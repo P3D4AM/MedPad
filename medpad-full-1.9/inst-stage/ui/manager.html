@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MedPad — مدیر سرور</title>
+<link rel="stylesheet" href="/fonts/vazirmatn.css" />
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Vazirmatn',Tahoma,sans-serif;background:#f8fafc;color:#1c1917;padding:24px 16px;min-height:100vh}
+.wrap{max-width:760px;margin:0 auto}
+h1{font-size:20px;margin-bottom:4px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.logo{width:42px;height:42px;border-radius:12px;background:#0f766e;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px}
+.sub{color:#78716c;font-size:13px;margin-bottom:18px}
+.badge{font-size:12px;background:#ccfbf1;color:#115e59;border-radius:999px;padding:2px 10px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+@media(max-width:560px){.grid{grid-template-columns:1fr}}
+.stat{background:#fff;border:1px solid #e7e5e4;border-radius:16px;padding:16px;display:flex;align-items:center;gap:12px}
+.dot{width:13px;height:13px;border-radius:50%;background:#a8a29e;flex:none;box-shadow:0 0 0 4px #f5f5f4}
+.dot.on{background:#16a34a;box-shadow:0 0 0 4px #dcfce7;animation:pulse 2s infinite}
+.dot.off{background:#dc2626;box-shadow:0 0 0 4px #fee2e2}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 4px #dcfce7}50%{box-shadow:0 0 0 7px #f0fdf4}}
+.stat b{font-size:14.5px;display:block}
+.stat small{color:#78716c;font-size:12px;direction:ltr;unicode-bidi:embed;display:block;margin-top:3px}
+.card{background:#fff;border:1px solid #e7e5e4;border-radius:16px;padding:18px;margin-bottom:14px}
+.card h2{font-size:15px;margin-bottom:12px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:5px 14px;font-size:13.5px}
+.kv span:nth-child(odd){color:#57534e;font-weight:600}
+.kv b{direction:ltr;unicode-bidi:embed;text-align:right;font-weight:400}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.btn{flex:1;min-width:140px;border:0;border-radius:12px;padding:13px 18px;font-size:14.5px;font-family:inherit;cursor:pointer;color:#fff}
+.btn:disabled{background:#a8a29e;cursor:not-allowed}
+.btn.green{background:#16a34a}.btn.green:hover:not(:disabled){background:#15803d}
+.btn.red{background:#dc2626}.btn.red:hover:not(:disabled){background:#b91c1c}
+.btn.teal{background:#0f766e}.btn.teal:hover:not(:disabled){background:#115e59}
+.btn.gray{background:#57534e}.btn.gray:hover:not(:disabled){background:#44403c}
+.msg{border-radius:12px;padding:11px 14px;font-size:13.5px;line-height:2;margin-top:12px;display:none}
+.msg.ok{background:#dcfce7;color:#166534;display:block}
+.msg.err{background:#fee2e2;color:#991b1b;display:block}
+.spin{display:inline-block;width:13px;height:13px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:sp 0.8s linear infinite;vertical-align:-2px;margin-inline-end:6px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.hint{font-size:12px;color:#78716c;line-height:2;margin-top:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>
+    <div class="logo">M</div>
+    مدیر سرور MedPad
+    <span class="badge" id="verBadge">v—</span>
+  </h1>
+  <p class="sub">استارت، استاپ و ری‌استارت سرور — هم از همین صفحه (گرافیکی)، هم با start-server.bat / stop-server.bat (خط فرمان)</p>
+
+  <div class="grid">
+    <div class="stat">
+      <div class="dot" id="dotPanel"></div>
+      <div><b>پنل MedPad</b><small id="panelUrl">http://localhost:3000</small></div>
+    </div>
+    <div class="stat">
+      <div class="dot" id="dotRt"></div>
+      <div><b>سرویس Realtime</b><small id="rtInfo">port 3003</small></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>کنترل سرور</h2>
+    <div class="row">
+      <button class="btn green" id="btnStart">▶ استارت</button>
+      <button class="btn red" id="btnStop">■ استاپ</button>
+      <button class="btn teal" id="btnRestart">⟳ ری‌استارت</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn gray" id="btnOpen">🌐 باز کردن پنل</button>
+    </div>
+    <div class="msg" id="msgBox"></div>
+    <p class="hint">بعد از استارت، صفحه‌ی اصلی پنل به‌صورت خودکار در مرورگر باز می‌شود. با بستن همین پنجره‌ی مرورگر سرور خاموش نمی‌شود؛ برای خاموش کردن دکمه‌ی استاپ را بزنید.</p>
+  </div>
+
+  <div class="card">
+    <h2>اطلاعات نصب</h2>
+    <div class="kv">
+      <span>نسخه</span><b id="infoVer">—</b>
+      <span>نوع نصب</span><b id="infoTarget">—</b>
+      <span>کاربر مدیر</span><b id="infoAdmin">—</b>
+      <span>پورت پنل</span><b id="infoPort">—</b>
+      <span>پورت سوکت</span><b id="infoRt">—</b>
+      <span>آدرس عمومی</span><b id="infoPublic">—</b>
+    </div>
+  </div>
+
+  <button class="btn gray" id="btnQuit" style="width:100%">بستن مدیر سرور</button>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s)
+let busy = false
+
+function setMsg(cls, text) {
+  const b = $('#msgBox')
+  b.className = 'msg ' + cls
+  b.innerHTML = text
+}
+function clearMsg() { $('#msgBox').className = 'msg'; $('#msgBox').style.display = 'none' }
+
+async function refresh() {
+  try {
+    const r = await fetch('/api/status')
+    const s = await r.json()
+    $('#dotPanel').className = 'dot ' + (s.panel.running ? 'on' : 'off')
+    $('#dotRt').className = 'dot ' + (s.realtime.running ? 'on' : 'off')
+    $('#panelUrl').textContent = s.panel.url
+    $('#rtInfo').textContent = 'port ' + s.realtime.port
+    $('#verBadge').textContent = 'v' + (s.config.version || '?')
+    $('#infoVer').textContent = s.config.version || '—'
+    $('#infoTarget').textContent = ({ local: 'لوکال', vps: 'سرور (VPS)', cloudflare: 'کلادفلر' })[s.config.target] || s.config.target || '—'
+    $('#infoAdmin').textContent = s.config.adminUser || '—'
+    $('#infoPort').textContent = s.panel.port
+    $('#infoRt').textContent = s.realtime.port
+    $('#infoPublic').textContent = s.tunnel && s.tunnel.publicUrl ? s.tunnel.publicUrl : '— (لوکال)'
+    return s
+  } catch (e) { return null }
+}
+refresh()
+setInterval(() => { if (!busy) refresh() }, 3000)
+
+async function action(name, btn, label) {
+  if (busy) return
+  busy = true
+  const old = btn.innerHTML
+  btn.disabled = true
+  btn.innerHTML = '<span class="spin"></span> ' + label
+  clearMsg()
+  try {
+    const r = await fetch('/api/' + name, { method: 'POST' })
+    const d = await r.json().catch(() => ({}))
+    if (d.ok) setMsg('ok', '✅ انجام شد.' + (name !== 'stop' ? ' — صفحه‌ی پنل در مرورگر باز شد.' : ''))
+    else setMsg('err', '⚠ خطا: ' + (d.output || d.error || 'ناموفق').toString().split('\n').slice(-4).join('<br/>'))
+  } catch (e) {
+    setMsg('err', '⚠ ارتباط برقرار نشد: ' + e.message)
+  } finally {
+    btn.disabled = false
+    btn.innerHTML = old
+    busy = false
+    refresh()
+  }
+}
+
+$('#btnStart').addEventListener('click', (e) => action('start', e.target, 'در حال استارت…'))
+$('#btnStop').addEventListener('click', (e) => { if (confirm('سرور MedPad خاموش شود؟')) action('stop', e.target, 'در حال استاپ…') })
+$('#btnRestart').addEventListener('click', (e) => { if (confirm('سرور ری‌استارت شود؟')) action('restart', e.target, 'در حال ری‌استارت…') })
+$('#btnOpen').addEventListener('click', async () => { try { await fetch('/api/open', { method: 'POST' }) } catch (e) {} })
+$('#btnQuit').addEventListener('click', async () => {
+  try { await fetch('/api/quit', { method: 'POST' }) } catch (e) {}
+  document.body.innerHTML = '<div class="wrap"><div class="card" style="text-align:center;line-height:2.4">مدیر سرور بسته شد.<br/>سرور MedPad همچنان در حال اجراست (اگر استاپش نکرده باشید).<br/><b>start-server.bat / stop-server.bat</b> همیشه در پوشه‌ی MedPad در دسترس‌اند.</div></div>'
+})
+</script>
+</body>
+</html>

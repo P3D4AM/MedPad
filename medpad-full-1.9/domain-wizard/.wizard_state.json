@@ -1,0 +1,9 @@
+{
+  "tunnelId": "0e11a9c1ffffffffffffffffffffffff",
+  "hostname": "panel.example.com",
+  "zoneName": "example.com",
+  "accountId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "service": "http://localhost:3000",
+  "protocol": "http2",
+  "wizard_version": "1.1"
+}
