@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MedPad — نصب‌کننده گرافیکی</title>
+<link rel="stylesheet" href="/fonts/vazirmatn.css" />
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Vazirmatn',Tahoma,sans-serif;background:#f8fafc;color:#1c1917;padding:24px 16px;min-height:100vh}
+.wrap{max-width:820px;margin:0 auto}
+h1{font-size:20px;margin-bottom:4px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.logo{width:42px;height:42px;border-radius:12px;background:#0f766e;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px}
+.sub{color:#78716c;font-size:13px;margin-bottom:18px}
+.badge{font-size:12px;background:#ccfbf1;color:#115e59;border-radius:999px;padding:2px 10px}
+.card{background:#fff;border:1px solid #e7e5e4;border-radius:16px;padding:20px;margin-bottom:14px}
+.card h2{font-size:15px;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.steps{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap}
+.stepchip{flex:1;min-width:110px;text-align:center;font-size:12px;padding:8px 6px;border-radius:10px;background:#fff;border:1px solid #e7e5e4;color:#a8a29e}
+.stepchip.on{background:#0f766e;color:#fff;border-color:#0f766e;font-weight:600}
+.stepchip.done{background:#ccfbf1;color:#115e59;border-color:#99f6e4}
+.opt{display:flex;gap:12px;align-items:flex-start;border:1.5px solid #e7e5e4;border-radius:14px;padding:14px;cursor:pointer;transition:.15s;margin-bottom:10px}
+.opt:hover{border-color:#99f6e4}
+.opt:has(input:checked){border-color:#0f766e;background:#f0fdfa}
+.opt input{margin-top:5px}
+.opt b{font-size:14.5px}
+.opt small{color:#78716c;line-height:2;display:block;margin-top:2px;font-size:12px}
+.opt .rec{font-size:11px;background:#0f766e;color:#fff;border-radius:999px;padding:1px 10px;margin-inline-start:6px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:640px){.grid2{grid-template-columns:1fr}}
+.field{margin-top:10px}
+.field label{font-size:13px;font-weight:600;display:block;margin-bottom:5px}
+.field input{width:100%;border:1px solid #d6d3d1;border-radius:10px;padding:9px 12px;font-size:14px;font-family:inherit;background:#fff}
+.field input:focus{outline:2px solid #99f6e4;border-color:#0f766e}
+.hint{font-size:12px;color:#78716c;line-height:2;margin-top:5px}
+.adv{margin-top:12px;border:1px dashed #d6d3d1;border-radius:12px;padding:12px}
+.adv summary{cursor:pointer;font-size:13px;color:#0f766e;font-weight:600}
+.guide{background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;border-radius:12px;padding:14px;font-size:13px;line-height:2.1;display:none}
+.guide code{background:#dbeafe;padding:1px 7px;border-radius:6px;direction:ltr;unicode-bidi:embed;font-size:12px}
+.notice{border-radius:12px;padding:12px 14px;font-size:13.5px;line-height:2;margin-top:12px;display:none}
+.notice.ok{background:#dcfce7;color:#166534;display:none}
+.notice.warn{background:#fef9c3;color:#854d0e}
+.notice.err{background:#fee2e2;color:#991b1b}
+.preview{background:#ecfdf5;border:1px dashed #0f766e;color:#065f46;border-radius:10px;padding:10px 14px;font-size:13.5px;margin-top:12px;text-align:center}
+.preview b{direction:ltr;unicode-bidi:embed}
+details.tokenhelp{margin-top:8px}
+details.tokenhelp summary{cursor:pointer;font-size:12.5px;color:#0f766e;font-weight:600}
+details.tokenhelp ol{padding-right:18px;font-size:12px;color:#57534e;line-height:2.2;margin-top:6px}
+.btn{background:#0f766e;color:#fff;border:0;border-radius:12px;padding:13px 24px;font-size:15px;font-family:inherit;cursor:pointer;width:100%}
+.btn:hover{background:#115e59}
+.btn:disabled{background:#a8a29e;cursor:not-allowed}
+.btn.gray{background:#57534e}
+.btn.gray:hover{background:#44403c}
+.btn.green{background:#16a34a}
+.btn.green:hover{background:#15803d}
+.row{display:flex;gap:10px}
+.row .btn{flex:1}
+.back{background:none;border:none;color:#0f766e;font-family:inherit;font-size:13px;cursor:pointer;margin-top:10px;padding:4px}
+#log{background:#0c0a09;color:#d6d3d1;border-radius:12px;padding:14px;font-family:monospace;font-size:12px;direction:ltr;text-align:left;height:340px;overflow-y:auto;white-space:pre-wrap;display:none;margin-top:14px}
+.donebox{display:none;background:#dcfce7;border:1px solid #86efac;color:#14532d;border-radius:14px;padding:18px;margin-top:14px;line-height:2.3;font-size:14px}
+.donebox .big{font-size:17px;font-weight:700;margin-bottom:4px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:13.5px;margin:8px 0}
+.kv span:nth-child(odd){color:#3f6212;font-weight:600}
+.kv b{direction:ltr;unicode-bidi:embed;text-align:right}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:sp 0.8s linear infinite;vertical-align:-2px;margin-inline-end:6px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.hide{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>
+    <div class="logo">M</div>
+    نصب‌کننده MedPad
+    <span class="badge" id="verBadge">v—</span>
+  </h1>
+  <p class="sub">نصب پنل، دیتابیس، سرویس‌ها و تنظیم آدرس دسترسی — کاملاً آفلاین، همین‌جا در مرورگر</p>
+
+  <div class="steps">
+    <div class="stepchip on" id="chip1">۱. مقصد نصب</div>
+    <div class="stepchip" id="chip2">۲. تنظیمات</div>
+    <div class="stepchip" id="chip3">۳. اجرای نصب</div>
+    <div class="stepchip" id="chip4">۴. پایان</div>
+  </div>
+
+  <!-- ═══ STEP 1: target ═══ -->
+  <div id="page1">
+    <div class="card">
+      <h2>می‌خواهید MedPad را کجا نصب کنید؟</h2>
+      <label class="opt">
+        <input type="radio" name="target" value="local" />
+        <span>
+          <b>💻 این کامپیوتر (نصب لوکال)</b>
+          <span class="rec" id="recLocal">پیشنهادی</span>
+          <small>پنل روی همین سیستم نصب و اجرا می‌شود؛ از مرورگر و بقیه‌ی سیستم‌های همان شبکه قابل دسترسی است. مناسب دفتر و استفاده‌ی روزمره.</small>
+        </span>
+      </label>
+      <label class="opt">
+        <input type="radio" name="target" value="vps" />
+        <span>
+          <b>🖥 سرور لینوکسی (VPS)</b>
+          <small>نصب روی سرور مجازی به‌صورت سرویس دائمی (systemd) که با ری‌استارت سرور خودکار بالا می‌آید. از هر جایی قابل دسترسی.</small>
+        </span>
+      </label>
+      <label class="opt">
+        <input type="radio" name="target" value="cloudflare" />
+        <span>
+          <b>☁️ کلادفلر (آدرس عمومی HTTPS)</b>
+          <small>نصب لوکال + تونل کلادفلر برای دسترسی از اینترنت با آدرس HTTPS — بدون نیاز به IP عمومی یا باز کردن پورت روتر.</small>
+        </span>
+      </label>
+    </div>
+    <div class="guide" id="vpsGuide">
+      <b>راهنمای نصب روی VPS (الان روی ویندوز هستید):</b><br />
+      ۱. کل پوشه‌ی بسته را به سرور منتقل کنید:
+      <code>scp -r . root@آی‌پی-سرور:/opt/medpad</code> (یا با WinSCP)<br />
+      ۲. به سرور وصل شوید: <code>ssh root@آی‌پی-سرور</code><br />
+      ۳. روی سرور اجرا کنید: <code>cd /opt/medpad && bash install.sh</code> — همان منو باز می‌شود؛ گزینه‌ی «سرور لینوکسی» را انتخاب کنید. Node.js از داخل بسته نصب می‌شود (آفلاین) و سرویس systemd ساخته می‌شود.<br />
+      ۴. پنل روی <code>http://آی‌پی-سرور:3000</code> در دسترس است.<br />
+      💡 همین بسته روی ویندوز و لینوکس کار می‌کند؛ چیز دیگری لازم نیست دانلود کنید.
+    </div>
+    <div class="notice ok" id="existBox">📦 نصب MedPad روی این سیستم شناسایی شد — دیتابیس، فایل‌ها و تنظیمات حفظ می‌شوند و فقط فایل‌ها به‌روزرسانی می‌شوند.</div>
+    <button class="btn" id="next1">ادامه ←</button>
+  </div>
+
+  <!-- ═══ STEP 2: settings ═══ -->
+  <div id="page2" class="hide">
+    <div class="card">
+      <h2>اطلاعات حساب مدیر و پورت</h2>
+      <div class="grid2">
+        <div class="field">
+          <label>نام کاربری مدیر</label>
+          <input id="adminUser" dir="ltr" value="admin" />
+        </div>
+        <div class="field">
+          <label>رمز عبور مدیر</label>
+          <input id="adminPass" dir="ltr" type="password" placeholder="admin123" />
+          <p class="hint"><label style="display:inline;font-weight:400"><input type="checkbox" id="showPass" /> نمایش رمز</label> — خالی بگذارید تا رمز فعلی/پیش‌فرض بماند.</p>
+        </div>
+        <div class="field">
+          <label>پورت پنل</label>
+          <input id="panelPort" dir="ltr" value="3000" inputmode="numeric" />
+          <p class="hint" id="portHint">پنل روی این پورت در دسترس خواهد بود: <span dir="ltr" id="portPreview">http://localhost:3000</span></p>
+        </div>
+      </div>
+      <details class="adv">
+        <summary>تنظیمات پیشرفته</summary>
+        <div class="field">
+          <label>پورت سرویس Realtime (سوکت)</label>
+          <input id="rtPort" dir="ltr" value="3003" inputmode="numeric" />
+          <p class="hint">پیش‌فرض 3003 مناسب است؛ فقط اگر این پورت روی سیستم‌تان اشغال است تغییرش دهید (بیلد پنل به‌صورت امن پچ می‌شود).</p>
+        </div>
+      </details>
+      <div class="notice warn" id="portBusyBox">⚠️ پورت انتخابی الان اشغال است — یا سرویس قبلی MedPad در حال اجراست (نصب‌کننده خودش متوقفش می‌کند) یا برنامه‌ی دیگری روی آن است.</div>
+    </div>
+
+    <!-- cloudflare settings -->
+    <div class="card hide" id="cfCard">
+      <h2>نوع اتصال کلادفلر</h2>
+      <label class="opt">
+        <input type="radio" name="cftype" value="quick" checked />
+        <span><b>تونل سریع (بدون دامنه)</b><small>آدرس تصادفی <span dir="ltr">https://*.trycloudflare.com</span> — سریع و بدون تنظیم، ولی آدرس با هر اجرا عوض می‌شود. فقط برای تست.</small></span>
+      </label>
+      <label class="opt">
+        <input type="radio" name="cftype" value="domain" />
+        <span><b>دامنه‌ی خودم (آدرس ثابت — پیشنهادی)</b><small>با توکن API کلادفلر، تونل و DNS خودکار ساخته می‌شود و آدرس ثابتی مثل <span dir="ltr">https://panel.example.com</span> می‌گیرید. به اینترنت نیاز دارد.</small></span>
+      </label>
+      <div id="domainFields" class="hide">
+        <div class="field">
+          <label>دامنه‌ی شما (ثبت‌شده در کلادفلر)</label>
+          <input id="cfDomain" dir="ltr" placeholder="example.com" />
+        </div>
+        <div class="field">
+          <label>زیردامنه‌ی پنل</label>
+          <input id="cfSub" dir="ltr" value="panel" />
+        </div>
+        <div class="field">
+          <label>Cloudflare API Token</label>
+          <input id="cfToken" dir="ltr" type="password" placeholder="توکن را اینجا وارد کنید" />
+          <details class="tokenhelp">
+            <summary>راهنمای ساخت توکن (۵ قدم)</summary>
+            <ol>
+              <li>به <span dir="ltr">dash.cloudflare.com</span> بروید ← My Profile ← API Tokens</li>
+              <li>Create Token ← Create Custom Token</li>
+              <li>دسترسی اول: <b>Account</b> → Cloudflare Tunnel → <b>Edit</b></li>
+              <li>دسترسی دوم و سوم: <b>Zone</b> → DNS → <b>Edit</b> و <b>Zone</b> → Zone → <b>Read</b></li>
+              <li>Continue ← Create ← توکن را کپی کنید و اینجا وارد کنید</li>
+            </ol>
+          </details>
+          <p class="hint">🔒 توکن فقط برای ساخت تونل استفاده می‌شود و جایی ذخیره نمی‌شود.</p>
+        </div>
+        <div class="preview">آدرس ثابت شما: <b id="cfPreview">https://panel.example.com</b></div>
+      </div>
+    </div>
+
+    <!-- vps-on-linux settings -->
+    <div class="card hide" id="vpsCard">
+      <h2>نصب روی سرور (VPS)</h2>
+      <p class="hint" style="margin-top:0">
+        سرویس‌های <b>systemd</b> ساخته می‌شوند تا پنل با بوت سرور خودکار بالا بیاید و در صورت کرش خودش ری‌استارت شود.
+        برای دسترسی از اینترنت، بعد از نصب می‌توانید تونل کلادفلر هم فعال کنید یا مستقیماً از
+        <span dir="ltr">http://آی‌پی-سرور:پورت</span> استفاده کنید (پورت را در فایروال باز کنید).
+      </p>
+    </div>
+
+    <button class="btn" id="goInstall">🚀 شروع نصب</button>
+    <button class="back" id="back1">→ بازگشت به انتخاب مقصد</button>
+  </div>
+
+  <!-- ═══ STEP 3: installing ═══ -->
+  <div id="page3" class="hide">
+    <div class="card">
+      <h2><span class="spin"></span> در حال نصب…</h2>
+      <p class="hint" id="phaseText">فایل‌ها کپی می‌شوند — چند لحظه صبر کنید…</p>
+      <pre id="log"></pre>
+    </div>
+  </div>
+
+  <!-- ═══ STEP 4: done ═══ -->
+  <div id="page4" class="hide">
+    <div class="card">
+      <div class="donebox" id="doneBox">
+        <div class="big">✅ نصب کامل شد!</div>
+        <div class="kv">
+          <span>آدرس پنل</span><b id="finalUrl">http://localhost:3000</b>
+          <span>نام کاربری</span><b id="finalUser">admin</b>
+          <span>رمز عبور</span><b id="finalPass">—</b>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button class="btn green" id="startNow">🔥 استارت سرور و باز کردن پنل</button>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button class="btn gray" id="openManager">🧰 باز کردن مدیر سرور (استارت/استاپ گرافیکی)</button>
+        </div>
+        <p class="hint" style="margin-top:12px">
+          از این به بعد برای استارت/استاپ: <b>start-server.bat</b> و <b>stop-server.bat</b> (خط فرمان) یا
+          <b>server-manager.bat</b> (صفحه‌ی گرافیکی) — صفحه‌ی پنل بعد از هر استارت خودکار باز می‌شود.
+        </p>
+      </div>
+      <div class="notice err" id="failBox"></div>
+      <button class="back hide" id="retryBtn">→ تلاش مجدد</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s)
+const $$ = (s) => document.querySelectorAll(s)
+let STATUS = null
+
+function showPage(n) {
+  for (let i = 1; i <= 4; i++) $('#page' + i).classList.toggle('hide', i !== n)
+  for (let i = 1; i <= 4; i++) {
+    const c = $('#chip' + i)
+    c.classList.toggle('on', i === n)
+    c.classList.toggle('done', i < n)
+  }
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+function currentTarget() {
+  for (const t of $$('input[name=target]')) if (t.checked) return t.value
+  return 'local'
+}
+function cfType() {
+  for (const t of $$('input[name=cftype]')) if (t.checked) return t.value
+  return 'quick'
+}
+
+// ── load status, adapt UI ──
+fetch('/api/status').then((r) => r.json()).then((s) => {
+  STATUS = s
+  $('#verBadge').textContent = 'v' + (s.installerVer || s.wizardVer || '1.9.11')
+  if (s.existingInstall) $('#existBox').style.display = 'block'
+  if (s.panelPortBusy) $('#portBusyBox').style.display = 'block'
+  if (s.config) {
+    $('#adminUser').value = s.config.adminUser || 'admin'
+    $('#panelPort').value = s.config.panelPort || 3000
+    $('#rtPort').value = s.config.rtPort || 3003
+  }
+  if (s.preselectedTarget) {
+    for (const t of $$('input[name=target]')) if (t.value === s.preselectedTarget) t.checked = true
+  } else if (s.isWindows) {
+    // local is the sensible default on Windows
+    $$('input[name=target]')[0].checked = true
+  } else {
+    $$('input[name=target]')[0].checked = true
+  }
+  $('#recLocal').style.display = s.isWindows ? '' : 'none'
+  refresh()
+}).catch(() => { $('#verBadge').textContent = 'v1.9.11' })
+
+function refresh() {
+  const t = currentTarget()
+  $('#vpsGuide').style.display = t === 'vps' && STATUS && STATUS.isWindows ? 'block' : 'none'
+  $('#cfCard').style.display = t === 'cloudflare' ? 'block' : 'none'
+  $('#vpsCard').style.display = t === 'vps' && STATUS && !STATUS.isWindows ? 'block' : 'none'
+  const p = $('#panelPort').value.trim() || '3000'
+  $('#portPreview').textContent = 'http://localhost:' + p
+  const d = $('#cfDomain').value.trim() || 'example.com'
+  const s = $('#cfSub').value.trim() || 'panel'
+  $('#cfPreview').textContent = 'https://' + s + '.' + d
+  $('#domainFields').classList.toggle('hide', cfType() !== 'domain')
+}
+$$('input[name=target]').forEach((t) => t.addEventListener('change', refresh))
+$$('input[name=cftype]').forEach((t) => t.addEventListener('change', refresh))
+$('#panelPort').addEventListener('input', refresh)
+$('#cfDomain').addEventListener('input', refresh)
+$('#cfSub').addEventListener('input', refresh)
+$('#showPass').addEventListener('change', () => { $('#adminPass').type = $('#showPass').checked ? 'text' : 'password' })
+
+$('#next1').addEventListener('click', () => {
+  // vps on windows -> guide is the answer; going "next" means local-style install settings
+  showPage(2)
+  refresh()
+})
+$('#back1').addEventListener('click', () => showPage(1))
+
+// ── run the install ──
+$('#goInstall').addEventListener('click', async () => {
+  const target = currentTarget()
+  const adminUser = $('#adminUser').value.trim() || 'admin'
+  const adminPass = $('#adminPass').value
+  const panelPort = parseInt($('#panelPort').value.trim() || '3000', 10)
+  const rtPort = parseInt($('#rtPort').value.trim() || '3003', 10)
+  if (!/^[a-zA-Z0-9._-]{2,32}$/.test(adminUser)) { alert('نام کاربری مدیر باید ۲ تا ۳۲ کاراکتر انگلیسی باشد'); return }
+  if (adminPass && adminPass.length < 4) { alert('رمز عبور حداقل ۴ کاراکتر باشد'); return }
+  if (!(panelPort > 0 && panelPort < 65536)) { alert('پورت پنل نامعتبر است'); return }
+  if (!(rtPort > 0 && rtPort < 65536)) { alert('پورت realtime نامعتبر است'); return }
+  if (panelPort === rtPort) { alert('پورت پنل و realtime نباید یکی باشند'); return }
+  if (target === 'cloudflare' && cfType() === 'domain') {
+    if (!$('#cfToken').value.trim() || !$('#cfDomain').value.trim()) { alert('توکن کلادفلر و دامنه را وارد کنید (یا تونل سریع را انتخاب کنید)'); return }
+  }
+
+  const body = { target, adminUser, adminPass, panelPort, rtPort }
+  if (target === 'vps' && STATUS && STATUS.isWindows) {
+    // on Windows the VPS target is a guide — install locally instead (the guide stays on screen)
+    body.target = 'local'
+  }
+  if (target === 'cloudflare') {
+    body.tunnelKind = cfType()
+    if (body.tunnelKind === 'domain') {
+      body.cfToken = $('#cfToken').value.trim()
+      body.cfDomain = $('#cfDomain').value.trim()
+      body.subdomain = $('#cfSub').value.trim() || 'panel'
+    }
+  }
+
+  showPage(3)
+  $('#log').style.display = 'block'
+  $('#log').textContent = ''
+  const phases = [
+    [/Step 2/, 'کپی فایل‌های پنل و سرویس‌ها…'],
+    [/Step 3/, 'ساخت دیتابیس و حساب مدیر…'],
+    [/Step 4/, 'بررسی بیلد آفلاین…'],
+    [/Step 5/, 'تنظیم آدرس دسترسی…'],
+    [/Step 6/, 'ساخت اسکریپت‌های استارت/استاپ…'],
+    [/Step 7/, 'بررسی نهایی سلامت…'],
+  ]
+  try {
+    const res = await fetch('/api/install', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok || !res.body) throw new Error('HTTP ' + res.status)
+    const reader = res.body.getReader()
+    const dec = new TextDecoder()
+    let text = ''
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      const chunk = dec.decode(value)
+      text += chunk
+      $('#log').textContent = text
+      $('#log').scrollTop = $('#log').scrollHeight
+      for (const [re, msg] of phases) if (re.test(text)) $('#phaseText').textContent = msg
+    }
+    const success = text.includes('[installer exited with code 0]') && text.includes('INSTALL COMPLETE')
+    if (success) {
+      $('#finalUrl').textContent = 'http://localhost:' + panelPort
+      $('#finalUser').textContent = adminUser
+      $('#finalPass').textContent = adminPass ? adminPass : (STATUS && STATUS.existingInstall ? 'رمز قبلی خودتان' : 'admin123')
+      showPage(4)
+      $('#doneBox').style.display = 'block'
+      $('#failBox').style.display = 'none'
+    } else {
+      showFail('نصب با خطا متوقف شد — لاگ بالا را بررسی کنید. اگر مشکل ادامه داشت install.log را برای پشتیبانی بفرستید.')
+    }
+  } catch (e) {
+    showFail('ارتباط با نصب‌کننده برقرار نشد: ' + e.message)
+  }
+})
+
+function showFail(msg) {
+  showPage(4)
+  $('#doneBox').style.display = 'none'
+  const b = $('#failBox')
+  b.innerHTML = '⚠ ' + msg
+  b.style.display = 'block'
+  $('#retryBtn').classList.remove('hide')
+}
+$('#retryBtn').addEventListener('click', () => { showPage(2) })
+
+// ── start the server + open the panel ──
+$('#startNow').addEventListener('click', async () => {
+  const btn = $('#startNow')
+  btn.disabled = true
+  btn.innerHTML = '<span class="spin"></span> در حال استارت…'
+  try {
+    const res = await fetch('/api/start', { method: 'POST' })
+    const data = await res.json().catch(() => ({}))
+    if (data.ok) {
+      btn.innerHTML = '✅ سرور بالا آمد — صفحه‌ی پنل باز شد'
+      // server-manager already opened the OS browser; window.open is a fallback
+      try { window.open(data.url || $('#finalUrl').textContent, '_blank') } catch (e) {}
+    } else {
+      btn.innerHTML = '🔥 استارت سرور و باز کردن پنل'
+      btn.disabled = false
+      alert('استارت ناموفق بود: ' + (data.output || data.error || 'لاگ را در پوشه‌ی logs ببینید'))
+    }
+  } catch (e) {
+    btn.innerHTML = '🔥 استارت سرور و باز کردن پنل'
+    btn.disabled = false
+    alert('خطا در استارت: ' + e.message)
+  }
+})
+
+// ── open the server manager GUI ──
+$('#openManager').addEventListener('click', async () => {
+  const btn = $('#openManager')
+  btn.disabled = true
+  btn.innerHTML = '<span class="spin"></span> در حال باز کردن…'
+  try {
+    const res = await fetch('/api/manager', { method: 'POST' })
+    const data = await res.json().catch(() => ({}))
+    if (data.url) { try { window.open(data.url, '_blank') } catch (e) {} }
+    btn.innerHTML = '🧰 مدیر سرور باز شد (پنجره‌ی جدید)'
+  } catch (e) {
+    btn.innerHTML = '🧰 باز کردن مدیر سرور (استارت/استاپ گرافیکی)'
+    btn.disabled = false
+    alert('خطا: ' + e.message)
+  }
+})
+
+refresh()
+</script>
+</body>
+</html>
