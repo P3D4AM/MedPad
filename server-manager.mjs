@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * MedPad Server Manager v1.9.11 — start / stop / restart / status / GUI
+ * MedPad Server Manager v1.9.12 — start / stop / restart / status / GUI
  *
  * The ONE place where MedPad services are started and stopped (v1.9.11):
  *
@@ -17,6 +17,20 @@
  *    GUI (server-manager.bat / .sh -> this file in gui mode);
  *  - after EVERY start the MAIN PAGE opens automatically in the default
  *    browser (services.mjs openBrowser) — disable with --no-open.
+ *
+ * v1.9.12 (process-safety audit):
+ *  - children are spawned with ABSOLUTE script paths (realtime/index.js,
+ *    panel server.js, cloudflared --config/--pidfile inside this dir) so
+ *    services.mjs can PROVE they belong to this install before killing;
+ *  - .medpad.pids is written in v2 format {pid, kind, script, startedAtMs}
+ *    (a reused PID with a different start time is never killed);
+ *  - panel env (socket mode / realtime url) is read from panel/.env.
+ *
+ * v1.9.12 (phase 0 hardening): the GUI server applies the same browser-origin
+ * gates as wizard.mjs (Host allow-list against DNS rebinding + Origin/
+ * Sec-Fetch-Site checks against CSRF on every state-changing POST). The GUI
+ * binds 127.0.0.1 only, but loopback binding alone does not stop a malicious
+ * website from POSTing to http://127.0.0.1:3198/api/stop.
  *
  * Technical notes:
  *  - panel + realtime are spawned DETACHED with output redirected to
@@ -44,7 +58,7 @@ const cfg = readConfig(__dirname)
 const PANEL_PORT = Number(cfg.panelPort) || 3000
 const RT_PORT = Number(cfg.rtPort) || 3003
 const PANEL_URL = `http://localhost:${PANEL_PORT}`
-const MANAGER_VER = '1.9.11'
+const MANAGER_VER = '1.9.12'
 
 const say = (m) => console.log(m)
 const ok = (m) => console.log(`[OK] ${m}`)
@@ -57,8 +71,10 @@ function panelEnv() {
   const out = { SOCKET_TOKEN: '', DATABASE_URL: '', MEDPAD_SOCKET_MODE: 'direct', REALTIME_URL: `http://127.0.0.1:${RT_PORT}` }
   try {
     const s = readFileSync(path.join(__dirname, 'panel', '.env'), 'utf8')
-    out.SOCKET_TOKEN = (s.match(/SOCKET_TOKEN=([^\r\n]+)/) || [])[1] || ''
-    out.DATABASE_URL = (s.match(/DATABASE_URL=([^\r\n]+)/) || [])[1] || ''
+    out.SOCKET_TOKEN = ((s.match(/^SOCKET_TOKEN=([^\r\n]+)/m) || [])[1] || '').trim()
+    out.DATABASE_URL = ((s.match(/^DATABASE_URL=([^\r\n]+)/m) || [])[1] || '').trim()
+    out.MEDPAD_SOCKET_MODE = ((s.match(/^MEDPAD_SOCKET_MODE=([^\r\n]+)/m) || [])[1] || '').trim() || 'direct'
+    out.REALTIME_URL = ((s.match(/^REALTIME_URL=([^\r\n]+)/m) || [])[1] || '').trim() || `http://127.0.0.1:${RT_PORT}`
   } catch { /* not installed yet */ }
   return out
 }
@@ -119,16 +135,25 @@ async function startServers({ open = true } = {}) {
   await sleep(500)
 
   const env = panelEnv()
-  const pids = []
+  // v1.9.12: pid registry — v2 format with identity evidence (kind +
+  // ABSOLUTE script path + spawn time) so services.mjs can prove ownership
+  // and never kill a recycled PID from another program.
+  const pidEntries = []
+  const notePid = (pid, kind, script) => {
+    if (!Number.isInteger(pid) || pid <= 1) return
+    pidEntries.push({ pid, kind, script, startedAtMs: Date.now() })
+  }
 
-  // realtime first (the panel dashboard connects to it)
+  // realtime first (the panel dashboard connects to it) — v1.9.12: ABSOLUTE
+  // script path so the child's command line proves it belongs to this dir.
   try {
-    const rt = spawn(process.execPath, ['realtime/index.js'], {
+    const rtScript = path.join(__dirname, 'realtime', 'index.js')
+    const rt = spawn(process.execPath, [rtScript], {
       cwd: __dirname, detached: true, stdio: ['ignore', logFd('realtime.log'), logFd('realtime.log')],
       env: { ...process.env, REALTIME_PORT: String(RT_PORT), SOCKET_TOKEN: env.SOCKET_TOKEN },
     })
     rt.unref()
-    pids.push(rt.pid)
+    notePid(rt.pid, 'realtime', rtScript)
     ok(`Realtime service started (port ${RT_PORT})`)
   } catch (e) {
     err(`Could not start the realtime service: ${e.message}`)
@@ -136,9 +161,10 @@ async function startServers({ open = true } = {}) {
   }
   await sleep(700)
 
-  // panel
+  // panel — v1.9.12: ABSOLUTE script path (ownership proof for the killer).
   try {
-    const panel = spawn(process.execPath, ['panel/.next/standalone/server.js'], {
+    const panelScript = path.join(__dirname, 'panel', '.next', 'standalone', 'server.js')
+    const panel = spawn(process.execPath, [panelScript], {
       cwd: __dirname, detached: true, stdio: ['ignore', logFd('panel.log'), logFd('panel.log')],
       env: {
         ...process.env,
@@ -148,7 +174,7 @@ async function startServers({ open = true } = {}) {
       },
     })
     panel.unref()
-    pids.push(panel.pid)
+    notePid(panel.pid, 'panel', panelScript)
   } catch (e) {
     err(`Could not start the panel: ${e.message}`)
     return { ok: false, error: String(e.message) }
@@ -161,11 +187,13 @@ async function startServers({ open = true } = {}) {
     const bin = cloudflaredBin()
     if (state.kind === 'domain' && existsSync(path.join(__dirname, 'tunnel-creds', 'config.yml'))) {
       if (bin) {
-        const t = spawn(bin, ['--config', path.join(__dirname, 'tunnel-creds', 'config.yml'), 'tunnel', 'run'], {
+        // v1.9.12: ABSOLUTE --config path (ownership proof for the killer)
+        const cfgAbs = path.join(__dirname, 'tunnel-creds', 'config.yml')
+        const t = spawn(bin, ['--config', cfgAbs, 'tunnel', 'run'], {
           cwd: __dirname, detached: true, stdio: ['ignore', logFd('tunnel.log'), logFd('tunnel.log')],
         })
         t.unref()
-        pids.push(t.pid)
+        notePid(t.pid, 'tunnel', cfgAbs)
         publicUrl = publicUrl || `https://${state.hostname}`
         ok(`Cloudflare tunnel started (${publicUrl})`)
       } else {
@@ -173,11 +201,14 @@ async function startServers({ open = true } = {}) {
       }
     } else if (state.kind === 'quick') {
       if (bin) {
-        const t = spawn(bin, ['tunnel', '--url', `http://localhost:${PANEL_PORT}`, '--protocol', 'http2'], {
+        // v1.9.12: --pidfile inside our dir gives the command line a path
+        // reference to this install (quick tunnels have no config file).
+        const pidfileAbs = path.join(__dirname, '.cloudflared.pid')
+        const t = spawn(bin, ['tunnel', '--url', `http://localhost:${PANEL_PORT}`, '--protocol', 'http2', '--pidfile', pidfileAbs], {
           cwd: __dirname, detached: true, stdio: ['ignore', logFd('tunnel.log'), logFd('tunnel.log')],
         })
         t.unref()
-        pids.push(t.pid)
+        notePid(t.pid, 'tunnel', pidfileAbs)
         ok('Quick tunnel started - the random public address appears in logs/tunnel.log')
       } else {
         warn('Quick tunnel skipped - no internet/cloudflared (the panel still works on your LAN)')
@@ -185,7 +216,7 @@ async function startServers({ open = true } = {}) {
     }
   } catch { /* no tunnel-state.json — plain local install */ }
 
-  writeFileSync(path.join(__dirname, '.medpad.pids'), JSON.stringify({ pids, at: new Date().toISOString() }))
+  writeFileSync(path.join(__dirname, '.medpad.pids'), JSON.stringify({ v: 2, pids: pidEntries, at: new Date().toISOString() }))
 
   // wait for the panel to become healthy (first boot can take a while)
   say(`[..] Waiting for the panel on port ${PANEL_PORT} (up to 90s)...`)
@@ -217,7 +248,9 @@ async function stopServers() {
   if (stopped.verified) ok('MedPad services stopped (panel + realtime + tunnel)')
   else {
     warn(`Some processes survived the stop (killed=${stopped.killed})`)
-    if (stopped.stillBusy?.length) warn(`Ports still busy: ${stopped.stillBusy.join(', ')}`)
+    if (stopped.stillBusy?.length) warn(`Ports still busy: ${stopped.stillBusy.map((b) => `${b.port} (${b.name || '?'}, pid ${b.pid})`).join(', ')}`)
+    if (stopped.foreignBusy?.length) warn(`Ports held by OTHER programs (not killed): ${stopped.foreignBusy.map((b) => `${b.port} (${b.name || '?'}, pid ${b.pid})`).join(', ')}`)
+    if (stopped.skipped?.length) warn(`Saved pid(s) not provably ours (left running): ${stopped.skipped.map((s) => s.pid).join(', ')}`)
   }
   return { ok: stopped.verified, killed: stopped.killed, stillBusy: stopped.stillBusy || [] }
 }
@@ -236,6 +269,35 @@ async function statusObject() {
 }
 
 // ─── GUI mode: serve ui/manager.html on 127.0.0.1 ─────────────────────
+
+// v1.9.12 (phase 0): browser-origin gates (shared design with wizard.mjs).
+const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]'])
+function hostAllowed(hostHeader) {
+  if (typeof hostHeader !== 'string' || hostHeader.trim() === '') return false
+  let h = hostHeader.trim().toLowerCase()
+  if (h.startsWith('[')) h = h.slice(0, h.indexOf(']') + 1)
+  else if (h.includes(':')) h = h.replace(/:\d+$/, '')
+  return LOCAL_HOSTNAMES.has(h)
+}
+function originAllowed(originHeader, port) {
+  if (typeof originHeader !== 'string' || originHeader.trim() === '') return true // non-browser client
+  const o = originHeader.trim().toLowerCase().replace(/\/+$/, '')
+  return o === `http://localhost:${port}` || o === `http://127.0.0.1:${port}` || o === `http://[::1]:${port}`
+}
+function fetchSiteAllowed(v) {
+  if (typeof v !== 'string' || v.trim() === '') return true
+  const s = v.trim().toLowerCase()
+  return s === 'same-origin' || s === 'same-site' || s === 'none'
+}
+function originGateRejection(req, port) {
+  if (!hostAllowed(req.headers.host)) return 'forbidden: unexpected Host header'
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    if (!originAllowed(req.headers.origin, port)) return 'forbidden: cross-origin request rejected'
+    if (!fetchSiteAllowed(req.headers['sec-fetch-site'])) return 'forbidden: cross-site request rejected'
+  }
+  return null
+}
+
 function findFreePort(start) {
   return new Promise((resolve) => {
     const tryPort = (p, left) => {
@@ -256,6 +318,10 @@ async function guiMode() {
   const server = http.createServer(async (req, res) => {
     const u = new URL(req.url || '/', `http://localhost:${port}`)
     const json = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(obj)) }
+
+    // v1.9.12 (phase 0): Host/Origin/Fetch-Metadata gates (see header)
+    const gate = originGateRejection(req, port)
+    if (gate) return json(403, { ok: false, error: gate })
 
     if (req.method === 'GET' && (u.pathname === '/' || u.pathname === '/index.html')) {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })

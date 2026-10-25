@@ -21,6 +21,17 @@
  *
  * Security: binds 127.0.0.1 ONLY. On a headless Linux VPS use an SSH tunnel:
  *   ssh -L 3199:localhost:3199 user@server
+ *
+ * v1.9.12 (phase 0 hardening) — binding to the loopback interface alone does
+ * NOT stop BROWSER-borne attacks, so three extra gates protect every request:
+ *   1. Host header must be localhost / 127.0.0.1 / [::1]   (DNS rebinding)
+ *   2. Origin header, when present, must be this exact local origin (CSRF —
+ *      a malicious website can otherwise still POST to http://127.0.0.1:3199)
+ *   3. Sec-Fetch-Site, when present, must be same-origin/none  (modern browsers)
+ * Non-browser clients (curl, tests, install.mjs probes) send none of these
+ * headers and are not affected. POST /api/install additionally requires
+ * Content-Type: application/json (a text/plain cross-origin POST would
+ * otherwise skip the CORS preflight and still be parsed as JSON).
  */
 import http from 'http'
 import net from 'net'
@@ -41,23 +52,79 @@ function readTunnelState() {
   try { return JSON.parse(readFileSync(path.join(__dirname, 'tunnel-state.json'), 'utf8')) } catch { return null }
 }
 function readBody(req, limit = 100 * 1024) {
+  // v1.9.12 (phase 0): on an oversized body the request is DRAINED (not
+  // destroyed) so the rejection can still be answered with a clean HTTP 400 —
+  // destroying the socket here used to surface as ECONNRESET on the client.
   return new Promise((resolve, reject) => {
     let size = 0
+    let done = false
     const chunks = []
     req.on('data', (c) => {
+      if (done) return // drain after rejection — never buffer
       size += c.length
-      if (size > limit) { reject(new Error('body too large')); req.destroy(); return }
+      if (size > limit) {
+        done = true
+        chunks.length = 0
+        reject(new Error('body too large'))
+        return
+      }
       chunks.push(c)
     })
     req.on('end', () => {
+      if (done) return
+      done = true
       try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')) } catch { reject(new Error('invalid json')) }
     })
-    req.on('error', reject)
+    req.on('error', (e) => {
+      if (done) return
+      done = true
+      reject(e)
+    })
   })
 }
 function portNumber(v, def) {
   const n = Number.parseInt(v, 10)
   return Number.isInteger(n) && n > 0 && n < 65536 ? n : def
+}
+
+// ── v1.9.12 (phase 0): browser-origin gates ──────────────────────────
+const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]'])
+
+/** Gate 1 — Host validation. Blocks DNS-rebinding domains (attacker.com
+ *  resolving to 127.0.0.1) from serving our page under their origin. */
+function hostAllowed(hostHeader) {
+  if (typeof hostHeader !== 'string' || hostHeader.trim() === '') return false
+  let h = hostHeader.trim().toLowerCase()
+  if (h.startsWith('[')) h = h.slice(0, h.indexOf(']') + 1)      // [::1]:3199
+  else if (h.includes(':')) h = h.replace(/:\d+$/, '')           // localhost:3199
+  return LOCAL_HOSTNAMES.has(h)
+}
+
+/** Gate 2 — Origin validation (CSRF). Browsers always send Origin on
+ *  cross-origin POSTs; same-origin fetches send our own local origin.
+ *  Absent Origin = a non-browser client (curl/tests) → allowed. */
+function originAllowed(originHeader, port) {
+  if (typeof originHeader !== 'string' || originHeader.trim() === '') return true
+  const o = originHeader.trim().toLowerCase().replace(/\/+$/, '')
+  return o === `http://localhost:${port}` || o === `http://127.0.0.1:${port}` || o === `http://[::1]:${port}`
+}
+
+/** Gate 3 — Fetch-Metadata (defense in depth, modern browsers only). */
+function fetchSiteAllowed(v) {
+  if (typeof v !== 'string' || v.trim() === '') return true
+  const s = v.trim().toLowerCase()
+  return s === 'same-origin' || s === 'same-site' || s === 'none'
+}
+
+/** The three gates, applied to an incoming request. Returns a rejection
+ *  reason string or null when the request may proceed. */
+function originGateRejection(req, port) {
+  if (!hostAllowed(req.headers.host)) return 'forbidden: unexpected Host header'
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    if (!originAllowed(req.headers.origin, port)) return 'forbidden: cross-origin request rejected'
+    if (!fetchSiteAllowed(req.headers['sec-fetch-site'])) return 'forbidden: cross-site request rejected'
+  }
+  return null
 }
 
 async function startServer() {
@@ -73,6 +140,10 @@ async function startServer() {
   const server = http.createServer(async (req, res) => {
     const u = new URL(req.url || '/', `http://localhost:${port}`)
     const json = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(obj)) }
+
+    // ── v1.9.12 (phase 0): Host/Origin/Fetch-Metadata gates (see header) ──
+    const gate = originGateRejection(req, port)
+    if (gate) return json(403, { ok: false, error: gate })
 
     // ── static: the installer page ──
     if (req.method === 'GET' && (u.pathname === '/' || u.pathname === '/index.html')) {
@@ -122,6 +193,13 @@ async function startServer() {
 
     // ── run the installer (streamed) ──
     if (req.method === 'POST' && u.pathname === '/api/install') {
+      // v1.9.12 (phase 0): require a JSON content type — a cross-origin
+      // text/plain body skips the CORS preflight yet would still parse as
+      // JSON below, so the gate above alone is not enough.
+      const ct = String(req.headers['content-type'] || '').toLowerCase()
+      if (!ct.startsWith('application/json')) {
+        return json(415, { ok: false, error: 'content-type must be application/json' })
+      }
       let body
       try { body = await readBody(req) } catch (e) { return json(400, { ok: false, error: e.message }) }
 

@@ -106,7 +106,7 @@
         "transform": "lodash/{{member}}"
       }
     },
-    "outputFileTracingRoot": "/home/z/my-project/installer/panel-src",
+    "outputFileTracingRoot": "/home/z/my-project/MedPad/medpad-full-1.9/inst-stage/panel-src",
     "enablePrerenderSourceMaps": true,
     "cacheComponents": false,
     "cacheLife": {
@@ -321,11 +321,14 @@
     "htmlLimitedBots": "[\\w-]+-Google|Google-[\\w-]+|Chrome-Lighthouse|Slurp|DuckDuckBot|baiduspider|yandex|sogou|bitlybot|tumblr|vkShare|quora link preview|redditbot|ia_archiver|Bingbot|BingPreview|applebot|facebookexternalhit|facebookcatalog|Twitterbot|LinkedInBot|Slackbot|Discordbot|WhatsApp|SkypeUriPreview|Yeti|googleweblight",
     "bundlePagesRouterDependencies": false,
     "configFileName": "next.config.ts",
+    "serverExternalPackages": [
+      "bcryptjs"
+    ],
     "skipTrailingSlashRedirect": true,
     "turbopack": {
-      "root": "/home/z/my-project/installer/panel-src"
+      "root": "/home/z/my-project/MedPad/medpad-full-1.9/inst-stage/panel-src"
     },
-    "repoRoot": "/home/z/my-project/installer/panel-src",
+    "repoRoot": "/home/z/my-project/MedPad/medpad-full-1.9/inst-stage/panel-src",
     "distDirRoot": ".next",
     "_originalRewrites": {
       "beforeFiles": [],
@@ -346,7 +349,7 @@
       "fallback": []
     }
   },
-  "appDir": "/home/z/my-project/installer/panel-src",
+  "appDir": "/home/z/my-project/MedPad/medpad-full-1.9/inst-stage/panel-src",
   "relativeAppDir": "",
   "files": [
     ".next/package.json",

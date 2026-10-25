@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # test-v1912.sh — MedPad v1.9.12 AUDIT test suite (phases 3-7 verification).
 # Run:  bash test-v1912.sh [PKG_DIR]
-# Default PKG_DIR = the WIP offline package inside the cloned repo.
+# Default PKG_DIR = the REPO ROOT (since phase 0 the hardened v1.9.12 lives
+# at the root; the old WIP package under medpad-full-1.9/ was removed when
+# the owner reorganized the repo).
 #
 # Suite (all must PASS):
 #  A1  compiled panel contains NO medpad-dev-token / admin123 literals
@@ -20,7 +22,10 @@
 #  T7  syntax check all .mjs + realtime/index.js ESM import
 #  T8  CF module: mock-server confirm flow (plan -> MEDPAD_CF_CONFIRM_REQUIRED -> apply)
 set -u
-PKG="${1:-$(cd "$(dirname "$0")/.." && pwd)/medpad-full-1.9/medpad-offline-1.9.12}"
+PKG="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
+# Absolutize: a relative PKG (e.g. ".") would break the node_modules
+# symlinks below and turn A2/A3 into module-not-found false results.
+PKG="$(cd "$PKG" 2>/dev/null && pwd)" || { echo "PKG_DIR not found"; exit 1; }
 PASS=0; FAIL=0
 t()  { echo "[PASS] $1"; PASS=$((PASS+1)); }
 f()  { echo "[FAIL] $1"; FAIL=$((FAIL+1)); }

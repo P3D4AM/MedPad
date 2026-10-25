@@ -9,7 +9,7 @@ import http from 'node:http'
 import { mkdirSync, rmSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 
-const PKG = process.argv[2] || '/home/z/my-project/MedPad/medpad-full-1.9/medpad-offline-1.9.12'
+const PKG = path.resolve(process.argv[2] || path.join(import.meta.dirname, '..'))
 const cf = await import(path.join(PKG, 'lib', 'cloudflare.mjs'))
 
 let pass = 0, fail = 0

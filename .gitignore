@@ -29,8 +29,9 @@ tunnel-creds/
 
 # Stray build outputs & local junk (NOT the tracked vendored ones)
 # The panel SOURCE tree's build cache and dependencies are disposable —
-# only the PACKAGE's prebuilt .next (medpad-offline-1.9.12/app/panel/.next)
-# and the vendored realtime node_modules are intentionally tracked.
+# only the PACKAGE's prebuilt .next (root app/panel/.next and
+# medpad-offline-1.9.12/app/panel/.next) and the vendored realtime
+# node_modules are intentionally tracked.
 medpad-full-1.9/inst-stage/panel-src/.next/
 medpad-full-1.9/inst-stage/panel-src/node_modules/
 medpad-full-1.9/inst-stage/panel-src/dev.log
@@ -43,6 +44,25 @@ logs/
 .keep-tmp/
 *.apk.idsig
 New Text Document.txt
+
+# In-place install artifacts — running install.mjs from the repo root
+# (install dir == repo root) generates these; they are machine-local state,
+# never source. Root-anchored so they cannot shadow intentional files in
+# subdirectories.
+/medpad-config.json
+/tunnel-state.json
+/.medpad.pids
+/.cloudflared.pid
+/install.log-msi.txt
+/start-server.bat
+/start-server.sh
+/stop-server.bat
+/stop-server.sh
+/start.bat
+/stop.bat
+/server-manager.bat
+/server-manager.sh
+/bin/
 
 # OS junk
 Thumbs.db

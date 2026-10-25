@@ -26,6 +26,12 @@
  *    (a reused PID with a different start time is never killed);
  *  - panel env (socket mode / realtime url) is read from panel/.env.
  *
+ * v1.9.12 (phase 0 hardening): the GUI server applies the same browser-origin
+ * gates as wizard.mjs (Host allow-list against DNS rebinding + Origin/
+ * Sec-Fetch-Site checks against CSRF on every state-changing POST). The GUI
+ * binds 127.0.0.1 only, but loopback binding alone does not stop a malicious
+ * website from POSTing to http://127.0.0.1:3198/api/stop.
+ *
  * Technical notes:
  *  - panel + realtime are spawned DETACHED with output redirected to
  *    logs/panel.log and logs/realtime.log, so they keep running after this
@@ -263,6 +269,35 @@ async function statusObject() {
 }
 
 // ─── GUI mode: serve ui/manager.html on 127.0.0.1 ─────────────────────
+
+// v1.9.12 (phase 0): browser-origin gates (shared design with wizard.mjs).
+const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]'])
+function hostAllowed(hostHeader) {
+  if (typeof hostHeader !== 'string' || hostHeader.trim() === '') return false
+  let h = hostHeader.trim().toLowerCase()
+  if (h.startsWith('[')) h = h.slice(0, h.indexOf(']') + 1)
+  else if (h.includes(':')) h = h.replace(/:\d+$/, '')
+  return LOCAL_HOSTNAMES.has(h)
+}
+function originAllowed(originHeader, port) {
+  if (typeof originHeader !== 'string' || originHeader.trim() === '') return true // non-browser client
+  const o = originHeader.trim().toLowerCase().replace(/\/+$/, '')
+  return o === `http://localhost:${port}` || o === `http://127.0.0.1:${port}` || o === `http://[::1]:${port}`
+}
+function fetchSiteAllowed(v) {
+  if (typeof v !== 'string' || v.trim() === '') return true
+  const s = v.trim().toLowerCase()
+  return s === 'same-origin' || s === 'same-site' || s === 'none'
+}
+function originGateRejection(req, port) {
+  if (!hostAllowed(req.headers.host)) return 'forbidden: unexpected Host header'
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    if (!originAllowed(req.headers.origin, port)) return 'forbidden: cross-origin request rejected'
+    if (!fetchSiteAllowed(req.headers['sec-fetch-site'])) return 'forbidden: cross-site request rejected'
+  }
+  return null
+}
+
 function findFreePort(start) {
   return new Promise((resolve) => {
     const tryPort = (p, left) => {
@@ -283,6 +318,10 @@ async function guiMode() {
   const server = http.createServer(async (req, res) => {
     const u = new URL(req.url || '/', `http://localhost:${port}`)
     const json = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(obj)) }
+
+    // v1.9.12 (phase 0): Host/Origin/Fetch-Metadata gates (see header)
+    const gate = originGateRejection(req, port)
+    if (gate) return json(403, { ok: false, error: gate })
 
     if (req.method === 'GET' && (u.pathname === '/' || u.pathname === '/index.html')) {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })

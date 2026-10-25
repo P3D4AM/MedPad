@@ -27,6 +27,10 @@
  *    standalone server.js AND .next/routes-manifest.json; tunnel installs
  *    switch to gateway socket mode so the dashboard works through the
  *    public hostname.
+ *  - (phase 0) FRESH-CLONE SAFETY NET: when the package ships no database
+ *    (db/custom.db is git-ignored), the empty template at db/template.db is
+ *    used, so installing straight from a git clone works; a package with
+ *    neither file stops with a clear "incomplete package" error.
  *
  * v1.9.11 changes (user request: bring back the interactive installer):
  *  - INTERACTIVE MENU on launch (no args): the CLI now asks WHERE to install
@@ -923,6 +927,22 @@ async function main() {
   mkdirSync(path.join(panelDir, 'uploads', 'voice'), { recursive: true })
   await lockDown(path.join(panelDir, 'db'), 'dir', 'panel/db') // v1.9.12
   try { const dbp = path.join(panelDir, 'db', 'custom.db'); if (existsSync(dbp)) await lockDown(dbp, 'file', 'panel/db/custom.db') } catch { /* fresh install - no db yet */ }
+  // v1.9.12 (phase 0): fresh-clone safety net. The empty SQLite template
+  // ships as app/panel/db/template.db (db/custom.db is git-ignored so real
+  // user data can never enter git). When the staged install has NO database
+  // yet — e.g. installing straight from a fresh `git clone` — start from the
+  // empty template instead of letting the seed fail with a confusing
+  // "table does not exist" Prisma error later.
+  if (!existsSync(path.join(panelDir, 'db', 'custom.db'))) {
+    const tplSrc = [path.join(panelDir, 'db', 'template.db'), path.join(srcPanel, 'db', 'template.db')].find(existsSync)
+    if (tplSrc) {
+      cpSync(tplSrc, path.join(panelDir, 'db', 'custom.db'))
+      await lockDown(path.join(panelDir, 'db', 'custom.db'), 'file', 'panel/db/custom.db')
+      ok('Empty database template installed (fresh start)')
+    } else {
+      await die('The offline package is incomplete: no database and no empty template found (expected app/panel/db/template.db). Nothing has been changed.')
+    }
+  }
   info('Config file (.env) is ready')
 
   // seed — uses the VENDORED prisma client + bcryptjs inside .next/standalone

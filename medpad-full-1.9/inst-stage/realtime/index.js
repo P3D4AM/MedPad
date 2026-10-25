@@ -11,9 +11,22 @@
  * v1.9.12: when SOCKET_TOKEN is not set in the environment, the token is
  *   read from ../panel/.env (owner-only file) — so generated launcher
  *   scripts never embed secrets.
+ *
+ * v1.9.12 (phase 0 hardening):
+ *   - /emit body is BOUNDED (64 KB) — an unauthenticated client must not be
+ *     able to stream an unbounded request into memory.
+ *   - the /emit shared-secret comparison is CONSTANT-TIME (both sides are
+ *     SHA-256-hashed first so lengths always match and no early-exit leaks).
+ *   - CORS stays permissive ON PURPOSE and is documented here: the dashboard
+ *     is reached from dynamic origins (LAN IPs, localhost, or a Cloudflare
+ *     tunnel hostname), so origin allow-listing would break real deployments
+ *     while adding nothing — ACCESS CONTROL IS TOKEN-BASED, not origin-based:
+ *     the socket.io handshake requires a panel-minted short-lived HMAC token,
+ *     and /emit requires the shared secret. A wildcard CORS header only
+ *     allows the ATTEMPT, which is then rejected by the auth layer.
  */
 import { createServer } from 'node:http'
-import { createHmac, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import url from 'node:url'
@@ -44,6 +57,19 @@ function resolveSocketToken() {
   process.exit(1)
 }
 const TOKEN = resolveSocketToken()
+
+/** v1.9.12 (phase 0): constant-time comparison for the /emit shared secret.
+ *  Both sides are hashed first so the lengths always match and the comparison
+ *  never leaks position information. */
+function tokenEq(a, b) {
+  try {
+    const ha = createHash('sha256').update(String(a)).digest()
+    const hb = createHash('sha256').update(String(b)).digest()
+    return timingSafeEqual(ha, hb)
+  } catch {
+    return false
+  }
+}
 
 /** Verify a panel-minted socket token: `<payloadB64url>.<hmacB64url>` (TTL ≤ 15 min) */
 function verifySocketToken(tok) {
@@ -85,12 +111,28 @@ const httpServer = createServer((req, res) => {
   }
 
   if (req.method === 'POST' && url.pathname === '/emit') {
+    // v1.9.12 (phase 0): bounded body — reject anything above 64 KB before
+    // parsing. A location update is a few hundred bytes; 64 KB is generous.
+    // The request is drained (not destroyed) after the 413 so the client
+    // receives the clean HTTP response instead of a connection reset.
+    const EMIT_BODY_LIMIT = 64 * 1024
     let body = ''
-    req.on('data', (c) => (body += c))
+    let oversized = false
+    req.on('data', (c) => {
+      if (oversized) return // drain after rejection — never buffer
+      body += c
+      if (body.length > EMIT_BODY_LIMIT) {
+        oversized = true
+        body = ''
+        res.writeHead(413, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: 'body too large' }))
+      }
+    })
     req.on('end', () => {
+      if (oversized) return
       try {
         const { token, event, payload } = JSON.parse(body || '{}')
-        if (token !== TOKEN) {
+        if (!tokenEq(token, TOKEN)) {
           res.writeHead(401, { 'content-type': 'application/json' })
           res.end(JSON.stringify({ ok: false, error: 'bad token' }))
           return
@@ -118,6 +160,9 @@ const httpServer = createServer((req, res) => {
 
 const io = new Server(httpServer, {
   path: '/socket.io',
+  // Wildcard CORS is INTENTIONAL — see the header comment: origins are
+  // dynamic (LAN IP / localhost / tunnel hostname) and every connection
+  // must still pass the mandatory token handshake below.
   cors: { origin: '*', methods: ['GET', 'POST'] },
   pingTimeout: 60000,
   pingInterval: 25000,
