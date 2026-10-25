@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -37,7 +39,11 @@ android {
     // UNSIGNED apk (app/build/outputs/apk/release/app-release-unsigned.apk)
     // and prints how to sign it — the build does NOT fail and does NOT
     // silently fall back to any default key.
-    val medpadProps = java.util.Properties()
+    // NOTE: `java.util.Properties()` does not compile inside the android{}
+    // lambda (the `java` name is shadowed there) — hence the top-level
+    // import + plain `Properties()` (found during the develop-test build;
+    // the script had never been compiled before).
+    val medpadProps = Properties()
     val medpadPropsFile = rootProject.file("keystore/medpad-release.properties")
     if (medpadPropsFile.exists()) {
         medpadPropsFile.inputStream().use { medpadProps.load(it) }
