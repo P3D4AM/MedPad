@@ -77,7 +77,21 @@ export async function setConfig(key: string, value: string) {
   await db.config.upsert({ where: { key }, update: { value }, create: { key, value } })
 }
 
-/** Socket token shared between panel & realtime service (from env or config) */
+/** Socket token shared between panel & realtime service.
+ *  v1.9.12 (audit phase 3): NO production fallback. The well-known dev
+ *  token is only honored when the operator explicitly opts into dev mode
+ *  (MEDPAD_DEV=1) — in production a missing SOCKET_TOKEN is a fatal
+ *  misconfiguration and must fail loudly, not silently fall back to a
+ *  public constant that would let anyone forge dashboard sockets. */
 export function socketToken(): string {
-  return process.env.SOCKET_TOKEN || 'medpad-dev-token'
+  const t = process.env.SOCKET_TOKEN
+  if (t && t.trim()) return t.trim()
+  if (process.env.MEDPAD_DEV === '1') {
+    if (!(globalThis as unknown as { __medpadDevTokenWarned?: boolean }).__medpadDevTokenWarned) {
+      ;(globalThis as unknown as { __medpadDevTokenWarned?: boolean }).__medpadDevTokenWarned = true
+      console.error('[medpad] DEV MODE: using the public dev socket token — NEVER use this in production')
+    }
+    return 'medpad-dev-token'
+  }
+  throw new Error('SOCKET_TOKEN is not configured — run the MedPad installer (it generates panel/.env), or set MEDPAD_DEV=1 for local development')
 }

@@ -890,7 +890,13 @@ async function main() {
   let env = existsSync(envPath) ? readFileSync(envPath, 'utf8') : ''
   const dbFile = path.join(panelDir, 'db', 'custom.db').replace(/\\/g, '/')
   if (!env.includes('DATABASE_URL=')) env += `\nDATABASE_URL=file:${dbFile}\n`
-  if (!env.includes('SOCKET_TOKEN=')) env += `\nSOCKET_TOKEN=medpad-${Math.random().toString(36).slice(2, 12)}${Math.random().toString(36).slice(2, 12)}\n`
+  // v1.9.12 (audit phase 3): SOCKET_TOKEN is generated with the CSPRNG
+  // (randomBytes — the old Math.random() pair was predictable) and an
+  // existing EMPTY/BROKEN value is replaced instead of being kept.
+  if (!/^SOCKET_TOKEN=\S/m.test(env)) {
+    env = env.replace(/^SOCKET_TOKEN=.*$/m, '').replace(/\n{3,}/g, '\n\n')
+    env += `\nSOCKET_TOKEN=medpad-${randomBytes(24).toString('hex')}\n`
+  }
   // v1.9.12: tunnel installs use GATEWAY socket mode — the browser connects
   // same-origin /socket.io and Next.js proxies it to the realtime service, so
   // the dashboard ALSO works through the public Cloudflare hostname (direct
@@ -904,7 +910,15 @@ async function main() {
   env += `\nREALTIME_URL=http://127.0.0.1:${rtPort}\n`
   writeFileSync(envPath, env)
   await lockDown(envPath, 'file', 'panel/.env') // v1.9.12: owner-only, also fixes upgraded installs
-  const socketToken = (env.match(/SOCKET_TOKEN=([^\r\n]+)/) || [])[1] || 'medpad-dev-token'
+  // v1.9.12 (audit phase 3): NO dev-token fallback. The token was just
+  // written with randomBytes above; if it cannot be read back the install
+  // is in an unknown state and must stop (fail secure) — the systemd units
+  // below embed this value and must never carry a public constant.
+  const socketToken = (env.match(/^SOCKET_TOKEN=(\S+)/m) || [])[1]
+  if (!socketToken) {
+    log('FAIL: SOCKET_TOKEN missing from panel/.env after writing it')
+    await die('Internal error: the generated .env has no usable SOCKET_TOKEN - the install was stopped before anything else was changed. Re-run the installer.')
+  }
   mkdirSync(path.join(panelDir, 'db'), { recursive: true })
   mkdirSync(path.join(panelDir, 'uploads', 'voice'), { recursive: true })
   await lockDown(path.join(panelDir, 'db'), 'dir', 'panel/db') // v1.9.12

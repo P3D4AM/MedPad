@@ -22,15 +22,26 @@ import { Server } from 'socket.io'
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url))
 const PORT = Number(process.env.REALTIME_PORT || 3003)
 
-/** v1.9.12: shared socket token — env first, then ../panel/.env, else dev default */
+/** v1.9.12: shared socket token — env first, then ../panel/.env.
+ *  v1.9.12 (audit phase 3): NO production fallback. The public dev token
+ *  is only honored with an explicit MEDPAD_DEV=1 opt-in; without any token
+ *  the service exits with a clear error (fail secure) instead of silently
+ *  accepting a well-known constant that anyone could forge. */
 function resolveSocketToken() {
-  if (process.env.SOCKET_TOKEN) return process.env.SOCKET_TOKEN
+  if (process.env.SOCKET_TOKEN && process.env.SOCKET_TOKEN.trim()) return process.env.SOCKET_TOKEN.trim()
   try {
     const env = readFileSync(path.join(__dirname, '..', 'panel', '.env'), 'utf8')
-    const m = env.match(/^SOCKET_TOKEN=([^\r\n]+)/m)
-    if (m) return m[1].trim()
-  } catch { /* no .env (dev) — fall through */ }
-  return 'medpad-dev-token'
+    const m = env.match(/^SOCKET_TOKEN=\s*([^\r\n]+)/m)
+    if (m && m[1].trim()) return m[1].trim()
+  } catch { /* no .env — fall through */ }
+  if (process.env.MEDPAD_DEV === '1') {
+    console.warn('[rt] DEV MODE: using the public dev socket token — NEVER use this in production')
+    return 'medpad-dev-token'
+  }
+  console.error('[rt] FATAL: SOCKET_TOKEN is not set and ../panel/.env has no token.')
+  console.error('[rt]        Run the MedPad installer (it generates panel/.env), or start with SOCKET_TOKEN=<secret>.')
+  console.error('[rt]        MEDPAD_DEV=1 allows the public dev token for local development only.')
+  process.exit(1)
 }
 const TOKEN = resolveSocketToken()
 

@@ -14,8 +14,16 @@ export async function GET() {
   if (!(await isAdmin())) {
     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
   }
+  let secret: string
+  try {
+    secret = socketToken()
+  } catch (e) {
+    // v1.9.12 (audit phase 3): no fallback — surface the misconfiguration
+    console.error(`[medpad] socket-auth refused: ${(e as Error).message}`)
+    return NextResponse.json({ ok: false, error: 'SOCKET_TOKEN is not configured on the server' }, { status: 500 })
+  }
   const payload = { svc: 'medpad-dashboard', exp: Date.now() + 10 * 60 * 1000 }
   const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64url')
-  const sig = createHmac('sha256', socketToken()).update(payloadB64).digest('base64url')
+  const sig = createHmac('sha256', secret).update(payloadB64).digest('base64url')
   return NextResponse.json({ ok: true, token: `${payloadB64}.${sig}`, expiresIn: 600 })
 }
