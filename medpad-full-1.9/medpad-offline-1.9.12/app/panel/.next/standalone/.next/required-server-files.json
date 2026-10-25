@@ -106,7 +106,7 @@
         "transform": "lodash/{{member}}"
       }
     },
-    "outputFileTracingRoot": "/home/z/my-project/work1912/panel-src",
+    "outputFileTracingRoot": "/home/z/my-project/MedPad/medpad-full-1.9/inst-stage/panel-src",
     "enablePrerenderSourceMaps": true,
     "cacheComponents": false,
     "cacheLife": {
@@ -323,9 +323,9 @@
     "configFileName": "next.config.ts",
     "skipTrailingSlashRedirect": true,
     "turbopack": {
-      "root": "/home/z/my-project/work1912/panel-src"
+      "root": "/home/z/my-project/MedPad/medpad-full-1.9/inst-stage/panel-src"
     },
-    "repoRoot": "/home/z/my-project/work1912/panel-src",
+    "repoRoot": "/home/z/my-project/MedPad/medpad-full-1.9/inst-stage/panel-src",
     "distDirRoot": ".next",
     "_originalRewrites": {
       "beforeFiles": [],
@@ -346,7 +346,7 @@
       "fallback": []
     }
   },
-  "appDir": "/home/z/my-project/work1912/panel-src",
+  "appDir": "/home/z/my-project/MedPad/medpad-full-1.9/inst-stage/panel-src",
   "relativeAppDir": "",
   "files": [
     ".next/package.json",
