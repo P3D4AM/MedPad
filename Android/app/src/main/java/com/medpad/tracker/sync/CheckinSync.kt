@@ -77,11 +77,13 @@ object CheckinSync {
                     lng = item.lng,
                     localId = item.localId,
                     voice = voice,
+                    clientAt = item.createdAt, // v1.9.12 (phase 1): real event time
                 )
                 else -> ApiClient.checkout(
                     note = item.note,
                     localId = item.localId,
                     voice = voice,
+                    clientAt = item.createdAt, // v1.9.12 (phase 1): real event time
                 )
             }
             if (resp.optBoolean("ok")) {

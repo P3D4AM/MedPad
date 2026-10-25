@@ -111,12 +111,16 @@ object ApiClient {
         lng: Double?,
         localId: String,
         voice: File?,
+        clientAt: Long? = null,
         onProgress: ((Float) -> Unit)? = null,
     ): JSONObject {
         val mp = MultipartBody.Builder().setType(MultipartBody.FORM)
             .addFormDataPart("customerId", customerId)
             .addFormDataPart("note", note)
             .addFormDataPart("localId", localId)
+        // v1.9.12 (phase 1): real event time from the offline queue so the
+        // server records when the check-in HAPPENED, not when it was synced.
+        clientAt?.let { mp.addFormDataPart("clientAt", isoTime(it)) }
         if (lat != null && lng != null) {
             mp.addFormDataPart("lat", lat.toString())
             mp.addFormDataPart("lng", lng.toString())
@@ -130,10 +134,12 @@ object ApiClient {
     }
 
     @Throws(Exception::class)
-    fun checkout(note: String, localId: String, voice: File?): JSONObject {
+    fun checkout(note: String, localId: String, voice: File?, clientAt: Long? = null): JSONObject {
         val mp = MultipartBody.Builder().setType(MultipartBody.FORM)
             .addFormDataPart("note", note)
             .addFormDataPart("localId", localId)
+        // v1.9.12 (phase 1): real event time from the offline queue (see checkin)
+        clientAt?.let { mp.addFormDataPart("clientAt", isoTime(it)) }
         if (voice != null && voice.exists()) {
             mp.addFormDataPart("voice", voice.name,
                 voice.asRequestBody("audio/mp4".toMediaType()))
@@ -174,6 +180,10 @@ object ApiClient {
 
     fun mediaUrl(voicePath: String): String =
         "${Session.serverUrl}/api/media/$voicePath?token=${Session.token}"
+
+    /** Epoch ms → ISO 8601 instant (UTC) for the server's clientAt field. */
+    private fun isoTime(epochMs: Long): String =
+        java.time.Instant.ofEpochMilli(epochMs).toString()
 
     /** Raw authenticated GET returning bytes (voice download for playback) */
     @Throws(Exception::class)
