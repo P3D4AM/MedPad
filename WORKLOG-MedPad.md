@@ -18,6 +18,7 @@
 7. زبان کاربر: **فارسی**؛ تایم‌زون: Asia/Tehran.
 8. از v1.9.7 به بعد: یک نسخه از این فایل داخل هر ZIP جدید هم قرار بگیرد.
 9. **همیشه همه فایل‌ها علاوه بر سرور داخلی، روی سایت‌های آپلودی هم آپلود شوند** (درخواست صریح کاربر — Oct 14, 2026: «فایل‌ها رو همیشه روی سایت‌های آپلودی هم آپلود کن. در worklog بنویس تا یادت نره»). یعنی: ZIPها، worklog، سندها، اسکریپت‌ها و هر فایل تحویلی/مهم دیگری → علاوه بر `download/` و سرور :3000، حتماً روی Filebin (و در صورت امکان سرویس‌های مشابه) آپلود شود. **هیچ تحویلی فقط محلی نماند.**
+10. **قانون دائمی Git (درخواست صریح کاربر — Oct 25, 2026):** پس از تکمیل هر وظیفه/فیکس/تغییر معنادار → بازبینی تغییرات + اجرای تست‌های مرتبط با نتیجهٔ واقعی + Stage فقط فایل‌های مرتبط (بدون `git add .` کورکورانه) + Commit با پیام دقیق + **Push به GitHub + تأیید ثبت روی Remote**. اسرار (keystore/custom.db/.env/توکن) هرگز Commit نشوند؛ تغییرات Commit‌نشدهٔ کاربر هرگز جذب/حذف نشوند؛ `reset --hard`/`clean -fd`/بازنویسی تاریخچه/Force Push بدون اجازهٔ صریح ممنوع؛ اگر Push ناموفق بود (اعتبارنامه/اختلاف تاریخچه) دقیقاً علت را گزارش کن و راه‌حل امن (merge) را اجرا کن — هرگز ادعای انتشار نکردنی منتشر‌شده مکن. متن کامل: `AGENT-DIRECTIVES.md` + `MedPad/AGENTS.md`. **این قاعده قاعدهٔ «بدون commit» وظیفهٔ Phase 0 را لغو کرد (پیام جدیدتر کاربر، Oct 25).**
 
 ---
 
@@ -60,8 +61,7 @@
 | v1.9.8 | **فیکس EPERM آپدیت ویندوز** (فراخوانی واقعی stopMedPadServices قبل از جایگزینی + rmRobust با retry/rename-fallback) · **ایمنی داده آپدیت** (بکاپ + راستی‌آزمایی سایز قبل از حذف + rescue آپگرید نیمه‌کاره) · **فیکس خطای 127 Git Bash** (type -P به‌جای command -v + تشخیص MSYS/MINGW و هدایت به install.bat) · **رفع DEP0190** (حذف shell:true، استفاده از process.execPath) · stop-server.bat با kill پورتی | ✅ |
 | v1.9.9 | **فیکس صفحه سفید/لودینگ بی‌پایان لوکال‌هاست** (فونت Vazirmatn از CDN jsdelivr → self-hosted داخل بسته: ۹ وزن woff2 در public/fonts + پچ تمام خروجی‌های بیلد + فیکس سورس layout.tsx + چک فونت در Step 4 نصب‌کننده + فونت لوکال در ویزارد setup) · **فیکس verified=false مثبت در stop سرویس لینوکس** (lsof در کانتینرها بی‌صدا هیچ برنمی‌گرداند → fallback به ss -tlnp + netstat + راستی‌آزمایی واقعی آزاد بودن پورت‌ها) | ✅ |
 | v1.9.10 | **چک نسخه بستهٔ app قبل از هر تغییری** (باگ کاربر: installer جدید داخل پوشه قدیمی → خطای مبهم در Step 4 بعد از جایگزینی پنل؛ حالا APP-VERSION + چک ساختاری در ابتدای اجرا، قبل از stop سرویس‌ها — die قابل‌اقدام یا هشدار) · **فیکس کرش tunnel-state.json خراب** · **cpRobust در مسیر نصب fresh + مهاجرت legacy** (قبلاً فقط مسیر آپدیت) | ✅ |
-| v1.9.11 | **بازگشت نصب‌کننده تعاملی (درخواست کاربر):** منوی CLI هنگام اجرای install.bat/ps1/sh — مقصد (۱ این کامپیوتر / ۲ VPS لینوکسی / ۳ کلادفلر) + رابط (۱ ویزارد مرورگری GUI که خودکار باز می‌شود / ۲ CLI) · **wizard.mjs + ui/installer.html** — ویزارد گرافیکی فارسی RTL (یوزرنیم/رمز/پورت/توکلن، لاگ زنده، فقط 127.0.0.1) · **server-manager.mjs + ui/manager.html** — استارت/استاپ/ری‌استارت/وضعیت هم CLI هم GUI · **باز شدن خودکار صفحه اصلی بعد از هر استارت** · **پورت قابل تنظیم** (--port و --rt-port؛ پچ امن بیلد برای پورت سوکت سفارشی با راستی‌آزمایی) · **systemd برای هدف VPS** (+ راهنمای انتقال روی ویندوز) · **medpad-config.json** (منبع واحد پورت‌ها/تنظیمات؛ استاپ هوشمند با union پورت‌های قدیم/جدید) · رمز/توکن در حالت ویزارد از ENV می‌روند نه argv · **فیکس باگ readline ورودی پایپ‌شده** (باگ #18) | ✅ |
-| v1.9.12 | **نسخه حساسیت‌بخشی امنیتی (ممیزی ۷ مرحله‌ای + فاز صفر):** · **امنیت پروسه‌ها** — اثبات مالکیت قبل از هر kill (cmdline/cwd/زمان شروع؛ PID بازیافتی هرگز کشته نمی‌شود) · برنامهٔ بیگانه روی پورت‌های ما هرگز کشته نمی‌شود · تطابق دقیق پورت (رفع findstr ساب‌رشته‌ای ویندوز؛ lsof فقط LISTEN) · **رمزهای عبور** — bcryptjs + مهاجرت شفاف SHA-256 قدیمی · نصب عمومی بدون رمز قوی انجام نمی‌شود · admin123 حذف شد · **مجوز فایل‌های حساس** 600/700 در هر نصب/آپگرید · **امنیت کلادفلر** — PLAN قبل از تغییر DNS، تأیید صریح تخریبی‌ها، بکاپ قابل بازیابی، rollback خودکار · توکن API هرگز روی دیسک/لاگ نوشته نمی‌شود · **فاز صفر** — ارتقای بستهٔ سخت‌شده به ریشهٔ ریپو + گیت‌های Host/Origin/Sec-Fetch-Site ویزارد و GUI مدیر (ضد CSRF/DNS-rebinding) + حد 64KB و مقایسهٔ زمان-ثابت /emit + قالب خالی db برای کلون تازه + README فارسی صفحهٔ اول · **تست‌ها: 92/92 PASS** | ✅ **نسخه فعلی** |
+| v1.9.11 | **بازگشت نصب‌کننده تعاملی (درخواست کاربر):** منوی CLI هنگام اجرای install.bat/ps1/sh — مقصد (۱ این کامپیوتر / ۲ VPS لینوکسی / ۳ کلادفلر) + رابط (۱ ویزارد مرورگری GUI که خودکار باز می‌شود / ۲ CLI) · **wizard.mjs + ui/installer.html** — ویزارد گرافیکی فارسی RTL (یوزرنیم/رمز/پورت/توکلن، لاگ زنده، فقط 127.0.0.1) · **server-manager.mjs + ui/manager.html** — استارت/استاپ/ری‌استارت/وضعیت هم CLI هم GUI · **باز شدن خودکار صفحه اصلی بعد از هر استارت** · **پورت قابل تنظیم** (--port و --rt-port؛ پچ امن بیلد برای پورت سوکت سفارشی با راستی‌آزمایی) · **systemd برای هدف VPS** (+ راهنمای انتقال روی ویندوز) · **medpad-config.json** (منبع واحد پورت‌ها/تنظیمات؛ استاپ هوشمند با union پورت‌های قدیم/جدید) · رمز/توکن در حالت ویزارد از ENV می‌روند نه argv · **فیکس باگ readline ورودی پایپ‌شده** (باگ #18) | ✅ **نسخه فعلی** |
 
 ---
 
@@ -554,31 +554,69 @@ Work Log:
 Stage Summary:
 - ممیزی هفت‌مرحله‌ای کامل شد: ۴۴/۴۴ تست PASS؛ همهٔ اسرار از ردیابی خارج؛ امضای اندروید سخت‌سازی؛ backdoorهای dev حذف؛ rate-limit اضافه؛ پنل بازسازی‌شده از سورس امن
 - باز ماندن برای مالک: push (توکن جدید) · پاکسازی تاریخچه (filter-repo) · چرخش کلید اندروید (ANDROID-SIGNING.md) · انتشار ZIP نهایی v1.9.12
+---
+Task ID: 16
+Agent: main (Super Z)
+Task: Phase 0 — Security, Stability, Tests & Project README (دستور جدید کاربر روی ریپوی MedPad)
+
+Work Log:
+- بازرسی کامل وضعیت: شاخهٔ main تمیز، ۹ کامیت جلوتر از origin (کار هفت‌مرحله‌ای قبل)؛ کشف دوگانگی: ریشه = v1.9.11 ناامن (admin123 در چانک پنل، medpad-dev-token در realtime) در برابر بستهٔ v1.9.12 سخت‌شده در medpad-full-1.9/
+- ارتقای کامل v1.9.12 به ریشه: install/wizard/services/server-manager/cloudflare/installer.html/realtime(+lock)/APP-VERSION/install.sh-ps1-bat + بیلد امن پنل (RzE0w8ok4YZardyOBcaAv، بدون admin123/fallback) — دادهٔ کاربر (db واقعی + uploads) دست‌نخورده
+- سخت‌سازی جدید فاز صفر: گیت‌های Host/Origin/Sec-Fetch-Site در wizard.mjs + GUI مدیر (ضد CSRF/DNS-rebinding) + الزام JSON برای /api/install + رفع باگ ECONNRESET (drain به‌جای destroy)؛ حد 64KB و مقایسهٔ زمان-ثابت در /emit؛ مستندسازی تصمیم CORS پویا
+- تور ایمنی کلون تازه: db/template.py? نه — db/template.db (قالب خالی) در سه نسخه + fallback در install.mjs — با نصب واقعی از کلون شبیه‌سازی‌شده راستی‌آزمایی شد
+- ۴۸ تست امنیتی جدید در audit-tests/ (wizard 15 + realtime 15 + process-safety 18) + run-all.sh — مجموع ۹۲/۹۲ PASS (سوئیت کامل دوبار: بستهٔ 1.9.12 + شبیه‌ساز کلون از ریشه، هر دو 44/44)
+- README.md فارسی جدید در ریشه (صفحهٔ اول GitHub) + همگام‌سازی README-fa.md + پیوست فاز صفر به SECURITY-AUDIT + ورودی WORKLOG-MedPad + به‌روزرسانی .gitignore (12 قاعدهٔ جدید Artefactهای نصب درجایی)
+- اسکن نهایی اسرار: پاک (dry-run add راستی‌آزمایی شد — فقط template.db از پوشهٔ db وارد گیت می‌شود، هرگز custom.db)
+- طبق قاعدهٔ صریح وظیفه: هیچ commit/push انجام نشد — working tree آمادهٔ بازبینی
+
+Stage Summary:
+- Phase 0 کامل شد: ریشه = v1.9.12 سخت‌شده + سخت‌سازی مرورگری جدید + ۹۲/۹۲ تست PASS + README فارسی صفحهٔ اول
+- بیلد اندروید اجرا نشد (Android SDK غایب) — JDK 21/wrapper موجود؛ گزارش شد
+- تغییرات در working tree بدون commit — بررسی دستی و commit توسط مالک
 
 ---
+Task ID: 17
+Agent: main (Super Z)
+Task: ثبت دستور دائمی Commit+Push مالک + انتشار کارهای commitنشده + ادغام با بازسازی ساختار ریموت
 
-## Phase 0 — Security, Stability, Tests & README (2026-10-25)
+Work Log:
+- دستور دائمی جدید کاربر (Oct 25) در ۳ محل ثبت شد: AGENT-DIRECTIVES.md + MedPad/AGENTS.md (کامیت 34a87bf7) + قاعدهٔ طلایی ۱۰ همین فایل — قاعدهٔ «بدون commit» فاز صفر لغو شد
+- بازرسی وضعیت: ۹ کامیت محلی منتشرنشده (کار هفت‌مرحله‌ای) + کل فاز صفر commitنشده در working tree + دو کامیت جدید مالک روی ریموت (ac6760bf حذف medpad-full-1.9/ + ارتقای v1.9.12 خام به ریشه؛ 8db3319a بازافزودن Android/ با keystore و gradle قدیمی) + ⚠️ PAT از بین رفته (ریست هفتم؛ ~/.git-credentials غایب)
+- راستی‌آزمایی فاز صفر: run-all.sh با «.» سه شکست کاذب داد (باگ مسیر نسبی: symlink نسبی node_modules + import نسبی lib؛ A2 با module-not-found تصادفی PASS می‌شد!) → اصلاح سوئیت (پیش‌فرض=ریشه + مطلق‌سازی PKG) → 92/92 PASS
+- کامیت فاز صفر: bd9c80ba (۱۸۳ فایل؛ + template.db ریشه + package-lock + تست‌ها + README)
+- بکاپ پیش از ادغام: recover/pre-merge-backup/ (۳ نسخهٔ custom.db با 600 + medpad.keystore) + recover/pre-merge-head.bundle (129MB)
+- ادغام امن origin/main: ۲۵۴ تداخل حل شد — ریشه/app = نسخهٔ سخت‌شدهٔ ما (فوق‌مجموعهٔ ارتقای خام مالک؛ wizard/services خودکار ادغام شدند و دقیقاً برابر نسخهٔ من بودند)؛ medpad-full-1.9 حذف (ارادهٔ مالک)؛ bcryptjs با بستهٔ کامل رسمی 3.0.3 از طرف مالک تکمیل شد (انطباق MIT)؛ keystore و custom.db از ردیابی خارج ماندند (هر دو همچنان در تاریخچهٔ ریموت!)؛ build.gradle.kts مالک = بایت‌به‌بایت نسخهٔ قدیمی با medpad123 → نسخهٔ سخت‌شده برد
+- اسناد هماهنگ شدند: README.md (۳ ارجاع به medpad-full اصلاح) + .gitignore (قواعد مرده حذف) + WORKLOG (ردیف v1.9.12 از نسخهٔ مالک بازگردانده + پیوست ادغام) + SECURITY-AUDIT (پیوست ۲)
+- سورس یکتای پنل پیش از حذف بایگانی شد: download/medpad-panel-src-v1.9.12-secure.zip (162 فایل، از git archive bd9c80ba، بدون DB واقعی)
+- تست درخت ادغام‌شده: 92/92 PASS → کامیت ادغام 864b707b (بدون force، بدون بازنویسی)
+- push ناموفق (PAT غایب): «could not read Username» → bundle جایگزین: download/medpad-phase0-merge-v1.9.12.bundle (پیش‌نیاز 8db3319a؛ 211KB) — روی کلون شبیه‌سازی‌شدهٔ تازه از GitHub تست عملی شد (fetch ✓، fast-forward push ممکن ✓)
+- آپلودها (قانون طلایی ۹): Filebin medpad202 (bundle+zip، SHA1 دانلود برگشتی تأیید) + temp.sh/AorcB (bundle) + سرور :3000 (زنده) + گزارش نهایی PHASE0-FINAL-REPORT-fa.md
 
-**وظیفه:** ارتقای امنیت/پایداری/تست‌پذیری و نوشتن README صفحهٔ اول — بدون commit/push (تغییرات برای بازبینی دستی).
-
-**انجام‌شده:**
-1. **ارتقای v1.9.12 سخت‌شده به ریشهٔ مخزن** — پایان دوگانگی «ریشهٔ v1.9.11 ناامن / بستهٔ v1.9.12 امن»: همهٔ ماژول‌ها + بیلد امن پنل (بدون admin123 و بدون fallback توکن) + APP-VERSION به ریشه منتقل شد؛ دادهٔ کاربر (db واقعی، uploads) دست‌نخورده.
-2. **سخت‌سازی حملات مرورگری** (wizard.mjs + GUI مدیر): گیت Host (ضد DNS-rebinding) + گیت Origin (ضد CSRF) + Sec-Fetch-Site + الزام JSON برای /api/install (415) + رفع باگ ECONNRESET بدنهٔ بزرگ (drain به‌جای destroy).
-3. **سخت‌سازی realtime**: حد 64KB برای /emit (413) + مقایسهٔ زمان-ثابت راز + مستندسازی تصمیم CORS پویا.
-4. **تور ایمنی کلون تازه**: قالب خالی `db/template.db` (در هر سه نسخه) + fallback در install.mjs؛ بستهٔ فاقد هر دو با خطای روشن متوقف می‌شود.
-5. **۴۸ تست امنیتی جدید** (wizard 15 + realtime 15 + process-safety 18) + `run-all.sh`؛ نتیجهٔ نهایی **92/92 PASS** (شامل اجرای مجدد سوئیت کامل روی بستهٔ 1.9.12 و شبیه‌ساز کلون تازه از ریشه).
-6. **README.md فارسی** در ریشه (معرفی/معماری Mermaid/نصب/امنیت/تست/نقشه راه) + همگام‌سازی README-fa.md با v1.9.12 + به‌روزرسانی .gitignore (Artefactهای نصب درجایی) + پیوست فاز صفر به SECURITY-AUDIT-v1.9.12.md.
-7. اسکن نهایی اسرار روی فایل‌های track‌شده: پاک. بیلد اندروید در این محیط ممکن نبود (Android SDK غایب) — گزارش شد.
-
-**وضعیت گیت پس از فاز:** طبق قاعدهٔ وقتِ وظیفه بدون commit مانده بود؛ طبق دستور دائمی جدید مالک (Oct 25، فایل AGENTS.md) کمیتی شد (bd9c80ba) و سپس با بازسازی ساختار ریپو توسط مالک ادغام شد.
+Stage Summary:
+- دستور دائمی ماندگار شد؛ فاز صفر + ادغام کامل و تست‌شده (92/92) در ۳ کامیت: 34a87bf7 → bd9c80ba → 864b707b
+- منتشرنشده روی GitHub (PAT لازم)؛ مسیر جایگزین bundle تست‌شده و در ۳ کانال موجود
+- باز مانده برای مالک: push (دستورهای دقیق در گزارش) · چرخش کلید اندروید + پاکسازی تاریخچه (keystore/custom.db در تاریخچهٔ ریموت عمومی) · تصمیم دربارهٔ شاخهٔ panel-src · PAT جدید برای ایجنت
 
 ---
+Task ID: 18
+Agent: main (Super Z)
+Task: انتشار Phase 0 روی GitHub با PAT جدید مالک (دستور: تأیید کامیت‌ها → بررسی diff با GitHub → گزارش bundle → push به develop → تأیید ریموت → تست روی کامیت منتشرشده → release)
 
-## 🔀 ادغام با بازسازی ساختار توسط مالک (Oct 25, 2026)
+Work Log:
+- **ریست هشتم سندباکس**: کلون `MedPad/`، هر دو bundle (audit + phase0-merge)، `~/.git-credentials` و به‌روزرسانی‌های این فایل (پایان Task 17) از بین رفت — working tree ریپوی محلی پاک شد
+- **بازیابی کامل از Filebin (bin `medpad202` — قانون طلایی ۹ نجات‌دهنده بود)**: `medpad-phase0-merge-v1.9.12.bundle` (215,797 بایت، SHA-256 `81c2213f…a6c5`) + `medpad-panel-src-v1.9.12-secure.zip` (806,412 بایت، SHA-256 `89b11a6d…e6328c` — نکته: در گزارش قبلی یک کاراکتر آن اشتباه رونویسی شده بود؛ این مقدار با متادیتای Filebin به‌صورت برنامه‌ای راستی‌آزمایی شد) + `PHASE0-FINAL-REPORT-fa.md` + آخرین WORKLOG — هر چهار فایل با hash یکسان تأیید شدند
+- PAT جدید مالک به‌صورت امن برقرار شد: `~/.git-credentials` (مجوز 600) + remote بدون توکن — دسترسی admin/push/maintain از طریق API تأیید شد
+- وضعیت GitHub: `main` = `8db3319a` (دو کامیت جدید مالک: `ac6760bf` Organized folder + `8db3319a` Android app — پنج کامیت کل)؛ شاخهٔ `develop` از قبل روی `8db3319a` موجود بود؛ `phase0-security-review` موجود نبود
+- `git bundle verify` ✓ → fetch ✓ → زنجیرهٔ `34a87bf7` (AGENTS.md) → `bd9c80ba` (فاز صفر، ۱۸۳ فایل) → `864b707b` (ادغام با 8db3319a) **دقیقاً و بدون تغییر** بازیابی شد
+- **اثبات عدم بازنویسی تاریخچهٔ مالک**: هر ۵ کامیت مالک (`2ab9e5ae` → `57aedb8d` → `42e1908f` → `ac6760bf` → `8db3319a`) با SHA یکسانِ ریموت، ancestor های `864b707b` هستند
+- Diff نهایی با GitHub فعلی: **۱۷۱ فایل (۲۱A / ۱۴D / ۱۳۲M / ۴R)** — حذف `Android/keystore/medpad.keystore`، `custom.db`→`template.db` (R100)، هاردنینگ install.mjs/server-manager.mjs/wizard.mjs، سوئیت audit-tests، README/AGENTS/SECURITY-AUDIT؛ اسکن اسرار روی خطوط افزوده: پاک (۲۵ تطبیق همگی مستندات/لیست‌سیاه رمز ضعیف/کد تست)
+- **PUSH**: `develop` از `8db3319` به `864b707` (fast-forward، بدون force) + شاخهٔ جدید `phase0-security-review` روی همان کامیت — `main` دست‌نخورده ماند
+- **تأیید ریموت (API)**: هر دو شاخه روی `864b707bca2c2c3db69b941e085cb03d4a447cd6`؛ `Android/keystore/medpad.keystore` و `app/panel/db/custom.db` روی develop → HTTP 404؛ `README.md`/`AGENTS.md`/`audit-tests/run-all.sh`/`SECURITY-AUDIT-v1.9.12.md` → HTTP 200
+- **تست روی کامیت منتشرشده** (کلون تازه از GitHub، HEAD = `864b707b`): **92/92 PASS — ALL-SUITES-PASS** (ایمنی پروسه‌ها ۱۸ + امنیت ویزارد ۱۵ + امنیت realtime ۱۵ + سوئیت کامل v1.9.12: ۴۴)
+- **Release**: `v1.9.12-phase0` (pre-release) روی همان کامیت `864b707b` + ضمیمهٔ `medpad-panel-src-v1.9.12-secure.zip` (۸۰۶KB)
+- AGENTS.md: سیاست شاخهٔ `develop` (دستور جدید مالک: از این به بعد push روی develop) + اجازهٔ release ثبت شد
 
-مالک روی ریموت دو کامیت زد: «Organized folder» (حذف کامل medpad-full-1.9/ + ارتقای فایل‌های v1.9.12 خام به ریشه) و «Android app» (بازافزودن Android/ با keystore و build.gradle.kts قدیمی با رمز hardcode). ادغام امن انجام شد:
-
-- **ریشه و app = نسخهٔ سخت‌شدهٔ ما** (فوق‌مجموعهٔ ارتقای خام مالک: همان v1.9.12 + همهٔ فیکس‌های امنیتی + بیلد امن پنل RzE0w8ok)؛ تست ۹۲/۹۲ روی درخت ادغام‌شده مجدداً پاس شد.
-- **medpad-full-1.9/ حذف شد** (ارادهٔ مالک)؛ سورس کامل پنل با فیکس‌های امنیتی در `medpad-panel-src-v1.9.12-secure.zip` (Filebin/:3000) و در تاریخچهٔ گیت (تا commit bd9c80ba) حفظ شد.
-- **bcryptjs باندل‌شده با نسخهٔ کامل بستهٔ رسمی 3.0.3** تکمیل شد (LICENSE/README/umd — انطباق MIT).
-- **keystore اندروید و custom.db از ردیابی خارج ماندند** (ادامهٔ remediation فاز ۲). ⚠️ هر دو همچنان در تاریخچهٔ ریموت موجودند (42e1908f و 8db3319a) — چرخش کلید (ANDROID-SIGNING.md) و پاکسازی تاریخچه همچنان توصیه می‌شود. بازیابی در صورت نیاز: `git show 8db3319a:Android/keystore/medpad.keystore > medpad.keystore`
+Stage Summary:
+- **Phase 0 + ممیزی کامل روی GitHub منتشر و راستی‌آزمایی شد**: `develop` و `phase0-security-review` هر دو روی `864b707b`؛ `main` دست‌نخورده؛ 92/92 تست روی کامیت منتشرشده PASS؛ release با سورس پنل ضمیمه شد
+- bundle اصلی به‌عنوان artefact دست‌نخورده در `recover/phase0-recovery/` نگهداری می‌شود (دستور مالک: حذف/بازسازی ممنوع)
+- باز مانده برای مالک: بازبینی و مرج `develop` → `main` · چرخش کلید اندروید + پاکسازی تاریخچه (`medpad123` و custom.db در تاریخچهٔ عمومی باقی‌اند) · تصمیم دربارهٔ شاخهٔ `panel-src`
