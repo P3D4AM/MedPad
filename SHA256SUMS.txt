@@ -1,0 +1,5 @@
+# MedPad develop test release v1.9.12-test.1
+# Source: branch develop, commit 3c827f187ca2b661e1d468a6f15f9687b30cc141
+# (tag: develop-v1.9.12-test.1)
+806961a2f34919b956e290a419c94bda76fda4114198b8c0434ab37b827bda39  MedPad-Web-Offline-develop-v1.9.12-test.1.zip
+fc4cf92d68e2d6e5c300463c64db7f96e1f200716237b242fadbfe522464cb44  MedPad-Tracker-Android-develop-v1.9.12-test.1.apk
