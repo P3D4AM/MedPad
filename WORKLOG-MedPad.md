@@ -620,3 +620,19 @@ Stage Summary:
 - **Phase 0 + ممیزی کامل روی GitHub منتشر و راستی‌آزمایی شد**: `develop` و `phase0-security-review` هر دو روی `864b707b`؛ `main` دست‌نخورده؛ 92/92 تست روی کامیت منتشرشده PASS؛ release با سورس پنل ضمیمه شد
 - bundle اصلی به‌عنوان artefact دست‌نخورده در `recover/phase0-recovery/` نگهداری می‌شود (دستور مالک: حذف/بازسازی ممنوع)
 - باز مانده برای مالک: بازبینی و مرج `develop` → `main` · چرخش کلید اندروید + پاکسازی تاریخچه (`medpad123` و custom.db در تاریخچهٔ عمومی باقی‌اند) · تصمیم دربارهٔ شاخهٔ `panel-src`
+
+---
+Task ID: 19
+Agent: main (Super Z)
+Task: ساخت و انتشار ریلیز آزمایشی develop برای وب و اندروید (تست واقعی نصب/اجرا + APK + Release على GitHub — دستور شش‌مرحله‌ای مالک)
+
+Work Log:
+- **مبنا:** شاخهٔ `develop` روی کامیت `1e9c983` (ادامهٔ امن fast-forward از `864b707` سخت‌شده + کامیت docs انتشار فاز صفر) — `phase0-security-review` روی `864b707`، `main` دست‌نخورده روی `8db3319`
+- **تأیید سلامت مبنا:** Checkout تمیز develop → `audit-tests/run-all.sh .` → **92/92 PASS, ALL-SUITES-PASS** (خروجی واقعی در گزارش ریلیز)؛ working tree بدون هیچ تغییر untracked؛ تمام ۲۱۱۴ فایل (شامل ۱۶۲۹ فایل باندل `.next` و ۳۷۲ فایل `realtime/node_modules`) در گیت ردیابی‌شده
+- **محیط:** JDK 21.0.12 · Node 24.21.0 · Android SDK نصب‌شده در سندباکس (cmdline-tools 11076708 + platform-tools + platforms;android-34 + build-tools;34.0.0) · Gradle wrapper 8.7 · AGP 8.4.2 / Kotlin 1.9.24
+- **تغییرات این ریلیز (کمترین تغییر لازم):** `Android/app/build.gradle.kts`: versionName `1.9.1` → `1.9.12-dev.1`، versionCode `10` → `11` (هماهنگ با سرور v1.9.12؛ ارتقا روی نصب قبلی ممکن) · فایل جدید `INSTALL-GUIDE-fa.md` (راهنمای فارسی کوتاه داخل ZIP: پیش‌نیازها/آفلاین بودن، نصب ویندوز، استارت/استاپ، نشانی پنل، رمز اولیهٔ مدیر، آدرس اتصال اپ اندروید `http://<IP>:3000`، مسیر لاگ‌ها — همه از کد واقعی استخراج‌شده)
+- **خروجی‌های این ریلیز:** `MedPad-Web-Offline-develop-v1.9.12-test.1.zip` (از git archive کامیت مبنا؛ بدون .git/Android/audit-tests/گزارش‌ها؛ با باندل کامل آفلاین: Node MSI+tar، node_modules، انجین‌های Prisma win/linux، فونت self-hosted، template.db) + `MedPad-Tracker-Android-develop-v1.9.12-test.1.apk` (**Debug APK با کلید Debug استاندارد اندروید** — نه keystore لو رفته و نه medpad123) + `DEVELOP-TEST-REPORT-fa.md` + `SHA256SUMS.txt`
+- نتایج کامل تست‌ها، SHA-256 هر فایل، محدودیت‌ها (ویندوز واقعی/Emulator در سندباکس غایب) و لینک‌ها → در `DEVELOP-TEST-REPORT-fa.md` پیوست ریلیز GitHub
+
+Stage Summary:
+- (در حال اجرا — تکمیل پس از تست‌ها و انتشار)

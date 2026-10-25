@@ -12,8 +12,11 @@ android {
         applicationId = "com.medpad.tracker"
         minSdk = 24
         targetSdk = 34
-        versionCode = 10
-        versionName = "1.9.1"
+        // develop test release: aligned with server v1.9.12 (see
+        // DEVELOP-TEST-REPORT-fa.md). versionCode strictly increased
+        // from 10 (v1.9.1) so it can upgrade an existing install.
+        versionCode = 11
+        versionName = "1.9.12-dev.1"
     }
 
     // ─── Signing (audit phase 2 hardening) ─────────────────────────────
