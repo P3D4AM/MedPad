@@ -1,0 +1,42 @@
+# ─── MedPad repo hygiene (audit phase 2) ─────────────────────────────
+# NOTE: vendored node_modules/ and the prebuilt .next/ inside the offline
+# package are INTENTIONALLY tracked (the repo IS the offline bundle).
+# These rules therefore only stop NEW junk from appearing; tracked files
+# are unaffected by .gitignore.
+
+# Databases — real user data must NEVER be committed.
+# Exception: the EMPTY schema template shipped inside the offline package.
+custom.db
+*.db-journal
+*.db-wal
+*.db-shm
+!medpad-full-1.9/medpad-offline-1.9.12/app/panel/db/custom.db
+
+# Android signing keys — the old key is compromised (was public); the new
+# key must NEVER enter git. Local signing config also stays out:
+*.keystore
+*.jks
+Android/keystore/medpad-release.properties
+medpad-full-1.9/medpad-tracker/keystore/medpad-release.properties
+
+# Secrets / env / tunnel credentials
+.env
+.env.*
+!.env.example
+tunnel-creds/
+*.pem
+*.key
+
+# Stray build outputs & local junk (NOT the tracked vendored ones)
+__pycache__/
+*.pyc
+install.log
+logs/
+.stale-*
+.keep-tmp/
+*.apk.idsig
+New Text Document.txt
+
+# OS junk
+Thumbs.db
+.DS_Store
