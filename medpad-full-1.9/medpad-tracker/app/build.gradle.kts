@@ -16,23 +16,68 @@ android {
         versionName = "1.9.1"
     }
 
+    // ─── Signing (audit phase 2 hardening) ─────────────────────────────
+    // The previous keystore AND its password were committed to a PUBLIC
+    // repository, so that key is COMPROMISED and must never be reused.
+    // No signing credential belongs in source control anymore.
+    //
+    // Configure the NEW release signing in one of two ways:
+    //   1) environment variables:
+    //        MEDPAD_STORE_FILE=/absolute/path/medpad-release.keystore
+    //        MEDPAD_STORE_PASSWORD=...
+    //        MEDPAD_KEY_ALIAS=...
+    //        MEDPAD_KEY_PASSWORD=...
+    //   2) keystore/medpad-release.properties (git-ignored), keys:
+    //        storeFile, storePassword, keyAlias, keyPassword
+    //
+    // Without a complete configuration, `assembleRelease` produces an
+    // UNSIGNED apk (app/build/outputs/apk/release/app-release-unsigned.apk)
+    // and prints how to sign it — the build does NOT fail and does NOT
+    // silently fall back to any default key.
+    val medpadProps = java.util.Properties()
+    val medpadPropsFile = rootProject.file("keystore/medpad-release.properties")
+    if (medpadPropsFile.exists()) {
+        medpadPropsFile.inputStream().use { medpadProps.load(it) }
+        logger.lifecycle("MedPad signing: using keystore/medpad-release.properties")
+    }
+    fun signingProp(env: String, key: String): String? =
+        System.getenv(env)?.takeIf { it.isNotBlank() } ?: medpadProps.getProperty(key)?.takeIf { it.isNotBlank() }
+
     signingConfigs {
         create("release") {
-            storeFile = file("../keystore/medpad.keystore")
-            storePassword = "medpad123"
-            keyAlias = "medpad"
-            keyPassword = "medpad123"
+            val storePath = signingProp("MEDPAD_STORE_FILE", "storeFile")
+            if (storePath != null) storeFile = file(storePath)
+            storePassword = signingProp("MEDPAD_STORE_PASSWORD", "storePassword")
+            keyAlias = signingProp("MEDPAD_KEY_ALIAS", "keyAlias")
+            keyPassword = signingProp("MEDPAD_KEY_PASSWORD", "keyPassword")
         }
+    }
+
+    val releaseSigningReady = signingConfigs.getByName("release").let {
+        it.storeFile != null && !it.storePassword.isNullOrBlank() && !it.keyAlias.isNullOrBlank() && !it.keyPassword.isNullOrBlank()
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("release")
+            if (releaseSigningReady) {
+                signingConfig = signingConfigs.getByName("release")
+            } else {
+                // Explicit unsigned build + instructions (never a silent default key).
+                signingConfig = null
+                logger.warn(
+                    "MedPad: release signing is NOT configured -> the release apk will be UNSIGNED.\n" +
+                    "  Set MEDPAD_STORE_FILE / MEDPAD_STORE_PASSWORD / MEDPAD_KEY_ALIAS / MEDPAD_KEY_PASSWORD\n" +
+                    "  or create keystore/medpad-release.properties (see Android/ANDROID-SIGNING.md).\n" +
+                    "  Sign the unsigned apk afterwards, e.g.:\n" +
+                    "    apksigner sign --ks <keystore> --ks-key-alias <alias> --out app-release.apk app-release-unsigned.apk"
+                )
+            }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         debug {
-            signingConfig = signingConfigs.getByName("release")
+            // Audit phase 2: debug builds use the standard ANDROID DEBUG key.
+            // (The old config signed debug builds with the RELEASE key — removed.)
         }
     }
 
