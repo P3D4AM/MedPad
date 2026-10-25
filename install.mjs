@@ -1,9 +1,32 @@
 #!/usr/bin/env node
 /**
- * MedPad Offline Installer v1.9.11 — main pipeline (win-x64 / linux-x64)
+ * MedPad Offline Installer v1.9.12 — main pipeline (win-x64 / linux-x64)
  *
  * 100% OFFLINE: Node.js, dependencies, Prisma engines and the production
  * build are all bundled. No npm install, no next build, no downloads.
+ *
+ * v1.9.12 changes (audit & hardening release):
+ *  - PROCESS SAFETY: foreign programs on our ports are NEVER killed. Every
+ *    port listener is classified first; anything that cannot be PROVEN to
+ *    belong to this install dir is left alone and the installer stops with
+ *    a clear error. Upgrade kills only ever hit proven-own processes
+ *    (absolute script paths / cwd / recorded start times — services.mjs).
+ *  - PASSWORD HARDENING: public targets (vps/cloudflare) REQUIRE a strong
+ *    unique admin password; fresh local installs without one get a random
+ *    generated password printed once (admin123 is gone). Hashes are bcrypt
+ *    now (panel rebuilt from source); legacy SHA-256 hashes still log in
+ *    and are transparently upgraded on the next successful login.
+ *  - SAMPLE DATA IS OPT-IN (ali/sara/mahla + sample customers only when the
+ *    user explicitly asks: --with-sample-data / wizard checkbox, default NO).
+ *  - SENSITIVE FILE PERMISSIONS: .env, db and tunnel-creds are owner-only
+ *    (chmod 600/700 on Linux, re-applied on every upgrade; icacls best
+ *    effort on Windows). No tokens in generated .bat scripts anymore.
+ *  - CLOUDFLARE SAFETY: DNS changes are planned/listed BEFORE any change,
+ *    need explicit confirmation, are backed up and rolled back on failure.
+ *  - RT-PORT PATCH now also fixes the gateway-mode rewrites embedded in
+ *    standalone server.js AND .next/routes-manifest.json; tunnel installs
+ *    switch to gateway socket mode so the dashboard works through the
+ *    public hostname.
  *
  * v1.9.11 changes (user request: bring back the interactive installer):
  *  - INTERACTIVE MENU on launch (no args): the CLI now asks WHERE to install
@@ -56,13 +79,15 @@
  * CLI: node install.mjs [--target local|vps|cloudflare] [--gui]
  *                      [--non-interactive] [--mode local] [--dir "C:\path"]
  *                      [--admin-user admin] [--admin-pass secret]
- *                      [--port 3000] [--rt-port 3003]
+ *                      [--port 3000] [--rt-port 3003] [--with-sample-data]
  *                      [--cf-token ..] [--cf-domain ..] [--subdomain panel]
+ *                      [--cf-confirm]  (confirm destructive Cloudflare DNS changes)
  *                      [--node "C:\path\to\node.exe"]   (when Node came from the bundle)
  */
 import { spawn, spawnSync } from 'child_process'
 import net from 'net'
 import http from 'http'
+import { randomBytes } from 'crypto'
 import {
   chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, rmSync, cpSync, readdirSync,
   renameSync, statSync,
@@ -70,10 +95,10 @@ import {
 import path from 'path'
 import url from 'url'
 import readline from 'readline'
-import { stopMedPadServices, portBusy, readConfig, openBrowser } from './services.mjs'
+import { stopMedPadServices, classifyPortOwners, portBusy, readConfig, openBrowser } from './services.mjs'
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url))
-export const INSTALLER_VER = '1.9.11'
+export const INSTALLER_VER = '1.9.12'
 const PANEL_PORT_DEFAULT = 3000
 const RT_PORT_DEFAULT = 3003
 const LOG = path.join(__dirname, 'install.log')
@@ -281,14 +306,17 @@ async function dieOldAppBundle(appDir, detail) {
   ].join('\n'))
 }
 
-/** v1.9.11: patch the prebuilt panel for a custom realtime port.
+/** v1.9.11 → v1.9.12: patch the prebuilt panel for a custom realtime port.
  *  The compiled CLIENT bundle contains the literal `location.hostname}:3003`
- *  exactly once (verified against the v1.9.10/v1.9.11 build) and the SERVER
- *  chunks contain `http://127.0.0.1:3003` as an env-overridable fallback.
- *  Both are replaced with an exact-string split/join (no regex surprises),
- *  and the result is verified. The panel build itself is NOT rebuilt. */
+ *  exactly once and the SERVER chunks contain `http://127.0.0.1:3003` as an
+ *  env-overridable fallback. v1.9.12 FIX: the GATEWAY-mode rewrites are
+ *  ALSO hardcoded in TWO more places — standalone `server.js` (an embedded
+ *  copy of the rewrites) and `.next/routes-manifest.json` — and both are
+ *  patched now too; proxy mode previously kept pointing at 3003.
+ *  All replaced with exact-string split/join (no regex surprises), and the
+ *  result verified. The panel build itself is NOT rebuilt. */
 function patchRtPort(panelDir, rtPort) {
-  if (!Number.isInteger(rtPort) || rtPort === RT_PORT_DEFAULT) return { client: 0, server: 0 }
+  if (!Number.isInteger(rtPort) || rtPort === RT_PORT_DEFAULT) return { client: 0, server: 0, gateway: 0 }
   const targets = [
     path.join(panelDir, '.next', 'standalone', '.next', 'static', 'chunks'),
     path.join(panelDir, '.next', 'standalone', '.next', 'server', 'chunks'),
@@ -313,11 +341,27 @@ function patchRtPort(panelDir, rtPort) {
       }
     }
   }
-  log(`rt-port patch: client=${clientHits} server=${serverHits} -> ${rtPort}`)
-  return { client: clientHits, server: serverHits }
+  // v1.9.12: gateway-mode rewrites (server.js embeds the manifest copy)
+  let gatewayHits = 0
+  for (const p of [
+    path.join(panelDir, '.next', 'standalone', 'server.js'),
+    path.join(panelDir, '.next', 'standalone', '.next', 'routes-manifest.json'),
+  ]) {
+    if (!existsSync(p)) continue
+    let s
+    try { s = readFileSync(p, 'utf8') } catch { continue }
+    if (s.includes('http://127.0.0.1:3003')) {
+      s = s.split('http://127.0.0.1:3003').join(`http://127.0.0.1:${rtPort}`)
+      writeFileSync(p, s)
+      gatewayHits++
+    }
+  }
+  log(`rt-port patch: client=${clientHits} server=${serverHits} gateway=${gatewayHits} -> ${rtPort}`)
+  return { client: clientHits, server: serverHits, gateway: gatewayHits }
 }
 
-/** v1.9.11: verify no stale realtime literals remain after patching. */
+/** v1.9.12: verify no stale realtime literals remain after patching —
+ *  client chunk, server chunks AND the two gateway rewrite carriers. */
 function verifyRtPatch(panelDir, rtPort) {
   if (rtPort === RT_PORT_DEFAULT) return true
   const dirs = [
@@ -333,6 +377,16 @@ function verifyRtPatch(panelDir, rtPort) {
         if (s.includes('location.hostname}:3003') || s.includes('http://127.0.0.1:3003')) return false
       } catch { /* ignore */ }
     }
+  }
+  for (const p of [
+    path.join(panelDir, '.next', 'standalone', 'server.js'),
+    path.join(panelDir, '.next', 'standalone', '.next', 'routes-manifest.json'),
+  ]) {
+    if (!existsSync(p)) continue
+    try {
+      const s = readFileSync(p, 'utf8')
+      if (s.includes('http://127.0.0.1:3003')) return false
+    } catch { /* ignore */ }
   }
   return true
 }
@@ -426,17 +480,30 @@ async function interactiveMenu() {
   }
 
   // ── CLI wizard: collect the settings ──
-  const s = { target, adminUser: 'admin', adminPass: '', panelPort: PANEL_PORT_DEFAULT, rtPort: RT_PORT_DEFAULT, tunnelKind: 'quick', cfToken: '', cfDomain: '', subdomain: 'panel', alsoLocal: true }
+  const s = { target, adminUser: 'admin', adminPass: '', panelPort: PANEL_PORT_DEFAULT, rtPort: RT_PORT_DEFAULT, tunnelKind: 'quick', cfToken: '', cfDomain: '', subdomain: 'panel', alsoLocal: true, sampleData: false }
   console.log('')
   s.adminUser = await ask('Admin username', 'admin')
   if (s.adminUser.length < 2) s.adminUser = 'admin'
-  s.adminPass = await askPassword('Admin password (blank = keep existing / default admin123 on a fresh install)')
+  const isPublic = target === 'cloudflare' || target === 'vps'
+  // v1.9.12: public targets REQUIRE a strong password (asked up to 3 times)
+  for (let i = 0; i < 3; i++) {
+    s.adminPass = await askPassword(isPublic
+      ? 'Admin password (REQUIRED for a public install - min 10 chars, letters + digits)'
+      : 'Admin password (blank = a random password is generated on a fresh install)')
+    if (!isPublic) break
+    if (passwordProblem(s.adminPass, s.adminUser) === null) break
+    warn(`Password rejected: ${passwordProblem(s.adminPass, s.adminUser)}`)
+    s.adminPass = ''
+  }
   const portIn = await ask('Panel port', String(PANEL_PORT_DEFAULT))
   s.panelPort = Number.parseInt(portIn, 10)
   if (!Number.isInteger(s.panelPort) || s.panelPort < 1 || s.panelPort > 65535) s.panelPort = PANEL_PORT_DEFAULT
   const rtIn = await ask(`Realtime (socket) port [${RT_PORT_DEFAULT} - leave default unless it is taken]`, String(RT_PORT_DEFAULT))
   s.rtPort = Number.parseInt(rtIn, 10)
   if (!Number.isInteger(s.rtPort) || s.rtPort < 1 || s.rtPort > 65535) s.rtPort = RT_PORT_DEFAULT
+
+  // v1.9.12: sample accounts are OPT-IN (default: no)
+  s.sampleData = (await ask('Also install SAMPLE data (employees ali/sara/mahla with password 1234 + 3 sample customers)? (y/n)', 'n')).toLowerCase().startsWith('y')
 
   if (target === 'cloudflare') {
     console.log('')
@@ -492,6 +559,40 @@ function printVpsGuide() {
 
 /** v1.9.11: "are we on Windows?" — real platform OR the test simulation */
 const onWindows = () => process.platform === 'win32' || process.env.MEDPAD_SIM_WIN === '1'
+
+/** v1.9.12: admin password policy. Returns null when the password is
+ *  acceptable, otherwise a short reason (English — console-safe ASCII).
+ *  Public targets (vps/cloudflare) enforce this; local installs warn. */
+export function passwordProblem(pw, username) {
+  if (!pw || typeof pw !== 'string') return 'missing'
+  if (pw.length < 10) return 'too short (minimum 10 characters)'
+  if (/^(admin123|password|12345678|1234567890|medpad123|qwerty123|letmein123|passw0rd1)$/i.test(pw)) return 'a well-known weak password'
+  if (username && pw.toLowerCase() === String(username).toLowerCase()) return 'the same as the username'
+  if (!/[a-z]/i.test(pw) || !/\d/.test(pw)) return 'must contain letters AND digits'
+  return null
+}
+
+/** v1.9.12: lock a sensitive file/dir down to the owner. Linux: chmod
+ *  600/700 (fatal when it fails — fail secure). Windows: icacls best-effort
+ *  (user-profile defaults are already restrictive; failure = warning). */
+async function lockDown(target, kind, label) {
+  if (process.platform === 'win32' || process.env.MEDPAD_SIM_WIN === '1') {
+    // best-effort ACL: remove inheritance, keep the current user only
+    const user = process.env.USERNAME || process.env.USERDOMAIN + '\\' + process.env.USER || 'Users'
+    try {
+      const r = spawnSync('icacls', [target, '/inheritance:r', '/grant:r', `${user}:F`], { encoding: 'utf8', timeout: 10000 })
+      if (r.status !== 0) warn(`could not tighten Windows permissions on ${label} (defaults kept) - ${String(r.stderr || '').trim().slice(0, 80)}`)
+      else ok(`${label}: Windows ACL restricted to the current user`)
+    } catch { warn(`could not apply icacls on ${label} (defaults kept)`) }
+    return
+  }
+  try {
+    chmodSync(target, kind === 'dir' ? 0o700 : 0o600)
+    ok(`${label}: owner-only permissions (${kind === 'dir' ? '700' : '600'})`)
+  } catch (e) {
+    await die(`Could not restrict permissions on the sensitive ${label} (${e.code || e.message}). The file would stay readable by every user on this machine - install stopped. Fix the filesystem issue and run install again.`)
+  }
+}
 
 async function main() {
   const t0 = Date.now()
@@ -563,6 +664,7 @@ async function main() {
   const rtPortRaw = Number.parseInt(menu?.rtPort || arg('rt-port') || RT_PORT_DEFAULT, 10)
   const rtPort = Number.isInteger(rtPortRaw) && rtPortRaw > 0 && rtPortRaw < 65536 ? rtPortRaw : RT_PORT_DEFAULT
   let tunnelKind = menu?.tunnelKind || (typeof arg('tunnel-kind') === 'string' ? arg('tunnel-kind') : undefined)
+  const sampleData = !!(menu?.sampleData || arg('with-sample-data'))
 
   // v1.9.11: VPS chosen on Windows -> guide first; local install only if asked
   if (target === 'vps' && onWindows()) {
@@ -580,24 +682,81 @@ async function main() {
     if (!tunnelKind) tunnelKind = NON_INTERACTIVE ? 'quick' : 'quick'
   }
   info(`Install target: ${target} (panel port ${panelPort}, realtime port ${rtPort})`)
-  log(`target=${target} panelPort=${panelPort} rtPort=${rtPort} admin=${adminUser}`)
+  log(`target=${target} panelPort=${panelPort} rtPort=${rtPort} admin=${adminUser} sampleData=${sampleData}`)
+
+  // ══ v1.9.12 PASSWORD POLICY (before anything is stopped or touched) ══
+  const isPublicTarget = target === 'cloudflare' || target === 'vps'
+  const hasExistingDb = existsSync(path.join(installDir, 'panel', 'db', 'custom.db'))
+  let generatedPassword = false
+  if (adminPass) {
+    const prob = passwordProblem(adminPass, adminUser)
+    if (prob) {
+      if (isPublicTarget) {
+        log(`FAIL weak password on public target: ${prob}`)
+        await die(`Admin password rejected (${prob}). A strong, unique password is REQUIRED for a public install (vps/cloudflare). Nothing has been changed.`)
+      }
+      warn(`Admin password is weak (${prob}) - change it after the first login.`)
+    }
+  } else if (!hasExistingDb) {
+    if (isPublicTarget) {
+      log('FAIL no password on public target + fresh install')
+      await die('A strong admin password is REQUIRED for a public install (vps/cloudflare). Pass --admin-pass (or the wizard password field / MEDPAD_ADMIN_PASS). Nothing has been changed.')
+    }
+    // v1.9.12: fresh LOCAL install without a password -> random one, printed
+    // exactly once on the console (never written to install.log or any file).
+    adminPass = 'Mp-' + randomBytes(9).toString('base64url')
+    generatedPassword = true
+  }
+
+  // ══ v1.9.12 PROCESS SAFETY: classify port owners BEFORE stopping anything.
+  // A foreign program on a needed port is NEVER killed — the install stops
+  // here with a clear error, before a single file has been changed.
+  const stopPorts = [...new Set([panelPort, rtPort, ...(prevConfig.panelPort ? [Number(prevConfig.panelPort)] : []), ...(prevConfig.rtPort ? [Number(prevConfig.rtPort)] : [])])].filter((p) => Number.isInteger(p) && p > 0 && p < 65536)
+  {
+    let cls
+    try { cls = await classifyPortOwners(installDir, stopPorts) } catch (e) { cls = { foreign: [] }; warn(`Port ownership check failed (non-fatal): ${e.message}`) }
+    if (cls.foreign && cls.foreign.length > 0) {
+      log(`FAIL foreign port holders: ${cls.foreign.map((f) => `${f.port}:${f.name}(${f.pid})`).join(', ')}`)
+      await die([
+        'Another program (NOT MedPad) is already using the port(s) this install needs:',
+        ...cls.foreign.map((f) => `    port ${f.port}:   ${f.name}   (pid ${f.pid})${f.cmd ? `  -  ${f.cmd}` : ''}`),
+        '',
+        '  MedPad did NOT stop that program and NOTHING has been changed.',
+        '  HOW TO FIX - pick one:',
+        '    1. Close that program, then run the installer again.',
+        '    2. Install MedPad on different ports:   --port <number>  and/or  --rt-port <number>',
+        '       (the wizard asks for both ports on the settings page).',
+      ].join('\n'))
+    }
+  }
 
   // v1.9.8 FIX (user EPERM bug): STOP any running MedPad services BEFORE
   // touching any files. v1.9.11: stop the UNION of old + new ports so a
   // port-changing upgrade does not leave the old server running.
+  // v1.9.12: stopMedPadServices only ever kills processes PROVEN to belong
+  // to this install dir (see services.mjs) — foreign programs were already
+  // rejected above, before anything was touched.
   info('Stopping previous MedPad services (if any are running)...')
-  const stopPorts = [...new Set([panelPort, rtPort, ...(prevConfig.panelPort ? [Number(prevConfig.panelPort)] : []), ...(prevConfig.rtPort ? [Number(prevConfig.rtPort)] : [])])].filter((p) => Number.isInteger(p) && p > 0)
   try {
     const stopped = await stopMedPadServices(installDir, { ports: stopPorts })
     if (stopped.killed > 0) ok(`Stopped ${stopped.killed} leftover MedPad process(es)`)
+    if (stopped.skipped && stopped.skipped.length > 0) {
+      warn(`Saved pid(s) could NOT be proven to belong to this install - they were LEFT RUNNING (not killed):`)
+      for (const s of stopped.skipped) warn(`    pid ${s.pid}${s.name ? ` (${s.name})` : ''} - ${s.note}`)
+      warn('If one of them really is an old MedPad server, close it manually and run install again.')
+      log(`unprovable pids skipped: ${stopped.skipped.map((s) => s.pid).join(',')}`)
+    }
     if (!stopped.verified) {
       warn('Some MedPad-related processes could not be stopped automatically.')
       if (stopped.stillBusy && stopped.stillBusy.length > 0) {
-        warn(`Port(s) still busy afterwards: ${stopped.stillBusy.join(', ')} - a process is holding them.`)
+        warn(`Port(s) still busy afterwards: ${stopped.stillBusy.map((b) => `${b.port} (${b.name}, pid ${b.pid})`).join(', ')} - a process is holding them.`)
+      }
+      if (stopped.foreignBusy && stopped.foreignBusy.length > 0) {
+        warn(`Port(s) held by programs that are NOT this MedPad install (they were NOT killed): ${stopped.foreignBusy.map((b) => `${b.port} (${b.name}, pid ${b.pid})`).join(', ')}`)
       }
       warn('If the next steps report EPERM/locked errors: close ALL MedPad and node.js windows, then run install again.')
     }
-    log(`service stop: killed=${stopped.killed} verified=${stopped.verified}${stopped.stillBusy && stopped.stillBusy.length ? ` stillBusy=${stopped.stillBusy.join(',')}` : ''}`)
+    log(`service stop: killed=${stopped.killed} verified=${stopped.verified}${stopped.stillBusy && stopped.stillBusy.length ? ` stillBusy=${JSON.stringify(stopped.stillBusy)}` : ''}`)
   } catch (e) {
     warn(`Service stop check failed (non-fatal): ${e.message}`)
   }
@@ -732,29 +891,43 @@ async function main() {
   const dbFile = path.join(panelDir, 'db', 'custom.db').replace(/\\/g, '/')
   if (!env.includes('DATABASE_URL=')) env += `\nDATABASE_URL=file:${dbFile}\n`
   if (!env.includes('SOCKET_TOKEN=')) env += `\nSOCKET_TOKEN=medpad-${Math.random().toString(36).slice(2, 12)}${Math.random().toString(36).slice(2, 12)}\n`
-  if (!env.includes('MEDPAD_SOCKET_MODE=')) env += `\nMEDPAD_SOCKET_MODE=direct\n`
+  // v1.9.12: tunnel installs use GATEWAY socket mode — the browser connects
+  // same-origin /socket.io and Next.js proxies it to the realtime service, so
+  // the dashboard ALSO works through the public Cloudflare hostname (direct
+  // mode would try hostname:3003 which the tunnel does not expose). Local
+  // installs keep direct mode. Re-written on every install/upgrade so a
+  // target change is always reflected.
+  const socketMode = target === 'cloudflare' ? 'gateway' : 'direct'
+  env = env.replace(/^MEDPAD_SOCKET_MODE=.*$/m, '').replace(/\n{3,}/g, '\n\n')
+  env += `\nMEDPAD_SOCKET_MODE=${socketMode}\n`
+  env = env.replace(/^REALTIME_URL=.*$/m, '').replace(/\n{3,}/g, '\n\n')
+  env += `\nREALTIME_URL=http://127.0.0.1:${rtPort}\n`
   writeFileSync(envPath, env)
+  await lockDown(envPath, 'file', 'panel/.env') // v1.9.12: owner-only, also fixes upgraded installs
   const socketToken = (env.match(/SOCKET_TOKEN=([^\r\n]+)/) || [])[1] || 'medpad-dev-token'
   mkdirSync(path.join(panelDir, 'db'), { recursive: true })
   mkdirSync(path.join(panelDir, 'uploads', 'voice'), { recursive: true })
+  await lockDown(path.join(panelDir, 'db'), 'dir', 'panel/db') // v1.9.12
+  try { const dbp = path.join(panelDir, 'db', 'custom.db'); if (existsSync(dbp)) await lockDown(dbp, 'file', 'panel/db/custom.db') } catch { /* fresh install - no db yet */ }
   info('Config file (.env) is ready')
 
-  // seed — uses the VENDORED prisma client inside .next/standalone (offline)
-  if (!adminPass && !keepDb) adminPass = 'admin123'
+  // seed — uses the VENDORED prisma client + bcryptjs inside .next/standalone
+  // (offline). v1.9.12: bcrypt hashes (bcrypt$...); sample employees/customers
+  // only when the user explicitly opted in.
   const standaloneDir = path.join(panelDir, '.next', 'standalone')
   const seed = spawnSync(nodeExe, ['--input-type=module', '-e', `
-    import { createHash } from 'crypto';
+    import bcrypt from 'bcryptjs';
     import { PrismaClient } from '@prisma/client';
     const db = new PrismaClient();
-    const sha = (s) => createHash('sha256').update(s).digest('hex');
+    const hashPw = (s) => 'bcrypt$' + bcrypt.hashSync(s, 10);
     const cfg = { adminUser: ${JSON.stringify(adminUser)}, panelVersion: '${INSTALLER_VER}', apkVersion: '1.9.1' };
-    ${adminPass ? `cfg.adminPassHash = sha(${JSON.stringify(adminPass)});` : ''}
+    ${adminPass ? `cfg.adminPassHash = hashPw(${JSON.stringify(adminPass)});` : ''}
     for (const [key, value] of Object.entries(cfg)) await db.config.upsert({ where: { key }, update: { value }, create: { key, value } });
     const count = await db.employee.count();
-    if (count === 0) {
+    if (count === 0 && ${sampleData ? 'true' : 'false'}) {
       const names = [['ali','علی محمدی'],['sara','سارا احمدی'],['mahla','مهلا کریمی']];
       const emp = [];
-      for (const [username, name] of names) emp.push(await db.employee.create({ data: { username, name, password: sha('1234') } }));
+      for (const [username, name] of names) emp.push(await db.employee.create({ data: { username, name, password: hashPw('1234') } }));
       const cus = [];
       const cs = [['دکتر رضایی — کلینیک سلامت',35.7448,51.3752],['دکتر محمدی — داروخانه نور',35.7010,51.3910],['دکتر کریمی — مطب شمال',35.7166,51.4160]];
       for (const [name, lat, lng] of cs) cus.push(await db.customer.create({ data: { name, lat, lng, address: 'تهران' } }));
@@ -763,8 +936,19 @@ async function main() {
     await db.$disconnect();
     console.log('seed-ok');
   `], { cwd: standaloneDir, stdio: 'pipe', encoding: 'utf8', env: { ...process.env, DATABASE_URL: `file:${dbFile}` } })
-  if (seed.stdout?.includes('seed-ok')) ok(`Admin account ready (user: ${adminUser})`)
+  if (seed.stdout?.includes('seed-ok')) ok(`Admin account ready (user: ${adminUser}${sampleData ? ' + sample data' : ''})`)
   else warn('seed: ' + (seed.stderr || seed.stdout || '').slice(-300))
+  // v1.9.12: a freshly generated random password is shown EXACTLY ONCE here
+  // (console only — never logged, never written to any file).
+  if (generatedPassword && seed.stdout?.includes('seed-ok')) {
+    info('')
+    info('  ==================================================')
+    info('  SAVE THIS NOW - your generated admin password:')
+    info(`      ${adminPass}`)
+    info('  (shown only this once - it is NOT stored anywhere')
+    info('   in plain text; reset it with --admin-pass if lost)')
+    info('  ==================================================')
+  }
 
   // ═══ Step 4 — verify pre-built app + realtime port patch ══
   step(4, 'Verify prebuilt build (offline)')
@@ -785,16 +969,17 @@ async function main() {
   const fontFiles = readdirSync(path.dirname(fontCss)).filter((f) => f.endsWith('.woff2'))
   if (fontFiles.length < 9) await die(`Self-hosted font files incomplete (${fontFiles.length}/9 woff2)`)
   ok(`Self-hosted Vazirmatn font verified (${fontFiles.length} woff2 weights - no CDN dependency)`)
-  // v1.9.11: custom realtime port -> patch the ONE compiled client chunk
-  // (exact literal) + server fallback literal, then verify.
+  // v1.9.11: custom realtime port -> patch the compiled client chunk
+  // (exact literal) + server fallback literal + BOTH gateway rewrite
+  // carriers, then verify.
   if (rtPort !== RT_PORT_DEFAULT) {
     const patch = patchRtPort(panelDir, rtPort)
-    if (patch.client < 1 || !verifyRtPatch(panelDir, rtPort)) {
+    if (patch.client < 1 || patch.gateway < 2 || !verifyRtPatch(panelDir, rtPort)) {
       await die(`Patching the panel for realtime port ${rtPort} failed - the build does not match the expected pattern. Re-run with the default port ${RT_PORT_DEFAULT}.`)
     }
-    ok(`Panel patched for realtime port ${rtPort} (${patch.client} client chunk, ${patch.server} server chunks)`)
+    ok(`Panel patched for realtime port ${rtPort} (${patch.client} client chunk, ${patch.server} server chunks, ${patch.gateway} gateway rewrite files - direct AND proxy modes)`)
   }
-  try { await cpRobust(envPath, path.join(standaloneDir2, '.env'), 'standalone .env mirror') } catch { /* non-fatal */ }
+  try { await cpRobust(envPath, path.join(standaloneDir2, '.env'), 'standalone .env mirror'); await lockDown(path.join(standaloneDir2, '.env'), 'file', 'standalone .env mirror') } catch { /* non-fatal */ }
   log(`verified: standalone + ${engines.length} prisma engines + realtime modules (rtPort=${rtPort})`)
 
   // ═══ Step 5 — address mode ═══════════════════════════════
@@ -828,25 +1013,61 @@ async function main() {
       warn('Token or domain not provided - falling back to local network mode')
       state.kind = 'local'
     } else {
-      const { setupDomainTunnel } = await import('./lib/cloudflare.mjs')
-      try {
-        const result = await setupDomainTunnel({
-          token: cfToken, domain: cfDomain, subdomain,
-          state: { tunnelId: state.tunnelId, service: `http://localhost:${panelPort}` },
-        })
-        const credDir = path.join(installDir, 'tunnel-creds')
-        mkdirSync(credDir, { recursive: true })
-        const credFile = path.join(credDir, `${result.tunnelId}.json`)
-        writeFileSync(credFile, JSON.stringify({ AccountTag: result.accountTag, TunnelSecret: result.tunnelToken.split(':').pop(), TunnelID: result.tunnelId }, null, 2))
-        writeFileSync(path.join(credDir, 'config.yml'),
-          `tunnel: ${result.tunnelId}\ncredentials-file: ${credFile.replace(/\\/g, '/')}\nprotocol: http2\n\ningress:\n  - hostname: ${result.hostname}\n    service: http://localhost:${panelPort}\n  - service: http_status:404\n`)
-        state.kind = 'domain'; state.tunnelId = result.tunnelId; state.hostname = result.hostname
-        state.publicUrl = `https://${result.hostname}`
-        ok(`Your fixed address: ${state.publicUrl}`)
-      } catch (e) {
-        err(`Domain setup failed: ${e.message}`)
-        warn('Falling back to local network mode')
-        state.kind = 'local'
+      const { setupDomainTunnel, formatDnsPlan } = await import('./lib/cloudflare.mjs')
+      // v1.9.12: DNS changes are PLANNED, LISTED and CONFIRMED before anything
+      // is modified; a restorable backup is written before the first change.
+      const cfConfirmFlag = !!arg('cf-confirm')
+      let cfConfirmed = cfConfirmFlag
+      let attempt = 0
+      while (true) {
+        attempt++
+        try {
+          const result = await setupDomainTunnel({
+            token: cfToken, domain: cfDomain, subdomain,
+            state: { tunnelId: state.tunnelId, service: `http://localhost:${panelPort}` },
+            backupDir: path.join(installDir, 'tunnel-creds'),
+            confirm: cfConfirmed,
+          })
+          const credDir = path.join(installDir, 'tunnel-creds')
+          mkdirSync(credDir, { recursive: true })
+          const credFile = path.join(credDir, `${result.tunnelId}.json`)
+          writeFileSync(credFile, JSON.stringify({ AccountTag: result.accountTag, TunnelSecret: result.tunnelToken.split(':').pop(), TunnelID: result.tunnelId }, null, 2))
+          writeFileSync(path.join(credDir, 'config.yml'),
+            `tunnel: ${result.tunnelId}\ncredentials-file: ${credFile.replace(/\\/g, '/')}\nprotocol: http2\n\ningress:\n  - hostname: ${result.hostname}\n    service: http://localhost:${panelPort}\n  - service: http_status:404\n`)
+          state.kind = 'domain'; state.tunnelId = result.tunnelId; state.hostname = result.hostname
+          state.publicUrl = `https://${result.hostname}`
+          ok(`Your fixed address: ${state.publicUrl}`)
+          break
+        } catch (e) {
+          if (e && e.code === 'MEDPAD_CF_CONFIRM_REQUIRED') {
+            // destructive changes detected — show the plan, ask for explicit confirmation
+            info('')
+            info('  The following Cloudflare DNS changes are needed:')
+            for (const line of formatDnsPlan(e.plan)) info(`    ${line}`)
+            info('  (A restorable backup is written to tunnel-creds/ before ANY change.)')
+            if (NON_INTERACTIVE) {
+              if (cfConfirmFlag) { /* flag given but plan changed? confirm again is impossible non-interactively */ }
+              err('DNS changes need explicit confirmation, but this is a non-interactive install.')
+              err('Re-run from the browser wizard and tick the DNS confirmation box, or add --cf-confirm.')
+              warn('Falling back to local network mode')
+              state.kind = 'local'
+              break
+            }
+            cfConfirmed = (await ask(`Type YES to confirm these DNS changes for ${e.plan.hostname}`, '')).trim().toUpperCase() === 'YES'
+            if (!cfConfirmed) {
+              warn('You did not confirm - no DNS record was changed. Falling back to local network mode.')
+              log('cf dns plan NOT confirmed - local mode')
+              state.kind = 'local'
+              break
+            }
+            continue // retry with confirm=true
+          }
+          err(`Domain setup failed: ${e.message}`)
+          if (e && e.rollbackNote) warn(e.rollbackNote)
+          warn('Falling back to local network mode')
+          state.kind = 'local'
+          break
+        }
       }
     }
   } else {
@@ -854,6 +1075,15 @@ async function main() {
     info('Quick tunnel: the random address is shown when the server starts (needs internet)')
   }
   writeFileSync(statePath, JSON.stringify(state, null, 2))
+
+  // v1.9.12: tunnel credentials are secrets — owner-only, every install.
+  if (existsSync(path.join(installDir, 'tunnel-creds'))) {
+    await lockDown(path.join(installDir, 'tunnel-creds'), 'dir', 'tunnel-creds')
+    for (const f of readdirSync(path.join(installDir, 'tunnel-creds'))) {
+      const p = path.join(installDir, 'tunnel-creds', f)
+      try { if (statSync(p).isFile()) await lockDown(p, 'file', `tunnel-creds/${f}`) } catch { /* ignore */ }
+    }
+  }
 
   // ═══ Step 6 — start scripts + server manager + config ════
   step(6, 'Create start scripts and server manager')
@@ -930,12 +1160,13 @@ rem v1.9.7: stop.bat is an alias for stop-server.bat
 call "%~dp0stop-server.bat"
 `), 'utf8')
     // kept for compatibility: manual realtime launcher (server-manager starts
-    // realtime itself; this is only for direct debugging)
+    // realtime itself; this is only for direct debugging). v1.9.12: NO token
+    // here — realtime/index.js reads SOCKET_TOKEN from ../panel/.env when
+    // the env var is not set, so generated .bat files stay secret-free.
     writeFileSync(path.join(installDir, 'start-realtime.bat'), crlf(`@echo off
 chcp 65001 >nul
 title MedPad-Realtime
 cd /d "%~dp0"
-set "SOCKET_TOKEN=${socketToken}"
 set "REALTIME_PORT=${rtPort}"
 "${nodeInBat}" realtime\\index.js
 pause
@@ -967,7 +1198,7 @@ NODE_EXE='${nodeExe === 'node' ? 'node' : nodeExe}'
 exec "$NODE_EXE" server-manager.mjs gui
 `, 'utf8')
   try { chmodSync(startSh, 0o755); chmodSync(path.join(installDir, 'stop-server.sh'), 0o755); chmodSync(path.join(installDir, 'server-manager.sh'), 0o755) } catch { /* ignore */ }
-  ok('start-server.sh / stop-server.sh / server-manager.sh created (socket token synced)')
+  ok('start-server.sh / stop-server.sh / server-manager.sh created')
 
   // v1.9.11: medpad-config.json — single source of truth for ports/target/
   // tunnel. services.mjs, wizard.mjs and server-manager.mjs all read it.
@@ -997,7 +1228,7 @@ Environment=PORT=${panelPort}
 Environment=HOSTNAME=0.0.0.0
 Environment=DATABASE_URL=file:${dbFile}
 Environment=SOCKET_TOKEN=${socketToken}
-Environment=MEDPAD_SOCKET_MODE=direct
+Environment=MEDPAD_SOCKET_MODE=${socketMode}
 Environment=REALTIME_URL=http://127.0.0.1:${rtPort}
 ExecStart=${nodeAbs} ${installDir}/panel/.next/standalone/server.js
 Restart=always
@@ -1025,6 +1256,11 @@ WantedBy=multi-user.target
     writeFileSync(path.join(installDir, 'medpad-panel.service'), unitPanel)
     writeFileSync(path.join(installDir, 'medpad-realtime.service'), unitRt)
     ok('systemd units created: medpad-panel.service + medpad-realtime.service')
+    // v1.9.12: the units embed SOCKET_TOKEN — lock them to the owner (the
+    // copies in /etc/systemd/system are chmod'd too, right after cpSync).
+    for (const u of ['medpad-panel.service', 'medpad-realtime.service']) {
+      try { await lockDown(path.join(installDir, u), 'file', u) } catch { /* best-effort */ }
+    }
     tunnelUnit = false
     if (state.kind === 'domain' && existsSync(path.join(installDir, 'tunnel-creds', 'config.yml'))) {
       const cfdBin = existsSync('/usr/bin/cloudflared') ? '/usr/bin/cloudflared' : (existsSync(path.join(installDir, 'bin', 'cloudflared')) ? path.join(installDir, 'bin', 'cloudflared') : '/usr/bin/cloudflared')
@@ -1049,7 +1285,7 @@ WantedBy=multi-user.target
       const enable = NON_INTERACTIVE ? true : (await ask('Install + enable the systemd services now (start on boot)? (y/n)', 'y')).toLowerCase().startsWith('y')
       if (enable) {
         for (const u of ['medpad-realtime', 'medpad-panel', ...(tunnelUnit ? ['medpad-tunnel'] : [])]) {
-          try { cpSync(path.join(installDir, `${u}.service`), `/etc/systemd/system/${u}.service`) } catch (e) { warn(`could not copy ${u}.service: ${e.message}`) }
+          try { cpSync(path.join(installDir, `${u}.service`), `/etc/systemd/system/${u}.service`); chmodSync(`/etc/systemd/system/${u}.service`, 0o600) } catch (e) { warn(`could not copy ${u}.service: ${e.message}`) }
         }
         spawnSync('systemctl', ['daemon-reload'], { stdio: 'ignore' })
         for (const u of ['medpad-realtime', 'medpad-panel', ...(tunnelUnit ? ['medpad-tunnel'] : [])]) {
@@ -1090,7 +1326,7 @@ ${target === 'vps' ? `  BOOT SERVICE:    systemd units medpad-panel + medpad-rea
 ` : ''}`}
   Panel (local):    http://localhost:${panelPort}
   Socket:           :${rtPort} (admin-authenticated only)
-  Admin login:      ${adminUser} / ${adminPass ? '(the password you chose)' : '(your existing password)'}
+  Admin login:      ${adminUser} / ${generatedPassword ? 'the RANDOM password printed above (save it!)' : adminPass ? '(the password you chose)' : '(your existing password)'}
 ${state.kind === 'domain' ? `  Public address:   ${state.publicUrl}
 ` : ''}  Android app:      enter the server address in the app login screen
   Security:         dashboard socket accepts only authenticated admin sessions

@@ -1,8 +1,0 @@
-tunnel: 0e11a9c1ffffffffffffffffffffffff
-credentials-file: /home/z/my-project/installer/domain-wizard/0e11a9c1ffffffffffffffffffffffff.json
-protocol: http2
-
-ingress:
-  - hostname: panel.example.com
-    service: http://localhost:3000
-  - service: http_status:404

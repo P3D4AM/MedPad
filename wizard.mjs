@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * MedPad Browser Installer (wizard) v1.9.11 — GUI backend, localhost only.
+ * MedPad Browser Installer (wizard) v1.9.12 — GUI backend, localhost only.
  *
  * Brought back by user request: the installer can run either in the CLI or
  * as a SETUP PAGE IN THE BROWSER that opens automatically (install.mjs
@@ -31,7 +31,7 @@ import url from 'url'
 import { readConfig, openBrowser, portBusy } from './services.mjs'
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url))
-const WIZARD_VER = '1.9.11'
+const WIZARD_VER = '1.9.12'
 const PORT = Number(process.env.MEDPAD_WIZARD_PORT || process.env.SETUP_PORT || 3199)
 
 function installerVer() {
@@ -131,6 +131,10 @@ async function startServer() {
       args.push('--port', String(portNumber(body.panelPort, 3000)))
       args.push('--rt-port', String(portNumber(body.rtPort, 3003)))
       if (body.dir && typeof body.dir === 'string' && body.dir.length < 300) args.push('--dir', body.dir)
+      // v1.9.12: sample data is OPT-IN; destructive Cloudflare DNS changes
+      // need the explicit confirmation checkbox from the page.
+      if (body.sampleData === true) args.push('--with-sample-data')
+      if (target === 'cloudflare' && body.cfConfirm === true) args.push('--cf-confirm')
       if (target === 'cloudflare') {
         const kind = body.tunnelKind === 'domain' ? 'domain' : 'quick'
         args.push('--tunnel-kind', kind)

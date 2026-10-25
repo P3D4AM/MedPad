@@ -134,8 +134,8 @@ details.tokenhelp ol{padding-right:18px;font-size:12px;color:#57534e;line-height
         </div>
         <div class="field">
           <label>رمز عبور مدیر</label>
-          <input id="adminPass" dir="ltr" type="password" placeholder="admin123" />
-          <p class="hint"><label style="display:inline;font-weight:400"><input type="checkbox" id="showPass" /> نمایش رمز</label> — خالی بگذارید تا رمز فعلی/پیش‌فرض بماند.</p>
+          <input id="adminPass" dir="ltr" type="password" placeholder="حداقل ۱۰ کاراکتر شامل حرف و رقم" />
+          <p class="hint"><label style="display:inline;font-weight:400"><input type="checkbox" id="showPass" /> نمایش رمز</label> — <span id="passHint">خالی بگذارید تا یک رمز تصادفی امن ساخته و یک‌بار نشان داده شود (نصب محلی جدید).</span></p>
         </div>
         <div class="field">
           <label>پورت پنل</label>
@@ -149,6 +149,10 @@ details.tokenhelp ol{padding-right:18px;font-size:12px;color:#57534e;line-height
           <label>پورت سرویس Realtime (سوکت)</label>
           <input id="rtPort" dir="ltr" value="3003" inputmode="numeric" />
           <p class="hint">پیش‌فرض 3003 مناسب است؛ فقط اگر این پورت روی سیستم‌تان اشغال است تغییرش دهید (بیلد پنل به‌صورت امن پچ می‌شود).</p>
+        </div>
+        <div class="field">
+          <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="sampleData" style="width:auto" /> نصب داده‌ی نمونه (کارمندان علی/سارا/مهلا با رمز <span dir="ltr">1234</span> + ۳ مشتری نمونه)</label>
+          <p class="hint">پیش‌فرض: <b>خیر</b> — حساب‌های نمونه فقط با انتخاب صریح شما ساخته می‌شوند (برای نصب عمومی توصیه نمی‌شود).</p>
         </div>
       </details>
       <div class="notice warn" id="portBusyBox">⚠️ پورت انتخابی الان اشغال است — یا سرویس قبلی MedPad در حال اجراست (نصب‌کننده خودش متوقفش می‌کند) یا برنامه‌ی دیگری روی آن است.</div>
@@ -188,6 +192,10 @@ details.tokenhelp ol{padding-right:18px;font-size:12px;color:#57534e;line-height
             </ol>
           </details>
           <p class="hint">🔒 توکن فقط برای ساخت تونل استفاده می‌شود و جایی ذخیره نمی‌شود.</p>
+        </div>
+        <div class="field">
+          <label style="display:flex;align-items:flex-start;gap:8px"><input type="checkbox" id="cfConfirm" style="width:auto;margin-top:4px" /> <span>اجازه‌ی تغییر رکوردهای DNS این زیردامنه را می‌دهم</span></label>
+          <p class="hint">🔒 قبل از هر تغییری، نصب‌کننده رکوردهای فعلی را فهرست و یک نسخه‌ی پشتیبان قابل بازیابی در <span dir="ltr">tunnel-creds/</span> ذخیره می‌کند؛ رکوردهای تکراری فقط با تأیید شما جایگزین/حذف می‌شوند. اگر بدون تأیید نصب کنید، به حالت محلی برگردانده می‌شود.</p>
         </div>
         <div class="preview">آدرس ثابت شما: <b id="cfPreview">https://panel.example.com</b></div>
       </div>
@@ -269,7 +277,7 @@ function cfType() {
 // ── load status, adapt UI ──
 fetch('/api/status').then((r) => r.json()).then((s) => {
   STATUS = s
-  $('#verBadge').textContent = 'v' + (s.installerVer || s.wizardVer || '1.9.11')
+  $('#verBadge').textContent = 'v' + (s.installerVer || s.wizardVer || '1.9.12')
   if (s.existingInstall) $('#existBox').style.display = 'block'
   if (s.panelPortBusy) $('#portBusyBox').style.display = 'block'
   if (s.config) {
@@ -287,7 +295,7 @@ fetch('/api/status').then((r) => r.json()).then((s) => {
   }
   $('#recLocal').style.display = s.isWindows ? '' : 'none'
   refresh()
-}).catch(() => { $('#verBadge').textContent = 'v1.9.11' })
+}).catch(() => { $('#verBadge').textContent = 'v1.9.12' })
 
 function refresh() {
   const t = currentTarget()
@@ -300,13 +308,32 @@ function refresh() {
   const s = $('#cfSub').value.trim() || 'panel'
   $('#cfPreview').textContent = 'https://' + s + '.' + d
   $('#domainFields').classList.toggle('hide', cfType() !== 'domain')
+  // v1.9.12: password hint adapts to the chosen target
+  const pub = t === 'cloudflare' || (t === 'vps' && STATUS && !STATUS.isWindows)
+  $('#passHint').innerHTML = pub
+    ? '<b style="color:#c0392b">الزامی:</b> رمز قوی حداقل ۱۰ کاراکتر شامل حرف و رقم — نصب عمومی بدون رمز قوی انجام نمی‌شود.'
+    : 'خالی بگذارید تا یک رمز تصادفی امن ساخته و یک‌بار نشان داده شود (نصب محلی جدید).'
+  $('#adminPass').required = pub
 }
-$$('input[name=target]').forEach((t) => t.addEventListener('change', refresh))
+$('input[name=target]').forEach((t) => t.addEventListener('change', refresh))
 $$('input[name=cftype]').forEach((t) => t.addEventListener('change', refresh))
 $('#panelPort').addEventListener('input', refresh)
 $('#cfDomain').addEventListener('input', refresh)
 $('#cfSub').addEventListener('input', refresh)
 $('#showPass').addEventListener('change', () => { $('#adminPass').type = $('#showPass').checked ? 'text' : 'password' })
+
+// v1.9.12: password requirement depends on the target (public = REQUIRED)
+function passProblem(pw) {
+  if (!pw) return 'missing'
+  if (pw.length < 10) return 'کوتاه است (حداقل ۱۰ کاراکتر)'
+  if (/^(admin123|password|12345678|1234567890|medpad123|qwerty123|letmein123|passw0rd1)$/i.test(pw)) return 'یک رمز ضعیف و شناخته‌شده است'
+  if (!/[a-z]/i.test(pw) || !/\d/.test(pw)) return 'باید شامل حرف و رقم باشد'
+  return null
+}
+function targetIsPublic() {
+  const t = currentTarget()
+  return t === 'cloudflare' || (t === 'vps' && !(STATUS && STATUS.isWindows))
+}
 
 $('#next1').addEventListener('click', () => {
   // vps on windows -> guide is the answer; going "next" means local-style install settings
@@ -323,7 +350,11 @@ $('#goInstall').addEventListener('click', async () => {
   const panelPort = parseInt($('#panelPort').value.trim() || '3000', 10)
   const rtPort = parseInt($('#rtPort').value.trim() || '3003', 10)
   if (!/^[a-zA-Z0-9._-]{2,32}$/.test(adminUser)) { alert('نام کاربری مدیر باید ۲ تا ۳۲ کاراکتر انگلیسی باشد'); return }
-  if (adminPass && adminPass.length < 4) { alert('رمز عبور حداقل ۴ کاراکتر باشد'); return }
+  const isPublic = targetIsPublic()
+  const pp = passProblem(adminPass)
+  if (isPublic && !adminPass) { alert('برای نصب عمومی (VPS / کلادفلر) رمز عبور قوی الزامی است — حداقل ۱۰ کاراکتر شامل حرف و رقم'); return }
+  if (isPublic && pp) { alert('این رمز برای نصب عمومی قابل قبول نیست: ' + pp); return }
+  if (!isPublic && adminPass && adminPass.length < 4) { alert('رمز عبور حداقل ۴ کاراکتر باشد'); return }
   if (!(panelPort > 0 && panelPort < 65536)) { alert('پورت پنل نامعتبر است'); return }
   if (!(rtPort > 0 && rtPort < 65536)) { alert('پورت realtime نامعتبر است'); return }
   if (panelPort === rtPort) { alert('پورت پنل و realtime نباید یکی باشند'); return }
@@ -331,7 +362,7 @@ $('#goInstall').addEventListener('click', async () => {
     if (!$('#cfToken').value.trim() || !$('#cfDomain').value.trim()) { alert('توکن کلادفلر و دامنه را وارد کنید (یا تونل سریع را انتخاب کنید)'); return }
   }
 
-  const body = { target, adminUser, adminPass, panelPort, rtPort }
+  const body = { target, adminUser, adminPass, panelPort, rtPort, sampleData: !!$('#sampleData').checked }
   if (target === 'vps' && STATUS && STATUS.isWindows) {
     // on Windows the VPS target is a guide — install locally instead (the guide stays on screen)
     body.target = 'local'
@@ -342,6 +373,7 @@ $('#goInstall').addEventListener('click', async () => {
       body.cfToken = $('#cfToken').value.trim()
       body.cfDomain = $('#cfDomain').value.trim()
       body.subdomain = $('#cfSub').value.trim() || 'panel'
+      body.cfConfirm = !!$('#cfConfirm').checked
     }
   }
 
@@ -379,7 +411,7 @@ $('#goInstall').addEventListener('click', async () => {
     if (success) {
       $('#finalUrl').textContent = 'http://localhost:' + panelPort
       $('#finalUser').textContent = adminUser
-      $('#finalPass').textContent = adminPass ? adminPass : (STATUS && STATUS.existingInstall ? 'رمز قبلی خودتان' : 'admin123')
+      $('#finalPass').textContent = adminPass ? adminPass : (STATUS && STATUS.existingInstall ? 'رمز قبلی خودتان' : 'رمز تصادفی تولیدشده — در لاگ نصب بالا (SAVE THIS NOW) ببینید و ذخیره کنید')
       showPage(4)
       $('#doneBox').style.display = 'block'
       $('#failBox').style.display = 'none'

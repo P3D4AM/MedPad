@@ -1,5 +1,5 @@
 /**
- * MedPad Realtime Service (installer version) v1.9.5 — Node.js, plain ESM.
+ * MedPad Realtime Service (installer version) v1.9.5 → v1.9.12 — Node.js, plain ESM.
  * socket.io on :3003 + /emit endpoint.
  *
  * v1.9.5 SECURITY FIX — dashboard socket handshake is now authenticated:
@@ -7,13 +7,32 @@
  *   (admin session required) and sends it in socket.handshake.auth.token.
  *   Anonymous / forged connections are rejected before any event is delivered.
  *   (Previously anyone on the LAN could listen to live locations.)
+ *
+ * v1.9.12: when SOCKET_TOKEN is not set in the environment, the token is
+ *   read from ../panel/.env (owner-only file) — so generated launcher
+ *   scripts never embed secrets.
  */
 import { createServer } from 'node:http'
 import { createHmac, timingSafeEqual } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
+import url from 'node:url'
 import { Server } from 'socket.io'
 
+const __dirname = path.dirname(url.fileURLToPath(import.meta.url))
 const PORT = Number(process.env.REALTIME_PORT || 3003)
-const TOKEN = process.env.SOCKET_TOKEN || 'medpad-dev-token'
+
+/** v1.9.12: shared socket token — env first, then ../panel/.env, else dev default */
+function resolveSocketToken() {
+  if (process.env.SOCKET_TOKEN) return process.env.SOCKET_TOKEN
+  try {
+    const env = readFileSync(path.join(__dirname, '..', 'panel', '.env'), 'utf8')
+    const m = env.match(/^SOCKET_TOKEN=([^\r\n]+)/m)
+    if (m) return m[1].trim()
+  } catch { /* no .env (dev) — fall through */ }
+  return 'medpad-dev-token'
+}
+const TOKEN = resolveSocketToken()
 
 /** Verify a panel-minted socket token: `<payloadB64url>.<hmacB64url>` (TTL ≤ 15 min) */
 function verifySocketToken(tok) {
@@ -97,7 +116,9 @@ const io = new Server(httpServer, {
 io.use((socket, next) => {
   const tok = socket.handshake.auth?.token
   if (verifySocketToken(tok)) return next()
-  console.warn(`[rt] rejected unauthenticated socket from ${socket.handshake.address || 'unknown'}`)
+  // v1.9.12: distinguish a FORGED/EXPIRED token from no token at all
+  if (tok) console.warn(`[rt] rejected FORGED/EXPIRED socket token from ${socket.handshake.address || 'unknown'}`)
+  else console.warn(`[rt] rejected unauthenticated socket from ${socket.handshake.address || 'unknown'}`)
   next(new Error('unauthorized'))
 })
 
