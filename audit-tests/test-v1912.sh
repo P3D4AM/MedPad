@@ -12,6 +12,7 @@
 #  A4  realtime reads SOCKET_TOKEN from ../panel/.env (v1.9.12 path)
 #  T1  fresh non-interactive install with custom ports (3110/3113)
 #  T2  medpad-config.json + helpers copied + rt-port patch + no stale 3003
+#  T2W generated Windows helpers (start/stop/server-manager.bat) ASCII+CRLF
 #  T3  boot: panel 200, font 200, login with chosen password 200,
 #      admin123 REJECTED, mint token, /emit bad token 401,
 #      socket anonymous REJECTED + authenticated ACCEPTED
@@ -21,6 +22,7 @@
 #  T6  .env owner-only (600), db dir 700, SOCKET_TOKEN CSPRNG format
 #  T7  syntax check all .mjs + realtime/index.js ESM import
 #  T8  CF module: mock-server confirm flow (plan -> MEDPAD_CF_CONFIRM_REQUIRED -> apply)
+#  A1W shipped install.bat/install.ps1 are pure ASCII + CRLF (rule 4 / bug #6)
 set -u
 PKG="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
 # Absolutize: a relative PKG (e.g. ".") would break the node_modules
@@ -42,6 +44,27 @@ echo "== PKG: $PKG =="
 chk "A1 no ungated dev-token fallback in compiled chunks" "! grep -rq 'SOCKET_TOKEN||\"medpad-dev-token\"' '$PKG/app/panel/.next/standalone/.next/server/chunks/' 2>/dev/null"
 chk "A1 no admin123 in compiled server chunks" "! grep -rq 'admin123' '$PKG/app/panel/.next/standalone/.next/server/chunks/' 2>/dev/null"
 chk "A1 rate limiting compiled in" "grep -rq 'retry-after' '$PKG/app/panel/.next/standalone/.next/server/chunks/' 2>/dev/null"
+
+# ── A1W: Windows scripts are pure ASCII + CRLF (golden rule 4 / bug #6) ──
+# A bare-LF .bat breaks in cmd.exe (labels/goto misparse) — this exact bug
+# shipped once (v1.9.6 era) and silently regressed in the repo afterwards.
+win_script_ok() {
+  node -e '
+    const d = require("fs").readFileSync(process.argv[1]);
+    let bad = "";
+    for (let i = 0; i < d.length; i++) {
+      if (d[i] > 127) { bad = "non-ASCII byte"; break; }
+      if (d[i] === 10 && (i === 0 || d[i-1] !== 13)) { bad = "bare LF (not CRLF)"; break; }
+    }
+    if (bad) { console.error(process.argv[1] + ": " + bad); process.exit(1); }
+    process.exit(0);
+  ' "$1"
+}
+for wf in install.bat install.ps1; do
+  if [ -f "$PKG/$wf" ]; then
+    chk "A1W $wf pure ASCII + CRLF" "win_script_ok '$PKG/$wf'"
+  fi
+done
 
 # ── A2: realtime without token fails fast ──
 mkdir -p $W/rt-noenv/panel $W/rt-noenv/realtime
@@ -89,6 +112,9 @@ chk "T2 helper scripts copied" "test -f $W/t1/server-manager.mjs -a -f $W/t1/wiz
 chk "T2 rt patch applied (client chunk)" "grep -rq 'location.hostname}:3113' $W/t1/panel/.next/standalone/.next/static/chunks/"
 chk "T2 no stale 3003 client pattern" "! grep -rq 'location.hostname}:3003' $W/t1/panel/.next/standalone/.next/static/chunks/"
 chk "T2 gateway rewrites patched" "! grep -rq 'http://127.0.0.1:3003' $W/t1/panel/.next/standalone/server.js $W/t1/panel/.next/standalone/.next/routes-manifest.json"
+for wf in start.bat stop.bat server-manager.bat; do
+  [ -f $W/t1/$wf ] && chk "T2W generated $wf pure ASCII + CRLF" "win_script_ok $W/t1/$wf"
+done
 
 # ── T6: permissions + token quality ──
 chk "T6 .env mode 600" "[ \"\$(stat -c %a $W/t1/panel/.env)\" = 600 ]"

@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# keep Windows batch files byte-exact CRLF (overrides * text=auto above)
+*.bat -text

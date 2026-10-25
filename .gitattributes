@@ -1,0 +1,8 @@
+# Windows scripts must keep CRLF byte-exact everywhere (golden rule 4 /
+# bug #6: LF-only bat files break in cmd.exe). -text disables ALL eol
+# normalization so blobs stay CRLF and checkouts/archives stay CRLF.
+*.bat -text
+*.ps1 -text
+
+# Unix scripts always LF
+*.sh text eol=lf
