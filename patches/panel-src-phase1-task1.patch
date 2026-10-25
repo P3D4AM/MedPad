@@ -1,0 +1,256 @@
+# Panel source patch — phase 1 / task 1 (applies at panel-src root: patch -p1 < this.patch)
+# Base: git commit bd9c80b (medpad-full-1.9/inst-stage/panel-src)
+--- orig/src/app/api/app/checkin/route.ts	2026-10-25 06:58:53.000000000 +0000
++++ fixed/src/app/api/app/checkin/route.ts	2026-10-25 22:04:27.641036081 +0000
+@@ -6,12 +6,15 @@
+ import { VOICE_DIR, ensureDirs } from '@/lib/media'
+ import { isValidLatLng } from '@/lib/geo'
+ import { emitEvent } from '@/lib/emit'
++import { resolveEventTime } from '@/lib/client-time'
+ 
+ const DEDUP_WINDOW_MS = 90_000 // same employee+customer within 90s = duplicate
+ 
+ /**
+  * App check-in (multipart/form-data):
+- *   token, customerId, note, lat, lng, localId, voice? (audio file)
++ *   token, customerId, note, lat, lng, localId, voice? (audio file),
++ *   clientAt? (ISO 8601 event time from the app's offline queue — see
++ *   lib/client-time.ts; absent on old app versions → server clock)
+  * Idempotency:
+  *   1) localId unique — replay returns the original row (201→200)
+  *   2) 90s dedup window per employee+customer
+@@ -33,6 +36,8 @@
+   const lat = parseFloat(String(form.get('lat') || ''))
+   const lng = parseFloat(String(form.get('lng') || ''))
+   const localId = String(form.get('localId') || '') || null
++  // v1.9.12 (phase 1): event time from the offline queue (falls back to now)
++  const eventTime = resolveEventTime(String(form.get('clientAt') || '') || null)
+ 
+   if (!customerId) {
+     return NextResponse.json({ ok: false, error: 'مشتری انتخاب نشده است' }, { status: 400 })
+@@ -85,14 +90,23 @@
+       voicePath,
+       lat: isValidLatLng(lat, lng) ? lat : customer.lat,
+       lng: isValidLatLng(lat, lng) ? lng : customer.lng,
++      createdAt: eventTime, // v1.9.12 (phase 1): real event time, not sync time
+     },
+   })
+ 
+   // ── Close previous open visits of this employee ─────────
+-  await db.visit.updateMany({
++  // endAt uses the event time but never moves BEFORE a visit's own startAt
++  // (guards against clock-skew producing negative durations).
++  const prevOpen = await db.visit.findMany({
+     where: { employeeId: emp.id, open: true },
+-    data: { open: false, endAt: new Date() },
++    select: { id: true, startAt: true },
+   })
++  for (const v of prevOpen) {
++    await db.visit.update({
++      where: { id: v.id },
++      data: { open: false, endAt: v.startAt > eventTime ? v.startAt : eventTime },
++    })
++  }
+ 
+   // ── New visit ────────────────────────────────────────────
+   await db.visit.create({
+@@ -100,7 +114,7 @@
+       employeeId: emp.id,
+       customerId,
+       checkinId: ci.id,
+-      startAt: new Date(),
++      startAt: eventTime,
+       open: true,
+     },
+   })
+diff -ruN orig/src/app/api/app/checkout/route.ts fixed/src/app/api/app/checkout/route.ts
+--- orig/src/app/api/app/checkout/route.ts	2026-10-25 06:58:53.000000000 +0000
++++ fixed/src/app/api/app/checkout/route.ts	2026-10-25 22:04:27.641036081 +0000
+@@ -5,12 +5,14 @@
+ import { appEmployee } from '@/lib/auth'
+ import { VOICE_DIR, ensureDirs } from '@/lib/media'
+ import { emitEvent } from '@/lib/emit'
++import { resolveEventTime } from '@/lib/client-time'
+ 
+ const MIN_NOTE = 10 // chars — "متن چک‌اوت ستاره‌دار"
+ 
+ /**
+  * App check-out (multipart/form-data):
+- *   token, note (REQUIRED ≥10 chars), localId, voice (REQUIRED), lat?, lng?
++ *   token, note (REQUIRED ≥10 chars), localId, voice (REQUIRED), lat?, lng?,
++ *   clientAt? (ISO 8601 event time from the app's offline queue)
+  * Closes ALL open visits of the employee (fixes duplicated-visit leak).
+  */
+ export async function POST(req: Request) {
+@@ -28,6 +30,8 @@
+   const localId = String(form.get('localId') || '') || null
+   const lat = parseFloat(String(form.get('lat') || ''))
+   const lng = parseFloat(String(form.get('lng') || ''))
++  // v1.9.12 (phase 1): event time from the offline queue (falls back to now)
++  const eventTime = resolveEventTime(String(form.get('clientAt') || '') || null)
+ 
+   if (note.length < MIN_NOTE) {
+     return NextResponse.json(
+@@ -73,14 +77,16 @@
+       voicePath,
+       lat: Number.isFinite(lat) ? lat : null,
+       lng: Number.isFinite(lng) ? lng : null,
++      createdAt: eventTime, // v1.9.12 (phase 1): real event time, not sync time
+     },
+   })
+ 
+-  const now = new Date()
++  // endAt uses the event time but never moves BEFORE a visit's own startAt
++  // (guards against clock-skew producing negative durations).
+   for (const v of openVisits) {
+     await db.visit.update({
+       where: { id: v.id },
+-      data: { open: false, endAt: now, checkoutId: co.id },
++      data: { open: false, endAt: v.startAt > eventTime ? v.startAt : eventTime, checkoutId: co.id },
+     })
+   }
+ 
+diff -ruN orig/src/app/api/employees/[id]/route.ts fixed/src/app/api/employees/[id]/route.ts
+--- orig/src/app/api/employees/[id]/route.ts	2026-10-25 06:58:53.000000000 +0000
++++ fixed/src/app/api/employees/[id]/route.ts	2026-10-25 22:04:27.643036092 +0000
+@@ -16,16 +16,45 @@
+   if (body?.phone !== undefined) data.phone = body.phone || null
+   if (body?.active !== undefined) data.active = body.active
+   if (body?.password) data.password = hashPassword(body.password)
+-  const row = await db.employee.update({ where: { id }, data })
++  const row = await db.employee.update({
++    where: { id },
++    data,
++    // v1.9.12 (phase 1): never serialize the password hash back to the client
++    select: { id: true, username: true, name: true, phone: true, active: true, createdAt: true, updatedAt: true },
++  })
+   return NextResponse.json({ ok: true, employee: row })
+ }
+ 
+-/** DELETE — remove employee (cascade tokens, assignments) */
++/**
++ * DELETE — remove employee (cascade tokens, assignments, notifications).
++ *
++ * v1.9.12 (phase 1 / task 1): Checkin and Visit reference Employee WITHOUT
++ * onDelete: Cascade (history must never be destroyed silently), so deleting
++ * an employee who has any attendance record used to blow up as an unhandled
++ * Prisma FK-constraint error → HTTP 500. The route now refuses with a clear,
++ * actionable 409 and tells the admin to deactivate instead; employees with
++ * no history are still hard-deleted as before.
++ */
+ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
+   if (!(await isAdmin())) {
+     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
+   }
+   const { id } = await ctx.params
++  const [checkins, visits] = await Promise.all([
++    db.checkin.count({ where: { employeeId: id } }),
++    db.visit.count({ where: { employeeId: id } }),
++  ])
++  if (checkins > 0 || visits > 0) {
++    return NextResponse.json(
++      {
++        ok: false,
++        error: `این کارمند سابقهٔ حضور و غیاب دارد (${checkins} ثبت و ${visits} ویزیت) و حذفش ممکن نیست — برای قطع دسترسی، همان را غیرفعال (active=false) کنید`,
++        checkins,
++        visits,
++      },
++      { status: 409 },
++    )
++  }
+   await db.employee.delete({ where: { id } })
+   return NextResponse.json({ ok: true })
+ }
+diff -ruN orig/src/app/api/employees/route.ts fixed/src/app/api/employees/route.ts
+--- orig/src/app/api/employees/route.ts	2026-10-25 06:58:53.000000000 +0000
++++ fixed/src/app/api/employees/route.ts	2026-10-25 22:04:27.643036092 +0000
+@@ -2,15 +2,37 @@
+ import { db } from '@/lib/db'
+ import { isAdmin, hashPassword } from '@/lib/auth'
+ 
++/**
++ * v1.9.12 (phase 1 / task 1): password hashes are no longer serialized.
++ * GET previously used `include`, which returns EVERY scalar column of
++ * Employee — including the bcrypt hash — to the admin browser. The panel UI
++ * never reads `password`; the field is now selected out at the query level.
++ */
++const EMPLOYEE_SELECT = {
++  id: true,
++  username: true,
++  name: true,
++  phone: true,
++  active: true,
++  createdAt: true,
++  updatedAt: true,
++  assignments: {
++    select: {
++      id: true,
++      customerId: true,
++      createdAt: true,
++      customer: { select: { id: true, name: true } },
++    },
++  },
++  _count: { select: { checkins: true } },
++} as const
++
+ export async function GET() {
+   if (!(await isAdmin())) {
+     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
+   }
+   const rows = await db.employee.findMany({
+-    include: {
+-      assignments: { include: { customer: { select: { id: true, name: true } } } },
+-      _count: { select: { checkins: true } },
+-    },
++    select: EMPLOYEE_SELECT,
+     orderBy: { createdAt: 'asc' },
+   })
+   return NextResponse.json({ ok: true, employees: rows })
+@@ -37,6 +59,8 @@
+       name: body.name,
+       phone: body.phone || null,
+     },
++    // never serialize the hash back to the client
++    select: { id: true, username: true, name: true, phone: true, active: true, createdAt: true },
+   })
+   return NextResponse.json({ ok: true, employee: row })
+ }
+diff -ruN orig/src/lib/client-time.ts fixed/src/lib/client-time.ts
+--- orig/src/lib/client-time.ts	1970-01-01 00:00:00.000000000 +0000
++++ fixed/src/lib/client-time.ts	2026-10-25 22:04:27.646036108 +0000
+@@ -0,0 +1,35 @@
++/**
++ * v1.9.12 (phase 1 / task 1): offline-queue event time.
++ *
++ * The Android app queues check-in/check-out locally while offline and flushes
++ * the queue when connectivity returns. Before this fix the server stamped
++ * `createdAt = now()` at SYNC time, so an offline check-in made at 09:00 and
++ * flushed at 11:00 was recorded as 11:00 — attendance history was silently
++ * wrong (reports, visit durations and the panel list all showed sync time).
++ *
++ * The app now sends the device-local event time as `clientAt` (ISO 8601,
++ * i.e. an absolute UTC instant — no timezone ambiguity). The server accepts
++ * it only within a sane window and otherwise falls back to the server clock:
++ * old app versions send nothing and keep the previous behavior exactly.
++ *
++ * Bounds (documented, deliberately generous):
++ *   - not more than 2 minutes in the future  (device clock skew tolerance)
++ *   - not older than 7 days                  (a queue cannot realistically
++ *                                             be older; also blocks forging
++ *                                             ancient history)
++ */
++const MAX_FUTURE_MS = 2 * 60 * 1000
++const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
++
++export function resolveEventTime(
++  raw: string | null | undefined,
++  fallback: Date = new Date(),
++): Date {
++  if (!raw) return fallback
++  const t = Date.parse(String(raw))
++  if (!Number.isFinite(t)) return fallback
++  const now = Date.now()
++  if (t > now + MAX_FUTURE_MS) return fallback
++  if (t < now - MAX_AGE_MS) return fallback
++  return new Date(t)
++}

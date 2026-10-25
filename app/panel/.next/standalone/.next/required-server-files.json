@@ -106,7 +106,7 @@
         "transform": "lodash/{{member}}"
       }
     },
-    "outputFileTracingRoot": "/home/z/my-project/MedPad/medpad-full-1.9/inst-stage/panel-src",
+    "outputFileTracingRoot": "/home/z/my-project/audit/panel-src-hardened",
     "enablePrerenderSourceMaps": true,
     "cacheComponents": false,
     "cacheLife": {
@@ -147,23 +147,29 @@
       }
     },
     "cacheHandlers": {},
+    "deprecated": {},
     "experimental": {
-      "appNewScrollHandler": true,
+      "agentUpgrade": "security",
+      "agentFeedback": false,
       "coldCacheBadge": false,
+      "collapseAdapterRoutes": true,
       "devValidationWorker": true,
       "useSkewCookie": false,
       "cssChunking": true,
       "multiZoneDraftMode": false,
       "appNavFailHandling": false,
+      "parallelRouteMetadata": false,
       "prerenderEarlyExit": true,
       "serverMinification": true,
       "linkNoTouchStart": false,
       "caseSensitiveRoutes": false,
       "cachedNavigations": false,
       "dynamicOnHover": false,
+      "reactBrowserBailout": true,
       "useOffline": false,
       "varyParams": true,
       "optimisticRouting": true,
+      "concurrentRouterQueue": false,
       "instrumentationClientRouterTransitionEvents": false,
       "prefetchInlining": {
         "maxSize": 2048,
@@ -183,6 +189,7 @@
       "imgOptTimeoutInSeconds": 7,
       "imgOptMaxInputPixels": 268402689,
       "imgOptSequentialRead": null,
+      "imgOptMozjpeg": true,
       "isrFlushToDisk": true,
       "workerThreads": false,
       "optimizeCss": false,
@@ -223,16 +230,23 @@
       "gestureTransition": false,
       "inlineCss": false,
       "useCache": false,
+      "useCacheStaticRootParamTracking": false,
       "globalNotFound": false,
+      "explicitParallelRouteChildren": true,
+      "strictRouteMatching": true,
       "browserDebugInfoInTerminal": "warn",
       "lockDistDir": true,
+      "disableResumeDataCacheCompression": false,
       "proxyClientMaxBodySize": 10485760,
       "hideLogsAfterAbort": false,
       "mcpServer": true,
+      "exposeRuntimeErrorsToHMR": false,
       "turbopackFileSystemCacheForDev": true,
       "turbopackFileSystemCacheForBuild": true,
+      "turbopackStaleOutputMaxAge": 604800000,
       "turbopackInferModuleSideEffects": true,
       "turbopackPluginRuntimeStrategy": "childProcesses",
+      "turbopackSharedRuntime": true,
       "turbopackMemoryEvictionMode": "auto",
       "optimizePackageImports": [
         "lucide-react",
@@ -326,9 +340,9 @@
     ],
     "skipTrailingSlashRedirect": true,
     "turbopack": {
-      "root": "/home/z/my-project/MedPad/medpad-full-1.9/inst-stage/panel-src"
+      "root": "/home/z/my-project/audit/panel-src-hardened"
     },
-    "repoRoot": "/home/z/my-project/MedPad/medpad-full-1.9/inst-stage/panel-src",
+    "repoRoot": "/home/z/my-project/audit/panel-src-hardened",
     "distDirRoot": ".next",
     "_originalRewrites": {
       "beforeFiles": [],
@@ -349,7 +363,7 @@
       "fallback": []
     }
   },
-  "appDir": "/home/z/my-project/MedPad/medpad-full-1.9/inst-stage/panel-src",
+  "appDir": "/home/z/my-project/audit/panel-src-hardened",
   "relativeAppDir": "",
   "files": [
     ".next/package.json",
@@ -357,6 +371,7 @@
     ".next/server/pages-manifest.json",
     ".next/build-manifest.json",
     ".next/prerender-manifest.json",
+    ".next/server/preview-props.json",
     ".next/server/functions-config-manifest.json",
     ".next/server/middleware-manifest.json",
     ".next/server/middleware-build-manifest.js",
