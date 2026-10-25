@@ -3,6 +3,11 @@ import path from "path";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // v1.9.12 (audit phase 3): keep bcryptjs EXTERNAL in the standalone output.
+  // The offline installer's seed step imports it from
+  // .next/standalone/node_modules at runtime; bundling it into the server
+  // chunks removed it from node_modules and broke the seed on fresh installs.
+  serverExternalPackages: ["bcryptjs"],
   typescript: {
     ignoreBuildErrors: true,
   },
