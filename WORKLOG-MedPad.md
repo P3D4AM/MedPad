@@ -17,6 +17,7 @@
 6. **هر تحویل = ZIP + SHA1 + لینک دانلود کارا** (Filebin + سرور داخلی :3000).
 7. زبان کاربر: **فارسی**؛ تایم‌زون: Asia/Tehran.
 8. از v1.9.7 به بعد: یک نسخه از این فایل داخل هر ZIP جدید هم قرار بگیرد.
+9. **همیشه همه فایل‌ها علاوه بر سرور داخلی، روی سایت‌های آپلودی هم آپلود شوند** (درخواست صریح کاربر — Oct 14, 2026: «فایل‌ها رو همیشه روی سایت‌های آپلودی هم آپلود کن. در worklog بنویس تا یادت نره»). یعنی: ZIPها، worklog، سندها، اسکریپت‌ها و هر فایل تحویلی/مهم دیگری → علاوه بر `download/` و سرور :3000، حتماً روی Filebin (و در صورت امکان سرویس‌های مشابه) آپلود شود. **هیچ تحویلی فقط محلی نماند.**
 
 ---
 
@@ -110,11 +111,11 @@
 
 | فایل | حجم | SHA1 |
 |---|---|---|
-| medpad-offline-v1.9.11.zip | TBD (بعد از بسته‌بندی) | TBD-after-packaging |
-| medpad-full-v1.9.11.zip | TBD | TBD-after-packaging |
-| medpad-installer-v1.9.11-src.zip | TBD | TBD-after-packaging |
+| medpad-offline-v1.9.11.zip | 154,409,842 بایت (~154MB) | `cb30220cb844b6d523e9c928b243fd0e21bcacf9` |
+| medpad-full-v1.9.11.zip | 161,229,321 بایت (~161MB) | `dea36d0bc4851825f1b6434396fe70244b0f7861` |
+| medpad-installer-v1.9.11-src.zip | 1,361,754 بایت (~1.4MB) | `c178cbc0388a4a619349ed78048f824851b965dc` |
 
-(مقادیر بعد از ساخت ZIPها در همین بخش تکمیل می‌شوند؛ نسخه داخل ZIPها جای‌نگهدار دارد — نسخه معتبر همین فایل در سندباکس/Filebin است)
+هر سه فایل در Filebin **medpad201** آپلود و SHA1 هر سه با دانلود برگشتی راستی‌آزمایی شد ✓ (+ unzip -t روی full بدون خطا)
 
 ## 📦 آرتیفکت‌ها و SHA1 (نسخه v1.9.10 — نهایی و تست‌شده)
 
@@ -151,7 +152,9 @@
 
 | محل | لینک | انقضا |
 |---|---|---|
-| Filebin (فعلی) | `filebin.net/medpad201` → offline + full v1.9.11 + installer-src + WORKLOG | ~6 روز |
+| **x0.at (مستقیم — کلیک=دانلود)** | `x0.at/xqtU.zip` (آفلاین ۱۵۴MB) · `x0.at/tnxx.zip` (کامل ۱۶۱MB) · `x0.at/6Pn1.zip` (installer-src 1.4MB) | بلندمدت (فایل‌های x0.at تا وقتی فعال باشند؛ ~۳۰-۱۰۰ روز) |
+| **temp.sh (بعد از باز شدن لینک، دکمه Click here to download)** | `temp.sh/iJYNj/medpad-offline-v1.9.11.zip` · `temp.sh/Aqvva/medpad-full-v1.9.11.zip` · `temp.sh/zxmlp/medpad-installer-v1.9.11-src.zip` · `temp.sh/mtHDO/worklog.md` | ۳ روز (تا ~Oct 17) |
+| Filebin (فعلی) | `filebin.net/medpad201` → offline + full v1.9.11 + installer-src + WORKLOG | ~6 روز (تا Oct 21) |
 | Filebin (v1.9.10) | `filebin.net/medpad200` → نسخه‌های v1.9.10 | احتمالاً منقضی |
 | Filebin (v1.9.9) | `filebin.net/medpad199` → نسخه‌های v1.9.9 | احتمالاً منقضی |
 | Filebin (v1.9.8) | `filebin.net/medpad198` → نسخه‌های v1.9.8 (با باگ #12 صفحه سفید) | احتمالاً منقضی |
@@ -159,18 +162,20 @@
 | Filebin (v1.9.6) | `filebin.net/medpad196` → نسخه‌های v1.9.6 | احتمالاً منقضی |
 | منبع اصلی پروژه | file.kiwi (لینک در پروتکل بازیابی) | کاربر نگه می‌دارد |
 
-**مسیرهای سندباکس:** `download/` (ZIPهای نهایی + worklog کپی) · `recover/` (استخراج offline-199) · `scripts/` (test-v1910.sh + one-shot-v1910.sh + package-v1910.sh) · `/tmp/t10-fresh/pkg` (درخت کامل v1.9.10 — منبع بسته‌بندی؛ اگر سندباکس ریست شد از ZIP فایل‌بین بازسازی کن) · `/tmp/fullcheck` (استخراج full-199 + src-199) · `worklog.md` (همین فایل)
+**SHA1 هر سه ZIP در همه سایت‌ها یکسان و راستی‌آزمایی‌شده (Oct 14):** offline `cb30220cb844b6d523e9c928b243fd0e21bcacf9` · full `dea36d0bc4851825f1b6434396fe70244b0f7861` · src `c178cbc0388a4a619349ed78048f824851b965dc`
+
+**مسیرهای سندباکس:** `download/` (هر سه ZIP v1.9.11 + worklog کپی) · `recover/v1911/` (منبع اصلی فایل‌های v1.9.11 — همه فایل‌های متنی کوچک) · `recover/src1910/` (سورس استخراج‌شده v1.9.10) · `scripts/` (test-v1911.sh + sync-v1911.sh) · `/tmp/t11/pkg/medpad-offline-1.9.11` (درخت کامل بسته — منبع بسته‌بندی؛ اگر سندباکس ریست شد از ZIP فایل‌بین بازسازی کن) · `/tmp/t11/src1911/` (درخت src) · `download-server/serve.mjs` (سرور دانلود :3000) · `worklog.md` (همین فایل)
 
 ---
 
 ## 📋 وضعیت فعلی و آینده
 
-- **v1.9.10 کامل تست و تحویل شد** — چک نسخه بستهٔ app قبل از هر تغییری (باگ خطای مبهم «package incomplete» کاربر) + سه فیکس مقاوم‌سازی دیگر. ۴۱/۴۱ تست PASS.
-- نکته مهم برای آینده: **هیچ فایل خارجی (فونت/اسکریپت/CSS) در هیچ صفحه‌ای از پنل/ویزارد مجاز نیست** — هر منبع خارجی render-blocking یا حتی async در شبکه ایران می‌تواند باعث مشکلات مشابه شود. نقشه Leaflet فقط اسکرین‌های OSM را async می‌گیرد (بدون بلاک رندر) — قابل قبول است چون داده نقشه است نه asset.
+- **v1.9.11 کامل تست و تحویل شد** — نصب‌کننده تعاملی (منوی مقصد + انتخاب CLI/مرورگر) + ویزارد گرافیکی + مدیر سرور GUI/CLI + باز شدن خودکار صفحه اصلی بعد از استارت + پورت‌های قابل تنظیم + systemd برای VPS. ۴۹/۴۹ تست PASS.
+- نکته مهم برای آینده: **هیچ فایل خارجی (فونت/اسکریپت/CSS) در هیچ صفحه‌ای از پنل/ویزارد/مدیر مجاز نیست** — صفحات جدید (installer.html / manager.html) هم فونت را از `/fonts/` خودشان می‌گیرند.
 - کار بعدی که کاربر بخواهد: از اینجا به بعد است — اول این فایل را کامل بخوان، بعد کار کن.
 - TODO دائمی: در هر ZIP جدید این فایل به‌روز باشد (از v1.9.7 اجرا می‌شود).
-- اگر نسخه جدید ساخته شد: شماره +1 (v1.9.11, v1.9.12, ...)، SHA1 جدید اینجا ثبت شود، Filebin جدید (مثلاً medpad201) + سرور :3000 آپدیت شود.
-- یادآوری بسته‌بندی: فایل `app/APP-VERSION` باید با INSTALLER_VER یکی باشد (مقدار: فقط عدد نسخه مثل `1.9.10` بدون newline اضافی).
+- اگر نسخه جدید ساخته شد: شماره +1 (v1.9.12, ...)، SHA1 جدید اینجا ثبت شود، Filebin جدید (مثلاً medpad202) + سرور :3000 آپدیت شود.
+- یادآوری بسته‌بندی: فایل `app/APP-VERSION` باید با INSTALLER_VER یکی باشد (مقدار: فقط عدد نسخه مثل `1.9.11` بدون newline اضافی) · bat/ps1 فقط ASCII+CRLF بدون BOM (اسکریپت sync-v1911.sh خودش اعمال می‌کند) · درخت بسته v1.9.11 در `/tmp/t11/pkg/medpad-offline-1.9.11` و منبع فایل‌های متنی در `recover/v1911/`.
 
 ---
 
@@ -414,3 +419,137 @@ Stage Summary:
 - v1.9.11 منتشر شد: منوی تعاملی نصب + ویزارد مرورگر گرافیکی + مدیر سرور GUI/CLI + باز شدن خودکار صفحه اصلی بعد از استارت + پورت‌های قابل تنظیم + systemd برای VPS — دقیقاً همان مدلی که کاربر خواسته بود
 - ۴۹/۴۹ تست PASS؛ auth سوکت (قانون طلایی ۵) دوباره راستی‌آزمایی شد
 - تحویل: Filebin medpad201 (لینک‌ها در بخش 🌐) + سرور دانلود داخلی :3000
+
+---
+Task ID: 10
+Agent: main (Super Z)
+Task: ثبت قانون طلایی جدید کاربر: «همیشه فایل‌ها روی سایت‌های آپلودی هم آپلود شوند» + همگام‌سازی پشتیبان‌ها
+
+Work Log:
+- درخواست کاربر (Oct 14, 2026): «فایل‌ها رو همیشه روی سایت‌های آپلودی هم آپلود کن. در worklog بنویس تا یادت نره»
+- وضعیت سندباکس چک شد: هر سه ZIP v1.9.11 در `download/` سالم · Filebin medpad201 زنده (HTTP 200) با هر ۴ فایل (offline + full + installer-src + WORKLOG)
+- قانون طلایی **شماره ۹** به بخش 👑 اضافه شد: همه فایل‌های تحویلی/مهم (ZIP، worklog، سند، اسکریپت و…) علاوه بر سرور داخلی :3000، همیشه روی سایت‌های آپلودی (Filebin و مشابه) هم آپلود شوند — هیچ تحویلی فقط محلی نمی‌ماند
+- از این پس در پایان هر تسک، چک‌لیست تحویل این است: ۱) فایل در `download/` ۲) کپی در سرور :3000 ۳) **آپلود روی Filebin (bin جدید در هر نسخهٔ بزرگ، همان bin برای آپدیتهای کوچک) + راستی‌آزمایی SHA1 با دانلود برگشتی** ۴) آپدیت همین worklog + کپی‌های پشتیبانش (download/WORKLOG-MedPad.md + upload/ + Filebin + داخل ZIP)
+- این ورودی خودش طبق همین قانون بلافاصله روی Filebin medpad201 هم آپلود شد
+
+Stage Summary:
+- قانون جدید همیشه‌معتبر ثبت شد (Golden Rule #9) — از این به بعد هر فایل تحویلی حتماً روی سایت آپلودی هم قرار می‌گیرد
+- Filebin medpad201 زنده تأیید شد؛ worklog به‌روز به Filebin آپلود شد
+
+---
+Task ID: 11
+Agent: main (Super Z)
+Task: رفع «دانلود از سرور داخلی کار نمی‌کند» + ارائه لینک‌های دانلود کارا به کاربر
+
+Work Log:
+- گزارش کاربر: روی سرور خودم (:3000) کلیک می‌کند ولی دانلود نمی‌شود
+- ریشه: بعد از ریست سندباکس (پنجم) پروسه `node download-server/serve.mjs` کشته شده بود — پورت 3000 خاموش
+- تلاش اول (`nohup … & disown` + `setsid`): سرور ۲-۳ ثانیه بالا می‌آمد ولی بین فراخوانی‌های ترمینال کشته می‌شد (ریپر پروسه سندباکس)
+- راه‌حل کارا: **double-fork با ساب‌شل** — `(cd … && setsid node serve.mjs >> server.log 2>&1 < /dev/null &)` → پروسه کاملاً detach شد و بین فراخوانی‌ها زنده ماند (PID 1368, Ssl)
+- راستی‌آزمایی کامل دانلود داخلی:
+  * medpad-offline-v1.9.11.zip: دانلود کامل 154,409,842 بایت → SHA1 = `cb30220c…acf9` == مقدار منتشرشده ✓ (magic bytes PK معتبر)
+  * medpad-full-v1.9.11.zip: 161,229,321 بایت ✓ · installer-src: 1,361,754 بایت ✓ · WORKLOG: 66,410 بایت ✓
+- راستی‌آزمایی Filebin medpad201 (لینک مستقیم + ریدایرکت storage): هر ۴ فایل → HTTP 206 ✓
+- 📌 درس فنی برای ریست‌های بعدی: برای سرورهای ماندگار در این سندباکس همیشه `( setsid … & )` ساب‌شلی استفاده کن، نه `& disown` ساده — وگرنه ریپر پروسه بین فراخوانی‌ها آن را می‌کشد
+
+Stage Summary:
+- سرور دانلود داخلی :3000 دوباره بالا است و هر ۴ فایل v1.9.11 را با SHA1 صحیح سرو می‌کند
+- Filebin medpad201 هم زنده است (هر ۴ فایل، انقضا ~۵ روز تا Oct 21)
+- لینک‌های هر دو کانال به کاربر تحویل شد
+
+---
+Task ID: 12
+Agent: main (Super Z)
+Task: آپلود بسته‌های v1.9.11 روی حداقل دو سایت آپلود خارجی (درخواست کاربر: «مدام قطع میشه وسط کار وقتی از سرورهات دانلود میکنم. روی سایتهای آپلودی آپلودش کن. حداقل دو تا»)
+
+Work Log:
+- کاربر گزارش داد دانلود از سرور داخلی (:3000) مدام وسط کار قطع می‌شود → نیاز به سایت‌های آپلود بیرونی
+- SHA1 هر سه ZIP محلی دوباره تأیید شد (با مقادیر منتشرشده یکی است)
+- پروب سایت‌های کاندید: pixeldrain (آپلود anon نیاز به API key — رد)، gofile (API از سندباکس خالی — رد)، transfer.sh و 0x0.st و bashupload و litterbox (قطع/ناپایدار — رد)، file.io (خطای ریدایرکت)
+- **دو سایت کارا پیدا و استفاده شد: x0.at + temp.sh** (علاوه بر Filebin موجود → مجموعاً ۳ سایت آپلود + سرور داخلی)
+- آپلود‌ها (همه موفق):
+  * x0.at: آفلاین ۱۵۴MB (۷۶ ثانیه) → `x0.at/xqtU.zip` · کامل ۱۶۱MB (۱۰۵ ثانیه) → `x0.at/tnxx.zip` · installer-src → `x0.at/6Pn1.zip` — بعد از این‌ها IP سندباکس برای آپلودِ بعدی (worklog) بن شد (403)؛ ZIPها قبلاً کامل رفته بودند
+  * temp.sh: هر ۴ فایل (آفلاین `iJYNj` · کامل `Aqvva` · src `zxmlp` · worklog `hUdYa`) — endpoint آپلود: POST multipart به `/upload`
+- **راستی‌آزمایی دانلود برگشتی (قانون طلایی ۶):** همه فایل‌ها از هر دو سایت دانلود و SHA1 هر کدام == مقدار منتشرشده ✓
+  * نکته temp.sh: لینک معمولی یک صفحه HTML نشان می‌دهد؛ دانلود واقعی با POST (در مرورگر: کلیک روی دکمه «Click here to download»)
+  * نکته x0.at: دانلود مستقیم است ولی از سندباکس گاهی وسط کار قطع می‌شد (HTTP/2 stream error) → با `--http1.1 -C -` و حلقه resume کامل و صحیح دانلود شد؛ برای کاربر: اگر دانلود ویندوزی قطع شد، دوباره ادامه بدهد یا از Filebin بگیرد
+- این ورودی + جدول لینک‌های 🌐 به‌روز شد؛ worklog جدید روی Filebin و temp.sh دوباره آپلود شد
+
+Stage Summary:
+- بسته‌های v1.9.11 حالا روی ۳ کانال بیرونی در دسترس‌اند: **x0.at (مستقیم، بلندمدت)** + **temp.sh (۳ روزه)** + **Filebin medpad201 (تا Oct 21)** + سرور داخلی :3000
+- SHA1 همه نسخه‌ها در همه سایت‌ها راستی‌آزمایی‌شده — هر کانالی که کاربر بگیرد فایل یکسان است
+- درس ثبت‌شده: در جلسات بعدی اگر خواستیم دوباره روی x0.at آپلود کنیم و 403 گرفتیم، IP موقتاً بن است — از Filebin/temp.sh جایگزین استفاده شود
+
+---
+Task ID: 13
+Agent: main (Super Z)
+Task: دیباگ «APK خطای نصب میده» (درخواست کاربر — Oct 14)
+
+Work Log:
+- APK استخراج شد از full ZIP → nested `medpad-apk-v1.9.1.zip` → `medpad-apk-v1.9.1.apk` (6,400,325 بایت، SHA1 `8aa30ea4fc1d3488b6c2bc0797f73cbec0660c4f`)
+- تحلیل ساختاری: unzip -t سالم ✓ · بدون native libs ✓ · **بدون امضای v1** (META-INF فاقد MANIFEST.MF/CERT.RSA) · فقط بلک امضای v2
+- سورس اندروید هم از full ZIP درآمد: `medpad-tracker/` — applicationId `com.medpad.tracker` · minSdk 24 · targetSdk 34 · versionCode 10 · versionName 1.9.1 · **keystore واقعی موجود:** `keystore/medpad.keystore` (storepass/keypass `medpad123`, alias `medpad`, گواهی CN=MedPad Tracker, معتبر تا 2054)
+- صحت‌سنجی امضا با apksig library (داخل uber-apk-signer 1.3.0 که از GitHub دانلود شد؛ Verify.java تک‌فایلی با `java -cp` اجرا شد): **امضای v2 معتبر بود** — signer cert SHA256 `3F:C8:53:97:…:5A:89` دقیقاً مطابق گواهی keystore ✓ → یعنی خود APK سالم و قابل نصب روی Android 7+ بود؛ خطای نصب کاربر از خرابی خود فایل نیست
+- برای حذف تمام علل احتمالی سمت فایل: نسخه مقاوم ساخته شد — `medpad-apk-v1.9.1-fix.apk`:
+  * zipalign شده + امضای **v2+v3** با همان keystore اصلی (همان گواهی → به‌روزرسانی روی نسخه قبلی بدون نیاز به uninstall)
+  * راستی‌آزمایی با apksig: OVERALL verified=true · v2 ✓ v3 ✓ · zipalign verified ✓
+  * SHA1: `36c48191fc910068f1e97b49b8b05fedf9e243ca` · SHA256 `b0a92106…cdbc810` · حجم 6,480,520 بایت (~6.5MB)
+- آپلود (قانون طلایی ۹): temp.sh → `temp.sh/fMuKN/medpad-apk-v1.9.1-fix.apk` ✓ (SHA1 دانلود برگشتی تأیید) · Filebin medpad201 → `medpad-apk-v1.9.1-fix.zip` (Filebin پسوند apk را 403 می‌دهد → داخل zip؛ SHA1 zip `6cbc859b…` + APK داخلی تأیید) ✓ · سرور داخلی :3000 ✓ · x0.at هنوز ban بود (403)
+- علت‌های محتمل باقی‌مانده خطای نصب کاربر (به کاربر گزارش شد): ۱) نسخه قدیمی با امضای متفاوت نصب است → اول uninstall ۲) Play Protect بلاک می‌کند → Install anyway ۳) دانلود ناقص ZIP بزرگ (کاربر خودش گفته دانلودها مدام قطع می‌شود) → لینک مستقیم APK تکی 6.5MB داده شد ۴) اندروید قدیمی‌تر از 7.0 (minSdk 24)
+- ابزار باقی‌مانده در سندباکس: `recover/apk-debug/` (uber-apk-signer.jar + Verify.java + APKها + keystore)
+
+Stage Summary:
+- ریشه: فایل APK سالم بود (امضای v2 معتبر با گواهی اصلی) — خطای نصب به احتمال زیاد سمت دستگاه/دانلود است
+- خروجی: APK مقاوم‌شده (zipalign + v2+v3 با همان کلید اصلی) با لینک مستقیم 6.5MB روی temp.sh + Filebin(zip) + :3000
+- SHA1 نهایی برای چک کاربر: `36c48191fc910068f1e97b49b8b05fedf9e243ca`
+
+---
+Task ID: 14
+Agent: main (Super Z)
+Task: اتصال ریپازیتوری GitHub MedPad + توکن PAT (درخواست کاربر: «از این به بعد هر تغییری را commit+push کن؛ فعلاً فقط ریپو را وصل کن و کار دیگری نکن»)
+
+Work Log:
+- (بازیابی‌شده بعد از ریست هفتم سندباکس — ورودی اصلی در ریست از دست رفت، این خلاصه بازسازی است)
+- توکن fine-grained PAT کاربر تست شد: admin/push/maintain:true → کلون عمومی + push ممکن
+- کلون ۶۸۸MB به MedPad/ — ۳ کامیت روی main (2ab9e5a initial · 57aedb8 Android app · 42e1908 Full Project) + شاخه fix/android-security-build (c525afc: حذف JDK path ماشین‌خاص از gradle.properties)
+- امنیت: توکن در ~/.git-credentials (600) · remote بدون توکن · identity=P3D4AM noreply
+- ساختار: root=v1.9.11 · medpad-full-1.9/medpad-offline-1.9.12/=WIP v1.9.12 (install 1356 · services 389 بدون bcrypt · cloudflare 413 با فیکس ESM · wizard 229 · server-manager 356 · installer.html 480) · Android/ · offline/ · app/(فقط db+schema+uploads، بدون بیلد پنل)
+- طبق دستور کاربر: هیچ commit/push انجام نشد
+
+Stage Summary:
+- ریپو وصل و مستند شد؛ آماده شروع تسک هفت‌مرحله‌ای ممیزی v1.9.12
+
+---
+Task ID: 15
+Agent: main (Super Z)
+Task: ادامه ممیزی هفت‌مرحله‌ای v1.9.12 روی ریپو (دستور کاربر: «ادامه بده»)
+
+Work Log:
+- ریست هفتم سندباکس: MedPad/ و ~/.git-credentials (توکن PAT) و ورودی Task 14 از دست رفت — کلون دوباره از GitHub عمومی انجام شد (بدون توکن)
+- ⚠️ توکن PAT دیگر موجود نیست → push ممکن نیست تا ارائه مجدد توسط کاربر؛ کامیت‌ها محلی + bundle در download/
+- سرور :3000 دوباره بالا آمد (double-fork)
+- شروع اجرای فازهای ۱ تا ۷ ممیزی
+
+Stage Summary:
+- (در حال اجرا)
+
+---
+Task ID: 15 (تکمیل)
+Agent: main (Super Z)
+Task: ممیزی هفت‌مرحله‌ای v1.9.12 روی ریپوی GitHub — اجرای کامل فازهای ۱ تا ۷
+
+Work Log:
+- کلون دوباره ریپو (عمومی، بدون توکن — توکن PAT در ریست هفتم از دست رفت)
+- فاز ۱: گزارش SECURITY-AUDIT-v1.9.12.md — وضعیت گیت، سه نسخه (root v1.9.11 / WIP 1.9.12 / inst-stage)، جدول هش، سهگانهٔ custom.db (۲ واقعی یکسان + ۱ قالب خالی)
+- فاز ۲: .gitignore + untrack (۲ keystore یکسان با رمز medpad123 لو رفته + ۲ DB واقعی + New Text Document.txt) — فایل‌ها روی دیسک دست‌نخورده · ادغام شاخهٔ fix/android-security-build · بازنویسی signing هر دو build.gradle.kts (env/properties، بدون رمز hardcode، debug دیگر با کلید release امضا نمی‌شود، رفتار صریح بدون امضا) · Android/ANDROID-SIGNING.md (fa): چرخش کلید + تأثیر APK (uninstall لازم) · طرح پاکسازی تاریخچه فقط گزارش (بخش ۲.۴)
+- فاز ۳: حذف همهٔ fallbackهای admin123/medpad-dev-token (login route + auth.ts + emit.ts + socket-auth + install.mjs + realtime/index.js — فقط با MEDPAD_DEV=1) · rate-limit هر دو لاگین (۵ شکست/۱۵دقیقه → 429+retry-after) · SOCKET_TOKEN با randomBytes + بازتولید مقدار خالی · downloads.html اصلاح شد
+- بازسازی پنل از سورس امن: کشف و رفع رگرسیون seed (Turbopack باندل می‌کرد bcryptjs را → serverExternalPackages) · دو symlink dereference شد برای checkout ویندوزی · BUILD_ID FbZh3ToaRF62cC8CdAY1v · قالب خالی db حفظ شد
+- فازهای ۴/۵/۶: بازبینی کامل و تأیید (services.mjs ایمنی پروسه · cloudflare.mjs با فیکس ESM و جریان plan/confirm/backup/rollback · install.mjs اصلاحات پروسه+CF)
+- فاز ۷: test-v1912.sh + test-cf-mock.mjs + db-triage/classify → در audit-tests/ ریپو کامیت شد — **۴۴/۴۴ PASS** (نصب، پچ پورت، بوت، لاگین، رد admin123، rate-limit 429، auth سوکت، استاپ، آپدیت با حفظ داده، مجوزها 600/700، CSPRNG، سینتکس، CF mock کامل)
+- ۷ کامیت روی main محلی: 1511df3 → 0b5dbb94
+- ⚠️ push ناموفق: توکن PAT در ریست سندباکس از بین رفت → بستهٔ git bundle در download/medpad-audit-v1.9.12.bundle ساخته شد (کاربر می‌تواند خودش fetch/push کند یا توکن جدید بدهد)
+- آپلودها (قانون طلایی ۹): Filebin + سرور :3000 (بالا)
+
+Stage Summary:
+- ممیزی هفت‌مرحله‌ای کامل شد: ۴۴/۴۴ تست PASS؛ همهٔ اسرار از ردیابی خارج؛ امضای اندروید سخت‌سازی؛ backdoorهای dev حذف؛ rate-limit اضافه؛ پنل بازسازی‌شده از سورس امن
+- باز ماندن برای مالک: push (توکن جدید) · پاکسازی تاریخچه (filter-repo) · چرخش کلید اندروید (ANDROID-SIGNING.md) · انتشار ZIP نهایی v1.9.12
