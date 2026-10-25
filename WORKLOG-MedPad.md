@@ -636,3 +636,25 @@ Work Log:
 
 Stage Summary:
 - (در حال اجرا — تکمیل پس از تست‌ها و انتشار)
+
+---
+Task ID: 19 (تکمیل)
+Agent: main (Super Z)
+Task: تکمیل ریلیز آزمایشی develop — تست‌ها، APK، گزارش، انتشار
+
+Work Log:
+- **دو باگ واقعی حین ساخت ریلیز کشف و فیکس شد** (هر دو در کامیت جداگانه):
+  1. `7368e20` — **رگرسیون CRLF**: install.bat/install.ps1/gradlew.bat در کامیت‌های فاز صفر با LF ذخیره شده بودند (ZIPهای v1.9.11 همه CRLF بودند؛ قانون طلایی ۴/باگ #6) + `Android/.gitattributes` با `* text=auto` دوباره LF می‌کرد → تبدیل به CRLF + `.gitattributes` ریشه (`*.bat/*.ps1 -text`) + چک‌های جدید A1W/T2W در test-v1912.sh
+  2. `3b277f2` — **خطای کامپایل Kotlin DSL**: بلاک امضای build.gradle.kts هیچ‌وقت کامپایل نشده بود؛ `java.util.Properties()` داخل بلاک android{} خطای Unresolved می‌دهد → `import java.util.Properties` سطح بالا
+- **تست وب روی ZIP نهایی** (استخراج در مسیر خالی مستقل): سوئیت کامل `run-all.sh <pkg>` → **94/94 PASS, ALL-SUITES-PASS** (46 چک v1912 شامل A1W جدید + 18 process-safety + 15 wizard + 15 realtime)
+- **E2E دستی جریان واقعی کاربر** (نصب تعاملی پایپ‌شده: منو→۱ این کامپیوتر→۲ CLI→رمز خالی=تولیدشده→پورت‌های 3210/3213→دادهٔ نمونه): نصب exit 0 + بنر INSTALL COMPLETE؛ رمز تصادفی `Mp-***` فقط یک بار چاپ شد؛ Health پنل 200 در 2ms؛ صفحهٔ ورود 200؛ **ورود مدیر با رمز تولیدشده** ok:true؛ ورود کارمند ali/1234 → توکن؛ لیست مشتریان؛ **چک‌این با فرمت دقیق multipart اپ اندروید** (X-Medpad-Token) ثبت شد و در API ادمین دیده شد؛ سوکت: ناشناس REJECTED + احرازشده ACCEPTED (لاگ rt)؛ پورت غلط→refused، IP غلط→timeout، رمز غلط→خطای فارسی JSON؛ دسترسی با IP شبکهٔ محلی 200؛ استاپ→پورت‌ها آزاد→ری‌استارت→داده (چک‌این) ماندگار
+- **شبیه‌سازی مسیر ویندوز** (`MEDPAD_SIM_WIN=1`): نصب exit 0 + هر ۶ فایل bat ویندوزی تولید شد (ASCII+CRLF تأییدشده) — سیمولیشن لینوکسی، نه ویندوز واقعی
+- **ساخت APK**: سیستم فقط JRE داشت (بدون javac/jlink، بدون sudo) → Temurin JDK 21.0.13 portable در سندباکس؛ SDK: cmdline-tools 11076708 + platform-tools + platforms;android-34 + build-tools;34.0.0؛ `assembleDebug` → **BUILD SUCCESSFUL**؛ تأیید aapt: `com.medpad.tracker` versionCode **11** versionName **1.9.12-dev.1** minSdk 24 target 34؛ تأیید apksigner: **v2 VERIFIED، امضاکننده CN=Android Debug, O=Android, C=US (کلید Debug استاندارد — نه keystore افشاشده، نه medpad123)**؛ حجم ~7.5MB
+- **تست‌های موجود اندروید**: هیچ تست واحدی در پروژه نیست (فقط `src/main`) — گزارش صادقانه در DEVELOP-TEST-REPORT
+- **محدودیت‌ها**: ویندوز واقعی/Emulator/دستگاه اندرویدی در سندباکس غایب — دستورالعمل تست مالک در گزارش؛ تست‌های لینوکسی/سیمولیشن به‌عنوان تست ویندوز معرفی نشدند
+- **خروجی نهایی**: ZIP وب + APK + `SHA256SUMS.txt` + `DEVELOP-TEST-REPORT-fa.md` → GitHub **Pre-release با tag `develop-v1.9.12-test.1`** روی کامیت مبنا (Artifacts از همان کامیت)؛ `main` دست‌نخورده
+
+Stage Summary:
+- ریلیز آزمایشی develop کامل شد: 94/94 تست وب PASS + E2E واقعی (نصب/لاگین/چک‌این/سوکت/خطاها/ماندگاری) + APK امضاشده با کلید Debug استاندارد تأییدشده با apksigner/aapt
+- دو رگرسیون واقعی (CRLF + کامپایل DSL) پیدا و فیکس شد و گارد رگرسیون به سوئیت اضافه شد
+- محدودیت صادقانه: ویندوز واقعی و دستگاه اندرویدی تست نشده (دستورالعمل مالک در گزارش)
