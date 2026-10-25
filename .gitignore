@@ -5,19 +5,17 @@
 # are unaffected by .gitignore.
 
 # Databases — real user data must NEVER be committed.
-# Exception: the EMPTY schema template shipped inside the offline package.
+# Exception: the EMPTY schema template shipped for fresh installs.
 custom.db
 *.db-journal
 *.db-wal
 *.db-shm
-!medpad-full-1.9/medpad-offline-1.9.12/app/panel/db/custom.db
 
 # Android signing keys — the old key is compromised (was public); the new
 # key must NEVER enter git. Local signing config also stays out:
 *.keystore
 *.jks
 Android/keystore/medpad-release.properties
-medpad-full-1.9/medpad-tracker/keystore/medpad-release.properties
 
 # Secrets / env / tunnel credentials
 .env
@@ -28,14 +26,8 @@ tunnel-creds/
 *.key
 
 # Stray build outputs & local junk (NOT the tracked vendored ones)
-# The panel SOURCE tree's build cache and dependencies are disposable —
-# only the PACKAGE's prebuilt .next (root app/panel/.next and
-# medpad-offline-1.9.12/app/panel/.next) and the vendored realtime
-# node_modules are intentionally tracked.
-medpad-full-1.9/inst-stage/panel-src/.next/
-medpad-full-1.9/inst-stage/panel-src/node_modules/
-medpad-full-1.9/inst-stage/panel-src/dev.log
-medpad-full-1.9/inst-stage/panel-src/server.log
+# The repo IS the offline bundle: the prebuilt .next/ at app/panel/.next
+# and the vendored realtime node_modules are intentionally tracked.
 __pycache__/
 *.pyc
 install.log
