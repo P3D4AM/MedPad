@@ -689,3 +689,34 @@ Work Log:
 Stage Summary:
 - هر دو باگ گزارش‌شدهٔ مالک روی develop-v1.9.12-test.1 (EPERM مرحلهٔ ۳ + گیرکردن صفحهٔ نصب گرافیکی) ریشه‌یابی و روی درخت سخت‌سازی‌شده فیکس شد — بدون از دست دادن هیچ فیچر امنیتی فاز ۰-۷
 - همهٔ ۹۴ چک خودکار + تست‌های هدفمند جدید PASS؛ آمادهٔ پوش به develop و تست ویندوز واقعی توسط مالک
+
+---
+Task ID: 21
+Agent: main (Z.ai)
+Task: فاز ۱ / تسک ۱ — ممیزی عملکردی کامل هسته، شناسایی و رفع باگ‌های تأییدشده، بازسازی باندل پنل و قفل رگرسیون
+
+Work Log:
+- مبنا ثبت شد: develop @ b717237 (نوک origin، درخت تمیز)؛ run-all.sh روی مبنا: ALL-SUITES-PASS (18+15+15+46)
+- ممیزی کد: هر ۲۵ هندلر API (فرم کامپایل‌شدهٔ باندل + سورس TS از تاریخچهٔ bd9c80b)، realtime/index.js، ۱۹ فایل Kotlin اپ، اسکیما Prisma، اسکریپت‌های نصب
+- باگ‌های تأییدشده (با تست بازتولید روی بیلد قدیمی: ۹ FAIL هدفمند):
+  * P1-T1: زمان واقعی صف آفلاین گم می‌شد (createdAt = زمان سینک نه زمان رویداد؛ پنجرهٔ dedup هم غلط مقایسه می‌شد)
+  * P1-T2: DELETE کارمند با سابقه = 500 (FK restrict روی Checkin/Visit)
+  * P2-T3: نشت هش bcrypt رمز کارمندان در GET/POST/PUT /api/employees
+  * P0-T4 (احتیاطی): next@16.3.8 با ۳ advisory بحرانی/بالا (RCE در مسیرهای استفاده‌نشده) — تنها پکیج آسیب‌پذیرِ ship‌شده
+- فیکس‌های سورس پنل (سورس سخت‌شده از تاریخچهٔ گیت بازیابی شد، اصلاح و rebuild):
+  * lib/client-time.ts جدید: resolveEventTime با پنجرهٔ سلامت (۲ دقیقه آینده / ۷ روز گذشته، خارج = fallback ساعت سرور)
+  * checkin/checkout: فیلد اختیاری clientAt (ISO 8601) → createdAt + startAt/endAt ویزیت‌ها از زمان رویداد + گارد endAt ≥ startAt
+  * employees: select بدون password در GET/POST/PUT؛ DELETE → 409 قابل‌اقدام با شمارش سابقه (بدون سابقه = حذف مثل قبل)
+  * ارتقای next → 16.4.3 (جراحی‌شده، فقط همین پکیج)
+- بازسازی باندل: next build standalone + static + public + дерefence سیم‌لینک‌های node_modules داخلی (درس f4425ac) + حذف .env ساخت build + راستی‌آزمایی سخت‌سازی بیلد جدید (صفر admin123، صفر fallback بدون گیت، rate-limit و clientAt و bcrypt در chunks، فونت ۹تایی، literal :3003 برای پچ نصب‌کننده، انجین‌های Prisma ویندوز+دبیان، بدون سیم‌لینک)
+- فیکس اپ اندروید: ApiClient.checkin/checkout پارامتر clientAt + isoTime()؛ CheckinSync ارسال item.createdAt — پروتکل backward-compatible
+- وصلهٔ سورس پنل در مخزن: patches/panel-src-phase1-task1.patch (مبنای bd9c80b؛ git apply --check سبز) تا rebuildهای آینده فیکس‌ها را گم نکنند
+- تست جدید: audit-tests/test-functional-core.sh — ۳۴ چک عملکردی (auth اپ، نشت هش، حذف کارمند، idempotency، clientAt در/خارج پنجره + راستی‌آزمایی مستقیم Visit در SQLite، اعتبارسنجی checkout، جداسازی داده، rate-limit اپ) + افزودن به run-all.sh (الان ۵ سوئیت)
+- نتیجهٔ نهایی: **ALL-SUITES-PASS — 18 + 15 + 15 + 46 + 34 = ۱۲۸ چک سبز**
+- امنیت: اسکن اسرار در فایل‌های tracked → پاک؛ هیچ پکیج آسیب‌پذیر شناخته‌شده‌ای در باندل runtime ارسالی نماند؛ یافته‌های باز (G-1 تا G-6) با دلیل در PHASE1-TASK1-REPORT-fa.md ثبت شد
+- محدودیت‌های صادقانه: تست روی دستگاه اندروید واقعی و ویندوز واقعی در این محیط ممکن نبود (سطح HTTP سرور برای clientAt کامل تأیید شد؛ سمت اپ فقط سورس)
+
+Stage Summary:
+- ۴ باگ تأییدشده رفع شد (بزرگ‌ترین: صحت زمان حضور و غیاب در سناریوی آفلاین — قلب محصول) + ارتقای امنیتی Next
+- گزارش کامل: PHASE1-TASK1-REPORT-fa.md — وضعیت کلی: READY برای تسک ۲
+- تسک پیشنهادی بعدی: چرخهٔ عمر نشست اپ + کنترل دسترسی مشتریان + UI مدیریت کارمند (G-1/G-2/G-3)
