@@ -13,7 +13,7 @@ rem  like "'MEDI_DIR' is not recognized as an internal or
 rem  external command"). All Persian messages are printed by
 rem  install.mjs / wizard.mjs (Node.js handles UTF-8 correctly).
 rem
-rem  v1.9.11: after the checks below, install.mjs shows a MENU:
+rem  v1.9.12: after the checks below, install.mjs shows a MENU:
 rem    Q1 - where to install: 1) this computer  2) Linux VPS
 rem                            3) Cloudflare (public HTTPS address)
 rem    Q2 - how: 1) browser installer (GUI - opens automatically)
@@ -50,7 +50,7 @@ if not exist "%~dp0install.mjs" (
     exit /b 1
 )
 
-rem -- pre-flight 2 (v1.9.11): the browser installer + server manager files
+rem -- pre-flight 2 (v1.9.12): the browser installer + server manager files
 if not exist "%~dp0wizard.mjs" (
     echo  [X] wizard.mjs not found next to install.bat
     echo      The package is incomplete - extract the FULL zip again.

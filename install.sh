@@ -2,7 +2,7 @@
 # MedPad Offline Installer v1.9.12 - Linux bootstrap
 # 100% offline: extracts the bundled Node.js tarball when no system node exists,
 # then runs the main offline pipeline (no npm, no build, no downloads).
-# v1.9.11: install.mjs shows a MENU - target (this machine / Linux VPS /
+# v1.9.12: install.mjs shows a MENU - target (this machine / Linux VPS /
 # Cloudflare) and interface (browser installer GUI or CLI wizard).
 set -u
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

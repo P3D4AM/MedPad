@@ -31,6 +31,15 @@
  *    (db/custom.db is git-ignored), the empty template at db/template.db is
  *    used, so installing straight from a git clone works; a package with
  *    neither file stops with a clear "incomplete package" error.
+ *  - test.2/test.3 FIXES (the two owner-reported crashes of test.1):
+ *    EPERM on the database copy -> copyFileRobust() (10 retries with growing
+ *    backoff, stream + cmd-copy fallbacks, stale sqlite sidecar cleanup,
+ *    broken-db quarantine). Windows ACL hardening now runs LAST (after
+ *    Step 7), grants via the ACCOUNT SID, verifies access with real file
+ *    probes and auto-reverts with icacls /reset - it can never break the
+ *    install again. The admin password travels via ENV (never argv), the
+ *    DB finalize retries 3x and fails LOUD, and the browser wizard shows a
+ *    global JS-error banner + captures [RANDOM-ADMIN-PASS].
  *
  * v1.9.11 changes (user request: bring back the interactive installer):
  *  - INTERACTIVE MENU on launch (no args): the CLI now asks WHERE to install
@@ -94,7 +103,7 @@ import http from 'http'
 import { randomBytes } from 'crypto'
 import {
   chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, rmSync, cpSync, readdirSync,
-  renameSync, statSync,
+  renameSync, statSync, copyFile, openSync, closeSync,
 } from 'fs'
 import path from 'path'
 import url from 'url'
@@ -253,6 +262,129 @@ async function cpRobust(src, dest, label = 'copy') {
       } else throw e
     }
   }
+}
+
+// ── v1.9.12-test.2: EPERM-proof single-file copy ───────────────────────
+// Root cause of the v1.9.12-test.1 Step-3 crash (owner report): antivirus /
+// Windows Defender / the search indexer hold a short exclusive handle on a
+// FRESHLY WRITTEN .db file, so an immediate fs.copyFile(template ->
+// custom.db) died with EPERM. Such locks are transient (usually < 2s), so we
+// retry with growing backoff, then fall back to a read/write stream copy,
+// then to cmd copy. Every successful path is size-verified.
+const copyFileP = (s, d) => new Promise((res, rej) => copyFile(s, d, (e) => (e ? rej(e) : res())))
+async function copyFileRobust(src, dest, label = 'file copy') {
+  // 0) a stale destination (from a crashed run) can itself be the lock:
+  //    remove it with Node's built-in retries first.
+  for (let i = 0; i < 5 && existsSync(dest); i++) {
+    try { rmSync(dest, { force: true, maxRetries: 5, retryDelay: 250 }) } catch (e) { log(`stale dest rm: ${e.code || e.message}`) }
+    if (existsSync(dest)) await sleep(400)
+  }
+  const delays = [300, 600, 1000, 1500, 2000, 2000, 3000, 3000, 4000, 5000]
+  let lastErr = null
+  for (let attempt = 0; attempt < delays.length; attempt++) {
+    try {
+      await copyFileP(src, dest)
+      if (statSync(dest).size === statSync(src).size) return // verified copy
+      throw new Error('size mismatch after copy')
+    } catch (e) {
+      lastErr = e
+      log(`copyFile ${src} -> ${dest} attempt ${attempt + 1}: ${e.code || e.message}`)
+      if (attempt < delays.length - 1) {
+        info(`[..] ${label} is locked by another program (antivirus scan?) - retrying (${attempt + 1}/${delays.length})...`)
+        await sleep(delays[attempt])
+      }
+    }
+  }
+  // fallback 1: stream through Node (different Windows code path)
+  try {
+    const buf = readFileSync(src)
+    writeFileSync(dest, buf)
+    if (statSync(dest).size === buf.length) return
+    throw new Error('size mismatch after stream copy')
+  } catch (e) { lastErr = e; log(`stream fallback failed: ${e.code || e.message}`) }
+  // fallback 2 (win32): let cmd.exe try
+  if (process.platform === 'win32') {
+    const r = spawnSync('cmd.exe', ['/d', '/s', '/c', `copy /y "${src}" "${dest}"`], { encoding: 'utf8', timeout: 30000 })
+    try { if ((r.status === 0) && existsSync(dest) && statSync(dest).size === statSync(src).size) return } catch { /* fallthrough */ }
+    log(`cmd copy fallback: status=${r.status}`)
+  }
+  throw lastErr
+}
+
+// ── v1.9.12-test.2: SAFE Windows ACL hardening ─────────────────────────
+// Restricts panel/.env and panel/db to the CURRENT user. v1.9.12-test.1
+// did this with a name-based grant BEFORE the database was created and a
+// mismatched/mangled ACL made the very next file operation die with EPERM.
+// This rewrite: (a) runs LAST, after every file operation is finished,
+// (b) grants via the ACCOUNT SID (*S-1-5-...) - immune to username,
+//     localization and Microsoft-account quirks,
+// (c) VERIFIES access with real file operations afterwards,
+// (d) auto-reverts with "icacls /reset" if verification fails,
+// (e) never, ever fails the install (warn-only).
+function winUserSid() {
+  try {
+    const r = spawnSync('whoami', ['/user', '/fo', 'csv', '/nh'], { encoding: 'utf8', timeout: 10000 })
+    const m = String(r.stdout || '').match(/(S-1-5-\d(?:-\d+)+)/)
+    if (m) return m[1]
+  } catch { /* fallthrough */ }
+  return null
+}
+
+function icaclsRun(args) {
+  try {
+    const r = spawnSync('icacls', args, { encoding: 'utf8', timeout: 20000 })
+    return { code: r.status, out: String(r.stdout || '') + String(r.stderr || '') }
+  } catch (e) {
+    return { code: -1, out: String(e.message) }
+  }
+}
+
+/** real access verification - never trust an icacls exit code alone */
+function aclVerify(target, isDir) {
+  try {
+    if (isDir) {
+      const probe = path.join(target, `.acl-probe-${Date.now()}`)
+      writeFileSync(probe, 'ok')
+      readFileSync(probe, 'utf8')
+      rmSync(probe, { force: true, maxRetries: 3, retryDelay: 200 })
+      return !existsSync(probe)
+    }
+    const fd = openSync(target, 'r+') // needs read AND write rights
+    closeSync(fd)
+    return true
+  } catch (e) {
+    log(`acl verify failed for ${target}: ${e.code || e.message}`)
+    return false
+  }
+}
+
+async function restrictAcl(label, target, isDir) {
+  const sid = winUserSid()
+  if (!sid) {
+    warn(`ACL: could not determine your Windows user SID - ${label} keeps its default permissions (non-fatal)`)
+    return false
+  }
+  const grant = isDir ? `*${sid}:(OI)(CI)(F)` : `*${sid}:(F)`
+  const r = icaclsRun([target, '/inheritance:r', '/grant:r', grant])
+  if (r.code !== 0) {
+    log(`icacls restrict ${label} -> ${r.out}`)
+    warn(`ACL: could not restrict ${label} - it keeps its default permissions (non-fatal)`)
+    return false
+  }
+  await sleep(400) // let the new ACL settle before verifying
+  if (!aclVerify(target, isDir)) {
+    warn(`ACL: restricting ${label} would break access - restoring inherited permissions`)
+    const rr = icaclsRun([target, '/reset'])
+    await sleep(400)
+    if (!aclVerify(target, isDir)) {
+      warn(`ACL: ${label} is still not accessible - right-click it > Properties > Security > Advanced > Reset permissions`)
+      return false
+    }
+    log(`icacls /reset recovered ${label} (exit ${rr.code})`)
+    return false
+  }
+  ok(`${label}: Windows ACL restricted to the current user`)
+  return true
 }
 
 /** resolve the node executable — system node or the bundled runtime (Linux) */
@@ -577,18 +709,13 @@ export function passwordProblem(pw, username) {
 }
 
 /** v1.9.12: lock a sensitive file/dir down to the owner. Linux: chmod
- *  600/700 (fatal when it fails — fail secure). Windows: icacls best-effort
- *  (user-profile defaults are already restrictive; failure = warning). */
+ *  600/700 (fatal when it fails — fail secure). Windows: DEFERRED — the ACL
+ *  hardening runs at the very END of the install via restrictAcl() (after
+ *  Step 7). Doing it here with a username-based grant, BEFORE the database
+ *  copy/seed, was the root cause of the EPERM crash of v1.9.12-test.1. */
 async function lockDown(target, kind, label) {
   if (process.platform === 'win32' || process.env.MEDPAD_SIM_WIN === '1') {
-    // best-effort ACL: remove inheritance, keep the current user only
-    const user = process.env.USERNAME || process.env.USERDOMAIN + '\\' + process.env.USER || 'Users'
-    try {
-      const r = spawnSync('icacls', [target, '/inheritance:r', '/grant:r', `${user}:F`], { encoding: 'utf8', timeout: 10000 })
-      if (r.status !== 0) warn(`could not tighten Windows permissions on ${label} (defaults kept) - ${String(r.stderr || '').trim().slice(0, 80)}`)
-      else ok(`${label}: Windows ACL restricted to the current user`)
-    } catch { warn(`could not apply icacls on ${label} (defaults kept)`) }
-    return
+    return // Windows: see restrictAcl() after Step 7 (v1.9.12-test.2 fix)
   }
   try {
     chmodSync(target, kind === 'dir' ? 0o700 : 0o600)
@@ -933,45 +1060,108 @@ async function main() {
   // yet — e.g. installing straight from a fresh `git clone` — start from the
   // empty template instead of letting the seed fail with a confusing
   // "table does not exist" Prisma error later.
+  //
+  // v1.9.12-test.2 FIX (EPERM crash of test.1, owner report): the copy is
+  // now wrapped in copyFileRobust() — antivirus / Windows Defender / the
+  // search indexer hold a short exclusive handle on freshly written .db
+  // files, so the previous plain cpSync died with EPERM at Step 3. A 0-byte
+  // / tiny custom.db (leftover of a crashed run) is quarantined aside
+  // (non-destructive), and stale sqlite sidecars are removed first so a
+  // crashed run can never poison the fresh database.
+  if (existsSync(path.join(panelDir, 'db', 'custom.db'))) {
+    let dbSize = 0
+    try { dbSize = statSync(path.join(panelDir, 'db', 'custom.db')).size } catch { dbSize = 0 }
+    if (dbSize < 8192) {
+      const corruptBak = path.join(panelDir, 'db', `custom.db.broken-${Date.now()}`)
+      try {
+        renameSync(path.join(panelDir, 'db', 'custom.db'), corruptBak)
+        warn('An empty/broken database file was found (leftover from an interrupted install) - it was renamed to ' + path.basename(corruptBak))
+        log(`renamed broken db to ${path.basename(corruptBak)}`)
+      } catch (e) {
+        await die(`The old database file is broken AND locked (${e.code || e.message}). Close all MedPad/node.js windows and run install again.`)
+      }
+    }
+  }
   if (!existsSync(path.join(panelDir, 'db', 'custom.db'))) {
     const tplSrc = [path.join(panelDir, 'db', 'template.db'), path.join(srcPanel, 'db', 'template.db')].find(existsSync)
-    if (tplSrc) {
-      cpSync(tplSrc, path.join(panelDir, 'db', 'custom.db'))
-      await lockDown(path.join(panelDir, 'db', 'custom.db'), 'file', 'panel/db/custom.db')
-      ok('Empty database template installed (fresh start)')
-    } else {
+    if (!tplSrc) {
       await die('The offline package is incomplete: no database and no empty template found (expected app/panel/db/template.db). Nothing has been changed.')
     }
+    // stale sqlite sidecar files would poison the fresh database
+    for (const junk of ['-journal', '-wal', '-shm'].map((s) => path.join(panelDir, 'db', `custom.db${s}`))) {
+      try { rmSync(junk, { force: true, maxRetries: 5, retryDelay: 200 }) } catch (e) { log(`junk rm ${path.basename(junk)}: ${e.code || e.message}`) }
+    }
+    try {
+      await copyFileRobust(tplSrc, path.join(panelDir, 'db', 'custom.db'), 'database template')
+    } catch (e) {
+      await die([
+        `Creating the database failed: ${e.code || e.message}`,
+        '  This is almost always a temporary antivirus lock:',
+        '    1) Add an exclusion for this folder in your antivirus (Windows Security > Virus & threat protection > Manage settings > Exclusions)',
+        '    2) Or just run install.bat again - the copy retries 10 times and usually succeeds on the 2nd run.',
+      ].join('\n'))
+    }
+    await lockDown(path.join(panelDir, 'db', 'custom.db'), 'file', 'panel/db/custom.db')
+    ok('Empty database template installed (fresh start)')
   }
   info('Config file (.env) is ready')
 
   // seed — uses the VENDORED prisma client + bcryptjs inside .next/standalone
   // (offline). v1.9.12: bcrypt hashes (bcrypt$...); sample employees/customers
   // only when the user explicitly opted in.
+  // v1.9.12-test.2 hardening: the admin password travels via ENV (never on
+  // the node command line, where it would be visible in process listings),
+  // the finalize step retries 3 times with backoff, and a failure is LOUD —
+  // a silent seed failure on a fresh install would leave the panel with NO
+  // usable admin login and no explanation.
   const standaloneDir = path.join(panelDir, '.next', 'standalone')
-  const seed = spawnSync(nodeExe, ['--input-type=module', '-e', `
-    import bcrypt from 'bcryptjs';
-    import { PrismaClient } from '@prisma/client';
-    const db = new PrismaClient();
-    const hashPw = (s) => 'bcrypt$' + bcrypt.hashSync(s, 10);
-    const cfg = { adminUser: ${JSON.stringify(adminUser)}, panelVersion: '${INSTALLER_VER}', apkVersion: '1.9.1' };
-    ${adminPass ? `cfg.adminPassHash = hashPw(${JSON.stringify(adminPass)});` : ''}
-    for (const [key, value] of Object.entries(cfg)) await db.config.upsert({ where: { key }, update: { value }, create: { key, value } });
-    const count = await db.employee.count();
-    if (count === 0 && ${sampleData ? 'true' : 'false'}) {
-      const names = [['ali','علی محمدی'],['sara','سارا احمدی'],['mahla','مهلا کریمی']];
-      const emp = [];
-      for (const [username, name] of names) emp.push(await db.employee.create({ data: { username, name, password: hashPw('1234') } }));
-      const cus = [];
-      const cs = [['دکتر رضایی — کلینیک سلامت',35.7448,51.3752],['دکتر محمدی — داروخانه نور',35.7010,51.3910],['دکتر کریمی — مطب شمال',35.7166,51.4160]];
-      for (const [name, lat, lng] of cs) cus.push(await db.customer.create({ data: { name, lat, lng, address: 'تهران' } }));
-      for (let i = 0; i < emp.length; i++) { await db.assignment.create({ data: { employeeId: emp[i].id, customerId: cus[i].id } }); await db.assignment.create({ data: { employeeId: emp[i].id, customerId: cus[(i+1)%3].id } }); }
-    }
-    await db.$disconnect();
-    console.log('seed-ok');
-  `], { cwd: standaloneDir, stdio: 'pipe', encoding: 'utf8', env: { ...process.env, DATABASE_URL: `file:${dbFile}` } })
+  let seed = null
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    seed = spawnSync(nodeExe, ['--input-type=module', '-e', `
+      import bcrypt from 'bcryptjs';
+      import { PrismaClient } from '@prisma/client';
+      const db = new PrismaClient();
+      const hashPw = (s) => 'bcrypt$' + bcrypt.hashSync(s, 10);
+      const cfg = { adminUser: process.env.MEDPAD_ADMIN_USER, panelVersion: process.env.MEDPAD_PANEL_VERSION, apkVersion: '1.9.1' };
+      if (process.env.MEDPAD_ADMIN_PASS) cfg.adminPassHash = hashPw(process.env.MEDPAD_ADMIN_PASS);
+      for (const [key, value] of Object.entries(cfg)) await db.config.upsert({ where: { key }, update: { value }, create: { key, value } });
+      const count = await db.employee.count();
+      if (count === 0 && process.env.MEDPAD_SAMPLE_DATA === '1') {
+        const names = [['ali','علی محمدی'],['sara','سارا احمدی'],['mahla','مهلا کریمی']];
+        const emp = [];
+        for (const [username, name] of names) emp.push(await db.employee.create({ data: { username, name, password: hashPw('1234') } }));
+        const cus = [];
+        const cs = [['دکتر رضایی — کلینیک سلامت',35.7448,51.3752],['دکتر محمدی — داروخانه نور',35.7010,51.3910],['دکتر کریمی — مطب شمال',35.7166,51.4160]];
+        for (const [name, lat, lng] of cs) cus.push(await db.customer.create({ data: { name, lat, lng, address: 'تهران' } }));
+        for (let i = 0; i < emp.length; i++) { await db.assignment.create({ data: { employeeId: emp[i].id, customerId: cus[i].id } }); await db.assignment.create({ data: { employeeId: emp[i].id, customerId: cus[(i+1)%3].id } }); }
+      }
+      await db.$disconnect();
+      console.log('seed-ok');
+    `], { cwd: standaloneDir, stdio: 'pipe', encoding: 'utf8', env: {
+      ...process.env,
+      DATABASE_URL: `file:${dbFile}`,
+      MEDPAD_ADMIN_USER: String(adminUser),
+      MEDPAD_PANEL_VERSION: String(INSTALLER_VER),
+      ...(adminPass ? { MEDPAD_ADMIN_PASS: adminPass } : {}),
+      ...(sampleData ? { MEDPAD_SAMPLE_DATA: '1' } : {}),
+    } })
+    if (seed.stdout?.includes('seed-ok')) break
+    log(`seed attempt ${attempt}/3 failed: ${(seed.stderr || seed.stdout || 'no output').slice(-200)}`)
+    if (attempt < 3) await sleep(1200 * attempt)
+  }
   if (seed.stdout?.includes('seed-ok')) ok(`Admin account ready (user: ${adminUser}${sampleData ? ' + sample data' : ''})`)
-  else warn('seed: ' + (seed.stderr || seed.stdout || '').slice(-300))
+  else {
+    warn('')
+    warn('  =====================================================')
+    warn('  [!] THE ADMIN ACCOUNT COULD NOT BE WRITTEN TO THE DB')
+    warn('  =====================================================')
+    warn('  The panel may not accept any login until this succeeds.')
+    warn('  FIX: close all MedPad windows and simply run install.bat')
+    warn('  again (your data is preserved - only the admin account')
+    warn('  is re-applied on the next run).')
+    warn('  Technical detail: ' + (seed.stderr || seed.stdout || 'no output').slice(-300))
+    log('seed failed after 3 attempts')
+  }
   // v1.9.12: a freshly generated random password is shown EXACTLY ONCE here
   // (console only — never logged, never written to any file).
   if (generatedPassword && seed.stdout?.includes('seed-ok')) {
@@ -982,6 +1172,9 @@ async function main() {
     info('  (shown only this once - it is NOT stored anywhere')
     info('   in plain text; reset it with --admin-pass if lost)')
     info('  ==================================================')
+    // v1.9.12-test.2: machine-readable line for the browser installer
+    // (installer.html parses it and shows the password in the final summary).
+    console.log(`[RANDOM-ADMIN-PASS] ${adminPass}`)
   }
 
   // ═══ Step 4 — verify pre-built app + realtime port patch ══
@@ -1342,6 +1535,22 @@ WantedBy=multi-user.target
   if (await portBusy(panelPort)) warn(`Port ${panelPort} is already in use - close the previous start-server first`)
   if (panelPort === rtPort) warn(`Panel and realtime use the SAME port ${panelPort} - change one of them!`)
   ok('All offline components verified')
+
+  // ═══ v1.9.12-test.2: Windows ACL hardening (LAST step, best-effort) ═══
+  // Runs only on real Windows, AFTER every file operation has finished,
+  // using the account SID. Verified with real file access probes;
+  // auto-reverts with icacls /reset if the restriction would break
+  // anything. Never fatal — this can no longer kill an install.
+  if (process.platform === 'win32') {
+    info('Hardening file permissions (Windows ACL)...')
+    try {
+      await restrictAcl('panel/.env', envPath, false)
+      await restrictAcl('panel/db', path.join(panelDir, 'db'), true)
+    } catch (e) {
+      warn(`ACL hardening skipped: ${e.code || e.message} (non-fatal)`)
+      log(`acl hardening exception: ${e.stack || e.message}`)
+    }
+  }
 
   const mins = ((Date.now() - t0) / 60000).toFixed(1)
   console.log(`

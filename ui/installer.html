@@ -65,10 +65,16 @@ details.tokenhelp ol{padding-right:18px;font-size:12px;color:#57534e;line-height
 .spin{display:inline-block;width:14px;height:14px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:sp 0.8s linear infinite;vertical-align:-2px;margin-inline-end:6px}
 @keyframes sp{to{transform:rotate(360deg)}}
 .hide{display:none!important}
+/* v1.9.12-test.2: global JS-error banner — a script error can never again
+   silently kill the page (the "buttons do nothing" bug class). */
+#jsErr{display:none;background:#fee2e2;border:2px solid #ef4444;color:#7f1d1d;border-radius:12px;padding:12px 14px;font-size:13px;line-height:2;margin-bottom:14px;direction:rtl}
+#jsErr b{display:block;margin-bottom:4px}
+#jsErr code{direction:ltr;unicode-bidi:embed;background:#fecaca;padding:1px 6px;border-radius:6px;font-size:11.5px}
 </style>
 </head>
 <body>
 <div class="wrap">
+  <div id="jsErr"><b>⚠ خطای داخلی صفحه‌ی نصب‌کننده</b><span id="jsErrMsg"></span> — صفحه همچنان کار می‌کند ولی اگر دکمه‌ها پاسخ ندادند، پنجره را ببندید و <b>install.bat</b> را دوباره اجرا کنید (گزینه‌ی نصب در همین کنسول هم موجود است: گزینه‌ی ۲).</div>
   <h1>
     <div class="logo">M</div>
     نصب‌کننده MedPad
@@ -274,6 +280,21 @@ function cfType() {
   return 'quick'
 }
 
+// ── v1.9.12-test.2: a JS error can never again silently kill the page ──
+// (the "buttons do nothing" bug class) — it is shown in a loud banner.
+window.addEventListener('error', (e) => {
+  try {
+    $('#jsErrMsg').innerHTML = '<code>' + String(e.message || 'unknown error').replace(/[<>]/g, '') + '</code>'
+    $('#jsErr').style.display = 'block'
+  } catch (e2) { /* last resort */ console.error(e) }
+})
+window.addEventListener('unhandledrejection', (e) => {
+  try {
+    $('#jsErrMsg').innerHTML = '<code>' + String((e.reason && e.reason.message) || e.reason || 'promise error').replace(/[<>]/g, '') + '</code>'
+    $('#jsErr').style.display = 'block'
+  } catch (e2) { /* ignore */ }
+})
+
 // ── load status, adapt UI ──
 fetch('/api/status').then((r) => r.json()).then((s) => {
   STATUS = s
@@ -295,7 +316,13 @@ fetch('/api/status').then((r) => r.json()).then((s) => {
   }
   $('#recLocal').style.display = s.isWindows ? '' : 'none'
   refresh()
-}).catch(() => { $('#verBadge').textContent = 'v1.9.12' })
+}).catch(() => {
+  // v1.9.12-test.2: a failed /api/status is now LOUD — the page previously
+  // kept looking normal with dead buttons when the wizard backend hiccuped.
+  $('#verBadge').textContent = 'v1.9.12'
+  $('#jsErrMsg').innerHTML = 'اطلاعات وضعیت (api/status) دریافت نشد — اگر دکمه‌ها کار نکردند، نصب‌کننده‌ی کنسولی (install.bat گزینه‌ی ۲) را استفاده کنید.'
+  $('#jsErr').style.display = 'block'
+})
 
 function refresh() {
   const t = currentTarget()
@@ -411,12 +438,21 @@ $('#goInstall').addEventListener('click', async () => {
     if (success) {
       $('#finalUrl').textContent = 'http://localhost:' + panelPort
       $('#finalUser').textContent = adminUser
-      $('#finalPass').textContent = adminPass ? adminPass : (STATUS && STATUS.existingInstall ? 'رمز قبلی خودتان' : 'رمز تصادفی تولیدشده — در لاگ نصب بالا (SAVE THIS NOW) ببینید و ذخیره کنید')
+      // v1.9.12-test.2: capture the auto-generated random admin password
+      // from the install stream ([RANDOM-ADMIN-PASS] line) so the user does
+      // not have to scroll the raw log to find it.
+      const rpm = text.match(/\[RANDOM-ADMIN-PASS\]\s+(\S+)/)
+      const randomPass = rpm ? rpm[1] : null
+      $('#finalPass').textContent = randomPass
+        ? randomPass + '  (خودکار ساخته شد — یادداشتش کنید!)'
+        : adminPass
+          ? adminPass
+          : (STATUS && STATUS.existingInstall ? 'رمز قبلی خودتان' : '—')
       showPage(4)
       $('#doneBox').style.display = 'block'
       $('#failBox').style.display = 'none'
     } else {
-      showFail('نصب با خطا متوقف شد — لاگ بالا را بررسی کنید. اگر مشکل ادامه داشت install.log را برای پشتیبانی بفرستید.')
+      showFail('نصب با خطا متوقف شد — لاگ بالا را بررسی کنید. اگر خطای EPERM یا قفل‌بودن فایل دیدید، آنتی‌ویروس را موقتاً غیرفعال کنید یا پوشه را در استثناهای آنتی‌ویروس قرار دهید و دوباره تلاش کنید (نصب‌کننده ۱۰ بار تلاش می‌کند). مشکل ادامه داشت؟ install.log را برای پشتیبانی بفرستید.')
     }
   } catch (e) {
     showFail('ارتباط با نصب‌کننده برقرار نشد: ' + e.message)

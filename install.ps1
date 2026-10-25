@@ -1,7 +1,7 @@
 # MedPad Offline Installer v1.9.12 - PowerShell bootstrap (alternative entry)
 # install.bat is the primary entry (self-elevation + bundled Node.js MSI install);
 # this script runs the same node pipeline when invoked directly.
-# v1.9.11: install.mjs shows a MENU (target: this PC / Linux VPS / Cloudflare,
+# v1.9.12: install.mjs shows a MENU (target: this PC / Linux VPS / Cloudflare,
 # interface: browser installer GUI - opens automatically - or CLI wizard).
 # NOTE: ASCII-only on purpose - Windows PowerShell 5.1 misparses UTF-8 .ps1
 # files saved without BOM (same root cause as the v1.9.5 install.bat crash).
