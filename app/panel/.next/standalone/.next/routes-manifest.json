@@ -62,6 +62,22 @@
       "namedRegex": "^/api/employees/(?<nxtPid>[^/]+?)(?:/)?$"
     },
     {
+      "page": "/api/employees/[id]/deactivate",
+      "regex": "^/api/employees/([^/]+?)/deactivate(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/employees/(?<nxtPid>[^/]+?)/deactivate(?:/)?$"
+    },
+    {
+      "page": "/api/employees/[id]/reactivate",
+      "regex": "^/api/employees/([^/]+?)/reactivate(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/employees/(?<nxtPid>[^/]+?)/reactivate(?:/)?$"
+    },
+    {
       "page": "/api/employees/[id]/tokens",
       "regex": "^/api/employees/([^/]+?)/tokens(?:/)?$",
       "routeKeys": {
@@ -188,6 +204,12 @@
       "regex": "^/api/assignments(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api/assignments(?:/)?$"
+    },
+    {
+      "page": "/api/audit-log",
+      "regex": "^/api/audit\\-log(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/audit\\-log(?:/)?$"
     },
     {
       "page": "/api/checkins",

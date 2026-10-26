@@ -447,6 +447,115 @@ chk "G5 admin re-login after logouts works" "grep -q '\"ok\":true' $W/adm-re.jso
 CODE=$(curl -s -o /dev/null -w '%{http_code}' -b $W/cj "$BASE/api/stats")
 chk "G5 re-authenticated admin request -> 200" "[ \"$CODE\" = 200 ]"
 
+# ═════════════════════════════════════════════════════════════
+# G-3 — employee lifecycle (edit/deactivate/reactivate/reset + audit)
+# ═════════════════════════════════════════════════════════════
+
+# setup: dave + customer + assignment + token + one checkin (history!)
+curl -s -b $W/cj -X POST $BASE/api/employees -H 'content-type: application/json' \
+  -d '{"username":"g3_dave","password":"davepass1","name":"G3 Dave"}' -o $W/dave.json
+EMP_D=$(python3 -c "import json;print(json.load(open('$W/dave.json'))['employee']['id'])")
+curl -s -b $W/cj -X POST $BASE/api/customers -H 'content-type: application/json' \
+  -d '{"name":"G3 Dave Clinic","lat":35.80,"lng":51.50}' -o $W/dc.json
+CUS_D=$(python3 -c "import json;print(json.load(open('$W/dc.json'))['customer']['id'])")
+curl -s -b $W/cj -X POST $BASE/api/assignments -H 'content-type: application/json' \
+  -d "{\"employeeId\":\"$EMP_D\",\"customerId\":\"$CUS_D\"}" -o /dev/null
+curl -s -X POST $BASE/api/app/login -H 'content-type: application/json' \
+  -d '{"username":"g3_dave","password":"davepass1"}' -o $W/dl.json
+TOK_D=$(python3 -c "import json;print(json.load(open('$W/dl.json'))['token'])")
+curl -s -X POST $BASE/api/app/checkin -H "X-Medpad-Token: $TOK_D" \
+  -F "customerId=$CUS_D" -F "note=g3 dave history checkin" -F "localId=g3-d-$RANDOM" \
+  -F "lat=35.8001" -F "lng=51.5001" -o /dev/null
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Medpad-Token: $TOK_D" "$BASE/api/app/config")
+chk "G3 dave token works pre-deactivation" "[ \"$CODE\" = 200 ]"
+
+# G3.1 edit (name/phone) — applied, hash never leaked, audited
+curl -s -b $W/cj -X PUT "$BASE/api/employees/$EMP_D" -H 'content-type: application/json' \
+  -d '{"name":"G3 Dave Renamed","phone":"09350000000"}' -o $W/dedit.json
+chk "G3 edit name/phone -> ok" "grep -q '\"ok\":true' $W/dedit.json"
+chk "G3 edit response has new name" "grep -q 'G3 Dave Renamed' $W/dedit.json"
+chk "G3 edit response leaks no hash" "! grep -qE '\"password\"|bcrypt\\$' $W/dedit.json"
+
+# G3.2 validation: empty name / short password -> 400
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -b $W/cj -X PUT "$BASE/api/employees/$EMP_D" \
+  -H 'content-type: application/json' -d '{"name":"  "}')
+chk "G3 edit empty name -> 400" "[ \"$CODE\" = 400 ]"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -b $W/cj -X PUT "$BASE/api/employees/$EMP_D" \
+  -H 'content-type: application/json' -d '{"password":"abc"}')
+chk "G3 edit short password -> 400" "[ \"$CODE\" = 400 ]"
+
+# G3.3 lifecycle endpoints require an admin session
+for EP in "PUT /api/employees/$EMP_D" "POST /api/employees/$EMP_D/deactivate" "POST /api/employees/$EMP_D/reactivate" "DELETE /api/employees/$EMP_D" "GET /api/audit-log"; do
+  METHOD=${EP%% *}; URL=${EP#* }
+  CODE=$(curl -s -o /dev/null -w '%{http_code}' -X $METHOD "$BASE$URL" \
+    -H 'content-type: application/json' -d '{}')
+  chk "G3 unauthorized $METHOD $URL -> 401" "[ \"$CODE\" = 401 ]"
+done
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/employees/$EMP_D/deactivate" \
+  -H "X-Medpad-Token: $TOK_A2")
+chk "G3 deactivate with employee token -> 401" "[ \"$CODE\" = 401 ]"
+
+# G3.4 deactivate: immediate access loss + token revocation
+curl -s -b $W/cj -X POST "$BASE/api/employees/$EMP_D/deactivate" -o $W/doff.json
+chk "G3 deactivate -> ok with revokedTokens" \
+  "python3 -c \"import json;d=json.load(open('$W/doff.json'));assert d['ok'] and d['revokedTokens']>=1\" 2>/dev/null"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Medpad-Token: $TOK_D" "$BASE/api/app/config")
+chk "G3 app request IMMEDIATELY 401 after deactivate" "[ \"$CODE\" = 401 ]"
+
+# G3.5 history preserved after deactivation
+curl -s -b $W/cj "$BASE/api/checkins" -o $W/ci-after.json
+chk "G3 check-in history preserved after deactivate" "grep -q 'g3 dave history checkin' $W/ci-after.json"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -b $W/cj -X DELETE "$BASE/api/employees/$EMP_D")
+chk "G3 delete WITH history still 409 (history protected)" "[ \"$CODE\" = 409 ]"
+
+# G3.6 reactivate: old token stays dead, new login works
+curl -s -b $W/cj -X POST "$BASE/api/employees/$EMP_D/reactivate" -o $W/don.json
+chk "G3 reactivate -> ok" "grep -q '\"ok\":true' $W/don.json"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Medpad-Token: $TOK_D" "$BASE/api/app/config")
+chk "G3 revoked token NOT restored by reactivation" "[ \"$CODE\" = 401 ]"
+curl -s -X POST $BASE/api/app/login -H 'content-type: application/json' \
+  -d '{"username":"g3_dave","password":"davepass1"}' -o $W/dl2.json
+TOK_D2=$(python3 -c "import json;print(json.load(open('$W/dl2.json'))['token'])" 2>/dev/null || echo "")
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Medpad-Token: $TOK_D2" "$BASE/api/app/config")
+chk "G3 fresh login after reactivation works" "[ \"$CODE\" = 200 ]"
+
+# G3.7 password reset: revokes tokens, old password dead, new works
+curl -s -b $W/cj -X PUT "$BASE/api/employees/$EMP_D" -H 'content-type: application/json' \
+  -d '{"password":"davenewpass9"}' -o $W/dreset.json
+chk "G3 password reset -> ok, no plaintext in response" \
+  "grep -q '\"ok\":true' $W/dreset.json && ! grep -q 'davenewpass9' $W/dreset.json"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Medpad-Token: $TOK_D2" "$BASE/api/app/config")
+chk "G3 tokens revoked by password reset" "[ \"$CODE\" = 401 ]"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST $BASE/api/app/login \
+  -H 'content-type: application/json' -d '{"username":"g3_dave","password":"davepass1"}')
+chk "G3 old password rejected after reset" "[ \"$CODE\" = 401 ]"
+curl -s -X POST $BASE/api/app/login -H 'content-type: application/json' \
+  -d '{"username":"g3_dave","password":"davenewpass9"}' -o $W/dl3.json
+chk "G3 new password login works" "grep -q '\"ok\":true' $W/dl3.json"
+
+# G3.8 idempotence guards: deactivating an inactive employee -> 409
+curl -s -b $W/cj -X POST "$BASE/api/employees/$EMP_D/deactivate" -o /dev/null # ensure inactive
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -b $W/cj -X POST "$BASE/api/employees/$EMP_D/deactivate")
+chk "G3 deactivate already-inactive -> 409" "[ \"$CODE\" = 409 ]"
+curl -s -b $W/cj -X POST "$BASE/api/employees/$EMP_D/reactivate" -o /dev/null
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -b $W/cj -X POST "$BASE/api/employees/$EMP_D/reactivate")
+chk "G3 reactivate already-active -> 409" "[ \"$CODE\" = 409 ]"
+
+# G3.9 audit trail: entries exist for the lifecycle actions, actor=admin,
+# and NEVER contain the plaintext password
+curl -s -b $W/cj "$BASE/api/audit-log?limit=100" -o $W/audit.json
+for ACTION in employee.create employee.update employee.deactivate employee.reactivate employee.password-reset; do
+  chk "G3 audit contains $ACTION" "grep -q '\"$ACTION\"' $W/audit.json"
+done
+chk "G3 audit actor is admin" "grep -q '\"actorId\":\"admin\"' $W/audit.json"
+chk "G3 audit NEVER contains the reset password" "! grep -q 'davenewpass9' $W/audit.json"
+chk "G3 audit NEVER contains bcrypt hashes" "! grep -q 'bcrypt\\$' $W/audit.json"
+chk "G3 audit has timestamps" "grep -q '\"createdAt\"' $W/audit.json"
+
+# G3.10 the admin account itself is untouched by employee lifecycle ops
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -b $W/cj "$BASE/api/stats")
+chk "G3 admin session unaffected (no self-lockout)" "[ \"$CODE\" = 200 ]"
+
 # ── teardown ─────────────────────────────────────────────────
 (cd $W/inst && node server-manager.mjs stop --quiet > /dev/null 2>&1)
 sleep 1
