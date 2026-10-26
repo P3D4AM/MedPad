@@ -12,7 +12,7 @@
 |---|---|
 | **GitHub Pre-release** | https://github.com/P3D4AM/MedPad/releases/tag/v1.9.13-dev.2 |
 | **دانلود ZIP پنل (ویندوز، نصب آفلاین)** | https://github.com/P3D4AM/MedPad/releases/download/v1.9.13-dev.2/MedPad-Web-Offline-v1.9.13-dev.2.zip |
-| **دانلود APK اندروید (توسعه‌ای)** | https://github.com/P3D4AM/MedPad/releases/download/v1.9.13-dev.2/MedPad-Android-DEV-1.9.13-dev.2.apk |
+| **دانلود APK اندروید (توسعه‌ای)** | https://github.com/P3D4AM/MedPad/releases/download/v1.9.13-dev.2/MedPad-Android-DEV-v1.9.13-dev.2.apk |
 | فایل هش‌ها | `SHA256SUMS.txt` و `SHA1SUMS.txt` (پیوست همان Release) |
 | commit مبنا | روی شاخهٔ `develop` (SHA در بخش ۷) — `main` دست‌نخورده (`8db3319`) |
 
@@ -128,7 +128,7 @@
 | فایل | اندازه | SHA-256 | SHA-1 |
 |---|---|---|---|
 | `MedPad-Web-Offline-v1.9.13-dev.2.zip` | 143,456,332 بایت (~137MB) | `69eaafac59cec829806f5d32aaf195aaf198a4dff0f36dd2ee4dcedda697014d` | `97f40114cc9e1f4639f75b16287b2c4f16782bc2` |
-| `MedPad-Android-DEV-1.9.13-dev.2.apk` | 7,900,781 بایت (~7.5MB) | `40a8602cd70290a48c89934fa287d719b7e00423ebed3e7ae33bfd61830be057` | `a849857fc9265530cda7c8f6099f061ed54b9523` |
+| `MedPad-Android-DEV-v1.9.13-dev.2.apk` | 7,900,781 بایت (~7.5MB) | `40a8602cd70290a48c89934fa287d719b7e00423ebed3e7ae33bfd61830be057` | `a849857fc9265530cda7c8f6099f061ed54b9523` |
 
 هر دو artifact با دانلود برگشتی از GitHub راستی‌آزمایی شدند (SHA-256 یکسان + `unzip -t` بدون خطا).
 
