@@ -127,8 +127,10 @@
 
 | فایل | اندازه | SHA-256 | SHA-1 |
 |---|---|---|---|
-| `MedPad-Web-Offline-v1.9.13-dev.2.zip` | — | در `SHA256SUMS.txt` پیوست Release | در `SHA1SUMS.txt` |
-| `MedPad-Android-DEV-1.9.13-dev.2.apk` | 7,900,781 بایت | همان‌جا | همان‌جا |
+| `MedPad-Web-Offline-v1.9.13-dev.2.zip` | 143,456,332 بایت (~137MB) | `69eaafac59cec829806f5d32aaf195aaf198a4dff0f36dd2ee4dcedda697014d` | `97f40114cc9e1f4639f75b16287b2c4f16782bc2` |
+| `MedPad-Android-DEV-1.9.13-dev.2.apk` | 7,900,781 بایت (~7.5MB) | `40a8602cd70290a48c89934fa287d719b7e00423ebed3e7ae33bfd61830be057` | `a849857fc9265530cda7c8f6099f061ed54b9523` |
+
+هر دو artifact با دانلود برگشتی از GitHub راستی‌آزمایی شدند (SHA-256 یکسان + `unzip -t` بدون خطا).
 
 (مقادیر نهایی هش در فایل‌های پیوست Release و بدنهٔ Release ثبت شده‌اند — نسخهٔ گزارش داخل ZIP قبل از محاسبهٔ هش بسته‌بندی می‌شود؛ محدودیت ترتیبی شناخته‌شدهٔ ریلیزهای قبلی.)
 
