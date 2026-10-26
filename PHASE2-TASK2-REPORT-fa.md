@@ -124,10 +124,10 @@ git archive --format=zip --prefix=MedPad-Web-Offline-v1.9.13-dev.1/ \
 
 | فایل | اندازه | SHA-256 | SHA-1 |
 |---|---|---|---|
-| `MedPad-Web-Offline-v1.9.13-dev.1.zip` | در Release | در `SHA256SUMS.txt` پیوست | در `SHA1SUMS.txt` پیوست |
-| `MedPad-Android-DEV-1.9.13-dev.1.apk` | 7,894,621 بایت | در `SHA256SUMS.txt` پیوست | در `SHA1SUMS.txt` پیوست |
+| `MedPad-Web-Offline-v1.9.13-dev.1.zip` | 143,362,445 بایت (~137MB) | `67440453fc31b801f79dd77468dbfc3496a519dddba023907896cf79819a872d` | `ab0f75a87551bcc2560332b21b81b4b138f8a897` |
+| `MedPad-Android-DEV-1.9.13-dev.1.apk` | 7,894,621 بایت (~7.5MB) | `83070b3a048e2a9e7364f7fadfae31795047c06dcecd39c7addc2fee493d9fb7` | `1518bc5524428f14b6598f88217f8f1b99cbb465` |
 
-(مقادیر دقیق در فایل‌های هش پیوستِ Release و در بدنهٔ Release درج شده‌اند؛ ZIP از commit واقعی push شده ساخته شده است.)
+هر دو artifact از commit واقعی `f3873c5` شاخهٔ `develop` ساخته شده‌اند (همان commit هدف tag ریلیز). فایل‌های `SHA256SUMS.txt` و `SHA1SUMS.txt` هم به Release پیوست شده‌اند. نسخهٔ گزارش داخل ZIP قبل از محاسبهٔ هش بسته‌بندی شده (محدودیت شناخته‌شدهٔ ترتیبی — همان رویهٔ ریلیزهای قبلی)؛ مقادیر معتبر همین‌جا، در فایل‌های هش پیوست و در بدنهٔ Release است.
 
 **محتوای ZIP:** نصب‌کننده‌های ویندوز/لینوکس (`install.bat/ps1/sh` + `install.mjs` + `wizard.mjs`)، پنل Next.js باندل‌شده با `node_modules` و انجین‌های Prisma (ویندوز+لینوکس)، سرویس realtime با `node_modules`، دیتابیس قالب خالی (`template.db` شامل جدول `PlannedVisit`)، بستهٔ Node.js برای نصب آفلاین (`offline/node-v24.21.0-x64.msi` + tar.xz لینوکس)، فونت‌های خودمیزبان، مستندات فارسی. **هیچ دیتابیس واقعی، `.env`، توکن، رمز یا keystoreای داخل بسته نیست.**
 
