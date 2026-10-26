@@ -20,6 +20,7 @@ import com.medpad.tracker.R
 import com.medpad.tracker.api.ApiClient
 import com.medpad.tracker.db.AppDatabase
 import com.medpad.tracker.db.Doctor
+import com.medpad.tracker.location.DeviceGps
 import com.medpad.tracker.sync.CheckinSync
 import com.medpad.tracker.sync.TrackerContext
 import com.medpad.tracker.voice.VoiceRecorder
@@ -117,8 +118,14 @@ class CheckinDialogFragment(private val onDone: () -> Unit) : DialogFragment() {
             scope.launch {
                 val ok = try {
                     withContext(Dispatchers.IO) {
-                        val loc = null // use customer coords server-side
-                        CheckinSync.enqueue("checkin", cus.id, edNote.text.toString(), voice, cus.lat, cus.lng)
+                        // G-6 (phase 1 / task 2): the REAL device GPS fix (with
+                        // accuracy), or NO location at all — the customer's
+                        // coordinates are never sent as the employee position.
+                        val fix = DeviceGps.snapshot()
+                        CheckinSync.enqueue(
+                            "checkin", cus.id, edNote.text.toString(), voice,
+                            fix?.lat, fix?.lng, fix?.accuracyM,
+                        )
                         CheckinSync.flush() >= 0
                     }
                 } catch (e: Exception) {

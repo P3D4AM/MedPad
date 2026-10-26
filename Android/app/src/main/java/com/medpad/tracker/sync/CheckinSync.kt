@@ -36,7 +36,7 @@ object CheckinSync {
 
     fun markSessionAlive() { sessionExpired = false }
 
-    suspend fun enqueue(kind: String, customerId: String?, note: String, voiceFile: File?, lat: Double?, lng: Double?): PendingCheckin {
+    suspend fun enqueue(kind: String, customerId: String?, note: String, voiceFile: File?, lat: Double?, lng: Double?, accuracyM: Double? = null): PendingCheckin {
         val db = AppDatabase.get(TrackerContext.app)
         val item = PendingCheckin(
             localId = UUID.randomUUID().toString(),
@@ -46,6 +46,7 @@ object CheckinSync {
             voicePath = voiceFile?.absolutePath,
             lat = lat,
             lng = lng,
+            accuracy = accuracyM,
         )
         val uid = db.pendingCheckinDao().insert(item)
         return item.copy(uid = uid)
@@ -97,12 +98,16 @@ object CheckinSync {
                     localId = item.localId,
                     voice = voice,
                     clientAt = item.createdAt, // v1.9.12 (phase 1): real event time
+                    accuracyM = item.accuracy,  // G-6 (phase 1 / task 2)
                 )
                 else -> ApiClient.checkout(
                     note = item.note,
                     localId = item.localId,
                     voice = voice,
                     clientAt = item.createdAt, // v1.9.12 (phase 1): real event time
+                    lat = item.lat,            // G-6 (phase 1 / task 2)
+                    lng = item.lng,
+                    accuracyM = item.accuracy,
                 )
             }
             if (resp.optBoolean("ok")) {

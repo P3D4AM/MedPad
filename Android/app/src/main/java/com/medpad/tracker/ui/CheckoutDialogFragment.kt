@@ -17,6 +17,7 @@ import androidx.fragment.app.DialogFragment
 import com.google.android.material.textfield.TextInputEditText
 import com.medpad.tracker.R
 import com.medpad.tracker.api.ApiClient
+import com.medpad.tracker.location.DeviceGps
 import com.medpad.tracker.sync.CheckinSync
 import com.medpad.tracker.sync.TrackerContext
 import com.medpad.tracker.voice.VoiceRecorder
@@ -91,7 +92,13 @@ class CheckoutDialogFragment(private val onDone: () -> Unit) : DialogFragment() 
             scope.launch {
                 val ok = try {
                     withContext(Dispatchers.IO) {
-                        CheckinSync.enqueue("checkout", null, note, voice, null, null)
+                        // G-6 (phase 1 / task 2): real device GPS fix (with
+                        // accuracy) or no location — never fabricated.
+                        val fix = DeviceGps.snapshot()
+                        CheckinSync.enqueue(
+                            "checkout", null, note, voice,
+                            fix?.lat, fix?.lng, fix?.accuracyM,
+                        )
                         CheckinSync.flush() >= 0
                     }
                 } catch (e: Exception) {

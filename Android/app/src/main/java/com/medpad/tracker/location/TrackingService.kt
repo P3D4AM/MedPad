@@ -25,6 +25,7 @@ import com.medpad.tracker.TrackerApp
 import com.medpad.tracker.api.ApiClient
 import com.medpad.tracker.db.AppDatabase
 import com.medpad.tracker.db.PendingLocation
+import com.medpad.tracker.location.DeviceGps
 import com.medpad.tracker.sync.AppNotifier
 import com.medpad.tracker.sync.CheckinSync
 import com.medpad.tracker.ui.MainActivity
@@ -111,6 +112,8 @@ class TrackingService : LifecycleService() {
         override fun onLocationResult(result: LocationResult) {
             val loc = result.lastLocation ?: return
             lastLocation = loc
+            // G-6 (phase 1 / task 2): publish the fix for the check-in dialogs
+            DeviceGps.update(loc)
             lifecycleScope.launch(Dispatchers.IO) {
                 val db = AppDatabase.get(applicationContext)
                 db.pendingLocationDao().insert(PendingLocation(lat = loc.latitude, lng = loc.longitude))

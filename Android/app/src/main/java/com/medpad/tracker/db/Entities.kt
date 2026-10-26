@@ -57,6 +57,10 @@ interface DoctorDao {
 /**
  * Offline queue entry — the heart of "data never gets lost".
  * v1.9.1: localId is a UUID used for server-side idempotency (anti double-submit).
+ * G-6 (phase 1 / task 2): accuracy = GPS accuracy in meters for the queued
+ * fix (null when the device reported none). lat/lng null = no location —
+ * the server then records the event as explicitly location-missing (the
+ * customer's coordinates are NEVER used as a substitute).
  */
 @Entity(tableName = "pending_checkins")
 data class PendingCheckin(
@@ -68,6 +72,7 @@ data class PendingCheckin(
     val voicePath: String? = null,     // local file path
     val lat: Double? = null,
     val lng: Double? = null,
+    val accuracy: Double? = null,      // G-6: GPS accuracy (meters)
     val createdAt: Long = System.currentTimeMillis(),
     val attempts: Int = 0,
     val lastError: String? = null,

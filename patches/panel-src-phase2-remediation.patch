@@ -1,10 +1,10 @@
-# Panel source patch — phase 1 / task 2 remediation (G-1..G-6)
+# Panel source patch — phase 1 / task 2 remediation (G-1..G-6) — FINAL
 # Applies at panel-src root:  patch -p1 < this.patch
 # Base: git commit bd9c80b (medpad-full-1.9/inst-stage/panel-src)
 #        WITH patches/panel-src-phase1-task1.patch already applied.
 # After applying: npm install (or npm ci && npm i next@16.4.3 --save-exact)
 #        then npx prisma generate && npm run build.
-# Contents (cumulative — grows with each remediation commit):
+# Contents:
 #   G-1  customer authorization: app/customers list returns only ASSIGNED
 #        customers; app PUT /api/app/customers/[id] and app check-in enforce
 #        server-side assignment (403 otherwise).
@@ -22,7 +22,12 @@
 #        files employee-denied (404) with an admin-only review listing
 #        (GET /api/admin/media-orphans); installer now preserves the RUNTIME
 #        uploads dir (panel/.next/standalone/uploads) across updates.
-#   (this file is regenerated per commit; see WORKLOG for per-commit state)
+#   G-6  GPS validation: src/lib/gps.ts (never substitute customer coords;
+#        impossible/over-tolerance accuracy discards the fix), Checkin
+#        accuracy/distanceM/outOfRadius/locationMissing columns, per-customer
+#        radius policy with explicit outOfRadius flag (strict 422 mode
+#        optional via gpsStrictRadius), gpsMaxAccuracyM tolerance, checkout
+#        same treatment, settings UI + CheckinsTab location badges.
 diff -ru a/package-lock.json b/package-lock.json
 --- orig/package-lock.json	2026-10-26 08:03:29.878780200 +0000
 +++ b/package-lock.json	2026-10-26 07:56:24.770452186 +0000
@@ -235,7 +240,7 @@ diff -ru a/package.json b/package.json
      "@tailwindcss/postcss": "^4",
 diff -ru a/prisma/schema.prisma b/prisma/schema.prisma
 --- orig/prisma/schema.prisma	2026-10-26 08:03:29.878780200 +0000
-+++ b/prisma/schema.prisma	2026-10-26 08:15:55.016112464 +0000
++++ b/prisma/schema.prisma	2026-10-26 08:25:10.043548815 +0000
 @@ -33,12 +33,19 @@
  }
  
@@ -261,7 +266,25 @@ diff -ru a/prisma/schema.prisma b/prisma/schema.prisma
  }
  
  model Customer {
-@@ -121,3 +128,19 @@
+@@ -83,6 +90,17 @@
+   lng        Float?
+   createdAt  DateTime  @default(now())
+ 
++  // phase 1 / task 2 (G-6) — GPS validation. lat/lng hold ONLY real device
++  // coordinates; when no trustworthy fix exists they are NULL and
++  // locationMissing=true (the customer's coordinates are NEVER substituted).
++  // accuracy = reported GPS accuracy in meters (null when unknown).
++  // distanceM = meters between the device and the customer at check-in.
++  // outOfRadius = distance exceeded the customer's configured radius.
++  accuracy        Float?
++  distanceM       Float?
++  outOfRadius     Boolean   @default(false)
++  locationMissing Boolean   @default(false)
++
+   visitStart Visit?  @relation("VisitCheckin")
+   visitEnd   Visit?  @relation("VisitCheckout")
+ }
+@@ -121,3 +139,19 @@
    key   String @id
    value String
  }
@@ -285,8 +308,50 @@ Only in b/src/app/api/admin: media-orphans
 Only in b/src/app/api/admin: settings
 diff -ru a/src/app/api/app/checkin/route.ts b/src/app/api/app/checkin/route.ts
 --- orig/src/app/api/app/checkin/route.ts	2026-10-26 08:03:29.879780210 +0000
-+++ b/src/app/api/app/checkin/route.ts	2026-10-26 07:57:28.711078479 +0000
-@@ -47,6 +47,18 @@
++++ b/src/app/api/app/checkin/route.ts	2026-10-26 08:26:02.512081238 +0000
+@@ -4,7 +4,9 @@
+ import { db } from '@/lib/db'
+ import { appEmployee } from '@/lib/auth'
+ import { VOICE_DIR, ensureDirs } from '@/lib/media'
+-import { isValidLatLng } from '@/lib/geo'
++import { distanceMeters } from '@/lib/geo'
++import { resolveGpsLocation } from '@/lib/gps'
++import { getAdminSettings } from '@/lib/settings'
+ import { emitEvent } from '@/lib/emit'
+ import { resolveEventTime } from '@/lib/client-time'
+ 
+@@ -13,12 +15,22 @@
+ /**
+  * App check-in (multipart/form-data):
+  *   token, customerId, note, lat, lng, localId, voice? (audio file),
++ *   accuracy? (GPS accuracy in meters),
+  *   clientAt? (ISO 8601 event time from the app's offline queue — see
+  *   lib/client-time.ts; absent on old app versions → server clock)
+  * Idempotency:
+  *   1) localId unique — replay returns the original row (201→200)
+  *   2) 90s dedup window per employee+customer
+  * Closes any previous open visit for the same employee.
++ *
++ * G-6 (phase 1 / task 2): GPS validation — lat/lng are stored ONLY when a
++ * real, structurally-valid device fix with acceptable accuracy exists;
++ * otherwise the event is recorded with locationMissing=true and NULL
++ * coordinates. The customer's coordinates are NEVER substituted. Distance
++ * to the customer is computed with Haversine (meters) and compared against
++ * the customer's admin-configured radius: default policy RECORDS the event
++ * with an explicit outOfRadius flag; strict mode (gpsStrictRadius=1)
++ * REJECTS with 422.
+  */
+ export async function POST(req: Request) {
+   const emp = await appEmployee(req)
+@@ -35,6 +47,7 @@
+   const note = String(form.get('note') || '').trim()
+   const lat = parseFloat(String(form.get('lat') || ''))
+   const lng = parseFloat(String(form.get('lng') || ''))
++  const accuracy = parseFloat(String(form.get('accuracy') || ''))
+   const localId = String(form.get('localId') || '') || null
+   // v1.9.12 (phase 1): event time from the offline queue (falls back to now)
+   const eventTime = resolveEventTime(String(form.get('clientAt') || '') || null)
+@@ -47,6 +60,18 @@
      return NextResponse.json({ ok: false, error: 'مشتری پیدا نشد' }, { status: 404 })
    }
  
@@ -305,6 +370,126 @@ diff -ru a/src/app/api/app/checkin/route.ts b/src/app/api/app/checkin/route.ts
    // ── Idempotency layer 1: localId replay ─────────────────
    if (localId) {
      const dup = await db.checkin.findUnique({ where: { localId } })
+@@ -80,6 +105,29 @@
+     voicePath = `voice/${fname}`
+   }
+ 
++  // ── G-6: resolve the device location (never the customer's coords) ──
++  const loc = await resolveGpsLocation(lat, lng, accuracy)
++  let distanceM: number | null = null
++  let outOfRadius = false
++  if (loc.lat !== null && loc.lng !== null) {
++    distanceM = Math.round(distanceMeters(loc.lat, loc.lng, customer.lat, customer.lng))
++    outOfRadius = distanceM > customer.radius
++  }
++  if (outOfRadius) {
++    const { gpsStrictRadius } = await getAdminSettings()
++    if (gpsStrictRadius === 1) {
++      return NextResponse.json(
++        {
++          ok: false,
++          error: `فاصلهٔ شما از مشتری (${distanceM} متر) بیشتر از شعاع مجاز (${Math.round(customer.radius)} متر) است`,
++          distanceM,
++          radiusM: Math.round(customer.radius),
++        },
++        { status: 422 },
++      )
++    }
++  }
++
+   const ci = await db.checkin.create({
+     data: {
+       localId,
+@@ -88,8 +136,12 @@
+       kind: 'checkin',
+       note: note || null,
+       voicePath,
+-      lat: isValidLatLng(lat, lng) ? lat : customer.lat,
+-      lng: isValidLatLng(lat, lng) ? lng : customer.lng,
++      lat: loc.lat,
++      lng: loc.lng,
++      accuracy: loc.accuracy,
++      distanceM,
++      outOfRadius,
++      locationMissing: loc.locationMissing,
+       createdAt: eventTime, // v1.9.12 (phase 1): real event time, not sync time
+     },
+   })
+@@ -128,6 +180,10 @@
+     hasVoice: !!voicePath,
+     voiceUrl: voicePath ? `/api/media/${voicePath}` : null,
+     at: ci.createdAt,
++    // G-6: explicit location status for the dashboard
++    locationMissing: ci.locationMissing,
++    distanceM: ci.distanceM,
++    outOfRadius: ci.outOfRadius,
+   })
+ 
+   return NextResponse.json({ ok: true, checkin: ci })
+diff -ru a/src/app/api/app/checkout/route.ts b/src/app/api/app/checkout/route.ts
+--- orig/src/app/api/app/checkout/route.ts	2026-10-26 08:03:29.879780210 +0000
++++ b/src/app/api/app/checkout/route.ts	2026-10-26 08:26:17.451237305 +0000
+@@ -4,6 +4,7 @@
+ import { db } from '@/lib/db'
+ import { appEmployee } from '@/lib/auth'
+ import { VOICE_DIR, ensureDirs } from '@/lib/media'
++import { resolveGpsLocation } from '@/lib/gps'
+ import { emitEvent } from '@/lib/emit'
+ import { resolveEventTime } from '@/lib/client-time'
+ 
+@@ -12,8 +13,12 @@
+ /**
+  * App check-out (multipart/form-data):
+  *   token, note (REQUIRED ≥10 chars), localId, voice (REQUIRED), lat?, lng?,
++ *   accuracy? (GPS accuracy in meters),
+  *   clientAt? (ISO 8601 event time from the app's offline queue)
+  * Closes ALL open visits of the employee (fixes duplicated-visit leak).
++ * G-6 (phase 1 / task 2): same GPS validation as check-in — real device
++ * coordinates or explicitly-missing; the customer's coordinates are never
++ * substituted (checkout previously stored raw lat/lng unvalidated).
+  */
+ export async function POST(req: Request) {
+   const emp = await appEmployee(req)
+@@ -30,6 +35,7 @@
+   const localId = String(form.get('localId') || '') || null
+   const lat = parseFloat(String(form.get('lat') || ''))
+   const lng = parseFloat(String(form.get('lng') || ''))
++  const accuracy = parseFloat(String(form.get('accuracy') || ''))
+   // v1.9.12 (phase 1): event time from the offline queue (falls back to now)
+   const eventTime = resolveEventTime(String(form.get('clientAt') || '') || null)
+ 
+@@ -67,6 +73,9 @@
+     )
+   }
+ 
++  // ── G-6: resolve the device location (validated, never fabricated) ──
++  const loc = await resolveGpsLocation(lat, lng, accuracy)
++
+   const co = await db.checkin.create({
+     data: {
+       localId,
+@@ -75,8 +84,10 @@
+       kind: 'checkout',
+       note,
+       voicePath,
+-      lat: Number.isFinite(lat) ? lat : null,
+-      lng: Number.isFinite(lng) ? lng : null,
++      lat: loc.lat,
++      lng: loc.lng,
++      accuracy: loc.accuracy,
++      locationMissing: loc.locationMissing,
+       createdAt: eventTime, // v1.9.12 (phase 1): real event time, not sync time
+     },
+   })
+@@ -99,6 +110,8 @@
+     hasVoice: true,
+     voiceUrl: `/api/media/${voicePath}`,
+     at: co.createdAt,
++    // G-6: explicit location status for the dashboard
++    locationMissing: co.locationMissing,
+   })
+ 
+   return NextResponse.json({ ok: true, checkout: co, closedVisits: openVisits.length })
 diff -ru a/src/app/api/app/customers/[id]/route.ts b/src/app/api/app/customers/[id]/route.ts
 --- orig/src/app/api/app/customers/[id]/route.ts	2026-10-26 08:03:29.879780210 +0000
 +++ b/src/app/api/app/customers/[id]/route.ts	2026-10-26 07:57:23.177024156 +0000
@@ -702,9 +887,39 @@ diff -ru a/src/app/api/media/[...path]/route.ts b/src/app/api/media/[...path]/ro
    }
  
    const file = path.join(VOICE_DIR, safe)
+diff -ru a/src/components/panel/CheckinsTab.tsx b/src/components/panel/CheckinsTab.tsx
+--- orig/src/components/panel/CheckinsTab.tsx	2026-10-26 08:03:29.881780229 +0000
++++ b/src/components/panel/CheckinsTab.tsx	2026-10-26 08:26:57.359638559 +0000
+@@ -103,6 +103,26 @@
+                 <MapPin className="h-3.5 w-3.5" />
+                 {r.customer?.name || '—'}
+               </div>
++              {/* G-6 (phase 1 / task 2): explicit location status */}
++              {r.kind === 'checkin' && r.locationMissing && (
++                <Badge variant="outline" className="bg-gray-100 text-gray-600 shrink-0">
++                  بدون موقعیت GPS
++                </Badge>
++              )}
++              {r.kind === 'checkin' && !r.locationMissing && r.distanceM != null && (
++                <Badge
++                  variant="outline"
++                  className={`shrink-0 ${
++                    r.outOfRadius
++                      ? 'bg-amber-100 text-amber-800'
++                      : 'bg-emerald-50 text-emerald-700'
++                  }`}
++                  title={r.outOfRadius ? 'فاصله بیشتر از شعاع مجاز مشتری' : 'فاصله از مشتری'}
++                >
++                  {r.outOfRadius ? 'خارج از شعاع · ' : ''}
++                  {Math.round(r.distanceM).toLocaleString('fa-IR')} متر
++                </Badge>
++              )}
+               <div className="flex-1 text-sm">
+                 {r.note ? (
+                   <p className="line-clamp-2">{r.note}</p>
 diff -ru a/src/components/panel/Dashboard.tsx b/src/components/panel/Dashboard.tsx
 --- orig/src/components/panel/Dashboard.tsx	2026-10-26 08:03:29.881780229 +0000
-+++ b/src/components/panel/Dashboard.tsx	2026-10-26 08:06:38.594626379 +0000
++++ b/src/components/panel/Dashboard.tsx	2026-10-26 08:26:45.309520586 +0000
 @@ -3,14 +3,24 @@
  import { useCallback, useEffect, useRef, useState } from 'react'
  import { Badge } from '@/components/ui/badge'
@@ -730,18 +945,21 @@ diff -ru a/src/components/panel/Dashboard.tsx b/src/components/panel/Dashboard.t
  } from 'lucide-react'
  import OverviewTab from './OverviewTab'
  import CheckinsTab from './CheckinsTab'
-@@ -40,6 +50,10 @@
+@@ -40,6 +50,13 @@
    const [connected, setConnected] = useState(false)
    const [live, setLive] = useState<Checkin[]>([]) // realtime events stream
    const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 +  // G-2 (phase 1 / task 2): admin settings dialog (app-token TTL)
++  // G-6: GPS accuracy tolerance + strict-radius mode
 +  const [showSettings, setShowSettings] = useState(false)
 +  const [ttlHours, setTtlHours] = useState('')
++  const [gpsAcc, setGpsAcc] = useState('')
++  const [gpsStrict, setGpsStrict] = useState(false)
 +  const [savingSettings, setSavingSettings] = useState(false)
  
    const bumpRefresh = useCallback(() => {
      if (refreshTimer.current) clearTimeout(refreshTimer.current)
-@@ -87,6 +101,33 @@
+@@ -87,6 +104,42 @@
      onLogout()
    }
  
@@ -750,7 +968,12 @@ diff -ru a/src/components/panel/Dashboard.tsx b/src/components/panel/Dashboard.t
 +    if (!showSettings) return
 +    fetch('/api/admin/settings', { cache: 'no-store' })
 +      .then((r) => r.json())
-+      .then((d) => d.ok && setTtlHours(String(d.settings.appTokenTtlHours)))
++      .then((d) => {
++        if (!d.ok) return
++        setTtlHours(String(d.settings.appTokenTtlHours))
++        setGpsAcc(String(d.settings.gpsMaxAccuracyM))
++        setGpsStrict(d.settings.gpsStrictRadius === 1)
++      })
 +      .catch(() => {})
 +  }, [showSettings])
 +
@@ -760,7 +983,11 @@ diff -ru a/src/components/panel/Dashboard.tsx b/src/components/panel/Dashboard.t
 +      const res = await fetch('/api/admin/settings', {
 +        method: 'PUT',
 +        headers: { 'content-type': 'application/json' },
-+        body: JSON.stringify({ appTokenTtlHours: Number(ttlHours) }),
++        body: JSON.stringify({
++          appTokenTtlHours: Number(ttlHours),
++          gpsMaxAccuracyM: Number(gpsAcc),
++          gpsStrictRadius: gpsStrict ? 1 : 0,
++        }),
 +      })
 +      const data = await res.json()
 +      if (data.ok) {
@@ -775,7 +1002,7 @@ diff -ru a/src/components/panel/Dashboard.tsx b/src/components/panel/Dashboard.t
    return (
      <div className="min-h-screen flex flex-col bg-gradient-to-b from-teal-50/60 to-background">
        {/* Header */}
-@@ -113,6 +154,9 @@
+@@ -113,6 +166,9 @@
            <Button variant="ghost" size="icon" title="مرکز دانلود" onClick={() => window.open('/downloads.html', '_blank')}>
              <Download className="h-4 w-4" />
            </Button>
@@ -785,7 +1012,7 @@ diff -ru a/src/components/panel/Dashboard.tsx b/src/components/panel/Dashboard.t
            <Button variant="ghost" size="icon" title="اعلان‌های مرورگر" onClick={requestNotifyPermission}>
              <Bell className="h-4 w-4" />
            </Button>
-@@ -151,6 +195,38 @@
+@@ -151,6 +207,69 @@
        <footer className="mt-auto border-t bg-background/60 py-3 text-center text-xs text-muted-foreground">
          MedPad v{cfg.panelVersion} — سیستم کنترل کارمندها با گزارش صوتی و اعلان لحظه‌ای
        </footer>
@@ -811,6 +1038,37 @@ diff -ru a/src/components/panel/Dashboard.tsx b/src/components/panel/Dashboard.t
 +              گذشته ندارد.
 +            </p>
 +          </div>
++          <div className="grid gap-2 border-t pt-3">
++            <Label>حداکثر خطای قابل‌قبول GPS (متر)</Label>
++            <Input
++              dir="ltr"
++              className="text-left"
++              inputMode="numeric"
++              value={gpsAcc}
++              onChange={(e) => setGpsAcc(e.target.value)}
++            />
++            <p className="text-xs text-muted-foreground">
++              اگر دقت گزارش‌شدهٔ دستگاه بدتر از این مقدار باشد، موقعیت «ثبت‌نشده» در نظر گرفته
++              می‌شود (خود رویداد ثبت می‌ماند). ۰ = عدم فیلتر بر اساس دقت · مجاز: ۰ تا ۵۰۰.
++            </p>
++          </div>
++          <div className="flex items-center gap-2 border-t pt-3">
++            <input
++              id="gpsStrict"
++              type="checkbox"
++              className="h-4 w-4"
++              checked={gpsStrict}
++              onChange={(e) => setGpsStrict(e.target.checked)}
++            />
++            <Label htmlFor="gpsStrict" className="cursor-pointer">
++              رد کردن چک‌این خارج از شعاع مشتری (حالت سخت‌گیرانه)
++            </Label>
++          </div>
++          <p className="text-xs text-muted-foreground">
++            شعاع مجاز هر مشتری در کارت همان مشتری تنظیم می‌شود (پیش‌فرض ۱۵۰ متر). حالت
++            پیش‌فرض: چک‌این خارج از شعاع ثبت می‌شود اما با هشدار «خارج از شعاع» مشخص
++            می‌گردد.
++          </p>
 +          <DialogFooter>
 +            <Button variant="outline" onClick={() => setShowSettings(false)}>
 +              انصراف
@@ -1164,4 +1422,20 @@ diff -ru a/src/lib/auth.ts b/src/lib/auth.ts
    // refresh lastUsed (fire & forget)
    db.appToken.update({ where: { token: tok }, data: { lastUsedAt: new Date() } }).catch(() => {})
    return row.employee
+Only in b/src/lib: gps.ts
 Only in b/src/lib: settings.ts
+diff -ru a/src/lib/types.ts b/src/lib/types.ts
+--- orig/src/lib/types.ts	2026-10-26 08:03:29.882780238 +0000
++++ b/src/lib/types.ts	2026-10-26 08:26:51.161577762 +0000
+@@ -37,6 +37,11 @@
+   lat?: number | null
+   lng?: number | null
+   createdAt: string
++  // G-6 (phase 1 / task 2)
++  accuracy?: number | null
++  distanceM?: number | null
++  outOfRadius?: boolean
++  locationMissing?: boolean
+ }
+ 
+ export interface Assignment {

@@ -112,6 +112,7 @@ object ApiClient {
         localId: String,
         voice: File?,
         clientAt: Long? = null,
+        accuracyM: Double? = null,
         onProgress: ((Float) -> Unit)? = null,
     ): JSONObject {
         val mp = MultipartBody.Builder().setType(MultipartBody.FORM)
@@ -121,9 +122,13 @@ object ApiClient {
         // v1.9.12 (phase 1): real event time from the offline queue so the
         // server records when the check-in HAPPENED, not when it was synced.
         clientAt?.let { mp.addFormDataPart("clientAt", isoTime(it)) }
+        // G-6 (phase 1 / task 2): real device GPS fix + reported accuracy.
+        // Absent lat/lng = no location — the server records the event as
+        // explicitly location-missing (never the customer's coordinates).
         if (lat != null && lng != null) {
             mp.addFormDataPart("lat", lat.toString())
             mp.addFormDataPart("lng", lng.toString())
+            accuracyM?.let { if (it > 0) mp.addFormDataPart("accuracy", it.toString()) }
         }
         if (voice != null && voice.exists()) {
             mp.addFormDataPart("voice", voice.name,
@@ -134,12 +139,18 @@ object ApiClient {
     }
 
     @Throws(Exception::class)
-    fun checkout(note: String, localId: String, voice: File?, clientAt: Long? = null): JSONObject {
+    fun checkout(note: String, localId: String, voice: File?, clientAt: Long? = null, lat: Double? = null, lng: Double? = null, accuracyM: Double? = null): JSONObject {
         val mp = MultipartBody.Builder().setType(MultipartBody.FORM)
             .addFormDataPart("note", note)
             .addFormDataPart("localId", localId)
         // v1.9.12 (phase 1): real event time from the offline queue (see checkin)
         clientAt?.let { mp.addFormDataPart("clientAt", isoTime(it)) }
+        // G-6 (phase 1 / task 2): real device GPS fix (same rules as checkin)
+        if (lat != null && lng != null) {
+            mp.addFormDataPart("lat", lat.toString())
+            mp.addFormDataPart("lng", lng.toString())
+            accuracyM?.let { if (it > 0) mp.addFormDataPart("accuracy", it.toString()) }
+        }
         if (voice != null && voice.exists()) {
             mp.addFormDataPart("voice", voice.name,
                 voice.asRequestBody("audio/mp4".toMediaType()))

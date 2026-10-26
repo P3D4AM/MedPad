@@ -674,6 +674,238 @@ chk "G4 token still valid after update (db preserved)" "[ \"$CODE\" = 200 ]"
 curl -s -H "X-Medpad-Token: $TOK_E" "$BASE/api/media/$VPATH" -o $W/got4.m4a
 chk "G4 audio still downloadable after update" "cmp -s $W/erin-voice.m4a $W/got4.m4a"
 
+# ═════════════════════════════════════════════════════════════
+# G-6 — GPS validation + customer-distance policy
+# ═════════════════════════════════════════════════════════════
+
+# All G-6 check-ins target the SAME employee+customer, so each carries a
+# staggered clientAt in the past — otherwise the server's 90s anti-double-
+# submit dedup window returns duplicate:true and records nothing.
+G6N=0
+g6ago() { G6N=$((G6N+1)); python3 -c "import datetime;print((datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(minutes=$((120-G6N*2)))).isoformat())"; }
+
+# setup: frank + customer at a known point (radius default 150m)
+curl -s -b $W/cj -X POST $BASE/api/employees -H 'content-type: application/json' \
+  -d '{"username":"g6_frank","password":"frankpass1","name":"G6 Frank"}' -o $W/frank.json
+EMP_F=$(python3 -c "import json;print(json.load(open('$W/frank.json'))['employee']['id'])")
+curl -s -b $W/cj -X POST $BASE/api/customers -H 'content-type: application/json' \
+  -d '{"name":"G6 Frank Clinic","lat":36.0000,"lng":52.0000}' -o $W/fc.json
+CUS_F=$(python3 -c "import json;print(json.load(open('$W/fc.json'))['customer']['id'])")
+curl -s -b $W/cj -X POST $BASE/api/assignments -H 'content-type: application/json' \
+  -d "{\"employeeId\":\"$EMP_F\",\"customerId\":\"$CUS_F\"}" -o /dev/null
+curl -s -X POST $BASE/api/app/login -H 'content-type: application/json' \
+  -d '{"username":"g6_frank","password":"frankpass1"}' -o $W/fl.json
+TOK_F=$(python3 -c "import json;print(json.load(open('$W/fl.json'))['token'])")
+
+# G6.1 default settings present (gpsMaxAccuracyM=50, gpsStrictRadius=0)
+curl -s -b $W/cj "$BASE/api/admin/settings" -o $W/g6set.json
+chk "G6 default gpsMaxAccuracyM=50" \
+  "python3 -c \"import json;s=json.load(open('$W/g6set.json'))['settings'];assert s['gpsMaxAccuracyM']==50 and s['gpsStrictRadius']==0\" 2>/dev/null"
+
+# G6.2 missing GPS coordinates -> recorded WITHOUT location (never customer coords!)
+curl -s -X POST $BASE/api/app/checkin -H "X-Medpad-Token: $TOK_F" \
+  -F "customerId=$CUS_F" -F "note=g6 no gps" -F "localId=g6-nogps-$RANDOM" -F "clientAt=$(g6ago)" -o $W/g6nogps.json
+chk "G6 no-GPS checkin accepted (event preserved)" "grep -q '\"ok\":true' $W/g6nogps.json"
+chk "G6 no-GPS: locationMissing=true" "grep -q '\"locationMissing\":true' $W/g6nogps.json"
+python3 - "$W/g6nogps.json" 36.0 52.0 << 'EOF'
+import json, sys
+d = json.load(open(sys.argv[1]))['checkin']
+cus_lat, cus_lng = float(sys.argv[2]), float(sys.argv[3])
+assert d['lat'] is None and d['lng'] is None, d
+# the customer's coordinates were NOT substituted
+assert d['lat'] != cus_lat or True
+sys.exit(0)
+EOF
+RC=$?
+chk "G6 no-GPS: lat/lng are NULL (not the customer's coords)" "[ $RC -eq 0 ]"
+
+# G6.3 invalid coordinates -> same treatment
+CODE=$(curl -s -o $W/g6bad.json -w '%{http_code}' -X POST $BASE/api/app/checkin \
+  -H "X-Medpad-Token: $TOK_F" -F "customerId=$CUS_F" -F "note=g6 invalid coords" \
+  -F "localId=g6-bad-$RANDOM" -F "lat=999" -F "lng=52.0" -F "clientAt=$(g6ago)")
+chk "G6 invalid lat=999 -> accepted, locationMissing" \
+  "[ \"$CODE\" = 200 ] && grep -q '\"locationMissing\":true' $W/g6bad.json"
+CODE=$(curl -s -o $W/g6bad2.json -w '%{http_code}' -X POST $BASE/api/app/checkin \
+  -H "X-Medpad-Token: $TOK_F" -F "customerId=$CUS_F" -F "note=g6 nan coords" \
+  -F "localId=g6-nan-$RANDOM" -F "lat=NaN" -F "lng=Infinity" -F "clientAt=$(g6ago)")
+chk "G6 NaN/Infinity coords -> accepted, locationMissing" \
+  "[ \"$CODE\" = 200 ] && grep -q '\"locationMissing\":true' $W/g6bad2.json"
+
+# G6.4 valid GPS near the customer -> recorded with accuracy + distance, in radius
+curl -s -X POST $BASE/api/app/checkin -H "X-Medpad-Token: $TOK_F" \
+  -F "customerId=$CUS_F" -F "note=g6 good gps" -F "localId=g6-good-$RANDOM" -F "clientAt=$(g6ago)" \
+  -F "lat=36.000100" -F "lng=52.000100" -F "accuracy=15" -o $W/g6good.json
+chk "G6 good GPS accepted" "grep -q '\"ok\":true' $W/g6good.json"
+chk "G6 good GPS: locationMissing=false" "grep -q '\"locationMissing\":false' $W/g6good.json"
+chk "G6 accuracy stored (15)" "grep -q '\"accuracy\":15' $W/g6good.json"
+python3 - "$W/g6good.json" << 'EOF'
+import json, sys
+d = json.load(open(sys.argv[1]))['checkin']
+assert d['distanceM'] is not None and 0 < d['distanceM'] < 150, d
+assert d['outOfRadius'] is False, d
+sys.exit(0)
+EOF
+RC=$?
+chk "G6 distance computed (Haversine, meters), in radius" "[ $RC -eq 0 ]"
+
+# G6.5 accuracy over tolerance (default 50m) -> location discarded
+curl -s -X POST $BASE/api/app/checkin -H "X-Medpad-Token: $TOK_F" \
+  -F "customerId=$CUS_F" -F "note=g6 low accuracy" -F "localId=g6-lowacc-$RANDOM" -F "clientAt=$(g6ago)" \
+  -F "lat=36.000100" -F "lng=52.000100" -F "accuracy=200" -o $W/g6lowacc.json
+chk "G6 accuracy=200 > tolerance -> locationMissing" "grep -q '\"locationMissing\":true' $W/g6lowacc.json"
+
+# G6.6 impossible accuracy (<=0 / huge) -> location discarded even with tolerance off
+curl -s -b $W/cj -X PUT "$BASE/api/admin/settings" -H 'content-type: application/json' \
+  -d '{"gpsMaxAccuracyM":0}' -o /dev/null
+curl -s -X POST $BASE/api/app/checkin -H "X-Medpad-Token: $TOK_F" \
+  -F "customerId=$CUS_F" -F "note=g6 zero acc" -F "localId=g6-zacc-$RANDOM" -F "clientAt=$(g6ago)" \
+  -F "lat=36.000100" -F "lng=52.000100" -F "accuracy=0" -o $W/g6zacc.json
+chk "G6 accuracy=0 (impossible) -> locationMissing even with tolerance off" "grep -q '\"locationMissing\":true' $W/g6zacc.json"
+curl -s -X POST $BASE/api/app/checkin -H "X-Medpad-Token: $TOK_F" \
+  -F "customerId=$CUS_F" -F "note=g6 huge acc" -F "localId=g6-hacc-$RANDOM" -F "clientAt=$(g6ago)" \
+  -F "lat=36.000100" -F "lng=52.000100" -F "accuracy=999999" -o $W/g6hacc.json
+chk "G6 accuracy=999999 (impossible) -> locationMissing" "grep -q '\"locationMissing\":true' $W/g6hacc.json"
+
+# G6.7 tolerance OFF + plausible accuracy -> location kept
+curl -s -X POST $BASE/api/app/checkin -H "X-Medpad-Token: $TOK_F" \
+  -F "customerId=$CUS_F" -F "note=g6 tolerance off" -F "localId=g6-toff-$RANDOM" -F "clientAt=$(g6ago)" \
+  -F "lat=36.000100" -F "lng=52.000100" -F "accuracy=300" -o $W/g6toff.json
+chk "G6 tolerance off: accuracy=300 kept, location recorded" "grep -q '\"locationMissing\":false' $W/g6toff.json"
+
+# G6.8 out-of-radius (default warn policy): recorded + flagged, NOT rejected
+curl -s -b $W/cj -X PUT "$BASE/api/admin/settings" -H 'content-type: application/json' \
+  -d '{"gpsMaxAccuracyM":50}' -o /dev/null
+# ~0.05 degrees away = ~5km — far outside the 150m radius
+curl -s -X POST $BASE/api/app/checkin -H "X-Medpad-Token: $TOK_F" \
+  -F "customerId=$CUS_F" -F "note=g6 far away" -F "localId=g6-far-$RANDOM" -F "clientAt=$(g6ago)" \
+  -F "lat=36.0500" -F "lng=52.0500" -F "accuracy=10" -o $W/g6far.json
+chk "G6 out-of-radius (warn mode): event ACCEPTED" "grep -q '\"ok\":true' $W/g6far.json"
+chk "G6 out-of-radius flagged outOfRadius=true" "grep -q '\"outOfRadius\":true' $W/g6far.json"
+python3 - "$W/g6far.json" << 'EOF'
+import json, sys
+d = json.load(open(sys.argv[1]))['checkin']
+assert d['distanceM'] and d['distanceM'] > 1000, d
+sys.exit(0)
+EOF
+RC=$?
+chk "G6 distance recorded (>> radius)" "[ $RC -eq 0 ]"
+
+# G6.9 strict mode: out-of-radius -> 422 with actionable Persian error
+curl -s -b $W/cj -X PUT "$BASE/api/admin/settings" -H 'content-type: application/json' \
+  -d '{"gpsStrictRadius":1}' -o /dev/null
+CODE=$(curl -s -o $W/g6strict.json -w '%{http_code}' -X POST $BASE/api/app/checkin \
+  -H "X-Medpad-Token: $TOK_F" -F "customerId=$CUS_F" -F "note=g6 strict reject" \
+  -F "localId=g6-strict-$RANDOM" -F "lat=36.0500" -F "lng=52.0500" -F "accuracy=10" -F "clientAt=$(g6ago)")
+chk "G6 strict mode: out-of-radius -> 422" "[ \"$CODE\" = 422 ]"
+chk "G6 strict rejection message mentions the distance" "grep -q 'شعاع' $W/g6strict.json"
+# ... while an in-radius check-in still works in strict mode
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST $BASE/api/app/checkin \
+  -H "X-Medpad-Token: $TOK_F" -F "customerId=$CUS_F" -F "note=g6 strict ok" \
+  -F "localId=g6-strictok-$RANDOM" -F "lat=36.000100" -F "lng=52.000100" -F "accuracy=10" -F "clientAt=$(g6ago)")
+chk "G6 strict mode: in-radius check-in still works" "[ \"$CODE\" = 200 ]"
+# back to warn mode for the rest of the suite
+curl -s -b $W/cj -X PUT "$BASE/api/admin/settings" -H 'content-type: application/json' \
+  -d '{"gpsStrictRadius":0}' -o /dev/null
+
+# G6.10 settings validation for the GPS keys
+for BADG in '-1' '501' '7.5' 'x'; do
+  CODE=$(curl -s -o /dev/null -w '%{http_code}' -b $W/cj -X PUT "$BASE/api/admin/settings" \
+    -H 'content-type: application/json' -d "{\"gpsMaxAccuracyM\":\"$BADG\"}")
+  chk "G6 gpsMaxAccuracyM='$BADG' -> 400" "[ \"$CODE\" = 400 ]"
+done
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -b $W/cj -X PUT "$BASE/api/admin/settings" \
+  -H 'content-type: application/json' -d '{"gpsStrictRadius":2}')
+chk "G6 gpsStrictRadius=2 -> 400" "[ \"$CODE\" = 400 ]"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -b $W/cj -X PUT "$BASE/api/admin/settings" \
+  -H 'content-type: application/json' -d '{"gpsMaxAccuracyM":0}')
+chk "G6 gpsMaxAccuracyM boundary 0 -> 200" "[ \"$CODE\" = 200 ]"
+curl -s -b $W/cj -X PUT "$BASE/api/admin/settings" -H 'content-type: application/json' \
+  -d '{"gpsMaxAccuracyM":50}' -o /dev/null
+
+# G6.11 configurable per-customer radius: shrink to 10m -> the 'good' fix is now outside
+curl -s -b $W/cj -X PUT "$BASE/api/customers/$CUS_F" -H 'content-type: application/json' \
+  -d '{"radius":10}' -o /dev/null
+curl -s -X POST $BASE/api/app/checkin -H "X-Medpad-Token: $TOK_F" \
+  -F "customerId=$CUS_F" -F "note=g6 small radius" -F "localId=g6-sr-$RANDOM" -F "clientAt=$(g6ago)" \
+  -F "lat=36.000100" -F "lng=52.000100" -F "accuracy=10" -o $W/g6sr.json
+chk "G6 per-customer radius=10m: same fix now outOfRadius" "grep -q '\"outOfRadius\":true' $W/g6sr.json"
+curl -s -b $W/cj -X PUT "$BASE/api/customers/$CUS_F" -H 'content-type: application/json' \
+  -d '{"radius":150}' -o /dev/null
+
+# G6.12 old app compatibility: no accuracy field at all -> location kept (no filtering)
+curl -s -X POST $BASE/api/app/checkin -H "X-Medpad-Token: $TOK_F" \
+  -F "customerId=$CUS_F" -F "note=g6 legacy app no accuracy" -F "localId=g6-leg-$RANDOM" -F "clientAt=$(g6ago)" \
+  -F "lat=36.000100" -F "lng=52.000100" -o $W/g6leg.json
+chk "G6 old app (no accuracy field): location recorded" \
+  "grep -q '\"locationMissing\":false' $W/g6leg.json && grep -q '\"accuracy\":null' $W/g6leg.json"
+
+# G6.13 checkout also records location status (and no substitution)
+printf 'g6-voice' > $W/g6v.m4a
+curl -s -X POST $BASE/api/app/checkout -H "X-Medpad-Token: $TOK_F" \
+  -F "note=g6 checkout with location" -F "localId=g6-co-$RANDOM" \
+  -F "lat=36.000100" -F "lng=52.000100" -F "accuracy=12" \
+  -F "voice=@$W/g6v.m4a;type=audio/mp4" -o $W/g6co.json
+chk "G6 checkout records location + accuracy" \
+  "grep -q '\"locationMissing\":false' $W/g6co.json && grep -q '\"accuracy\":12' $W/g6co.json"
+curl -s -X POST $BASE/api/app/checkin -H "X-Medpad-Token: $TOK_F" \
+  -F "customerId=$CUS_F" -F "note=g6 reopen for checkout test" -F "localId=g6-re-$RANDOM" -F "clientAt=$(g6ago)" -o /dev/null
+curl -s -X POST $BASE/api/app/checkout -H "X-Medpad-Token: $TOK_F" \
+  -F "note=g6 checkout without location" -F "localId=g6-co2-$RANDOM" \
+  -F "voice=@$W/g6v.m4a;type=audio/mp4" -o $W/g6co2.json
+chk "G6 checkout without GPS -> locationMissing, nulls" \
+  "grep -q '\"locationMissing\":true' $W/g6co2.json"
+
+# G6.14 direct SQLite verification of the stored rows
+python3 - "$DB" << 'EOF'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+rows = db.execute("select lat, lng, accuracy, distanceM, outOfRadius, locationMissing from Checkin where note like 'g6 %' order by createdAt").fetchall()
+nogps = [r for r in rows if r[5] == 1]
+good  = [r for r in rows if r[0] is not None and r[5] == 0]
+# every locationMissing row has NULL coords; every located row has real coords
+assert all(r[0] is None and r[1] is None and r[2] is None for r in nogps), rows
+assert all(abs(r[0] - 36.0) < 0.1 for r in good), rows
+# no stored coordinate equals the customer's exact point (36.0000, 52.0000)
+assert not any(abs(r[0] - 36.0) < 1e-9 and abs(r[1] - 52.0) < 1e-9 for r in rows if r[0] is not None), rows
+db.close()
+EOF
+RC=$?
+chk "G6 SQLite: rows consistent (nulls when missing, real device coords only)" "[ $RC -eq 0 ]"
+
+# G6.15 runtime migration for EXISTING databases: drop the new Checkin
+# columns (simulating a pre-G-6 install) -> reboot -> columns restored
+(cd $W/inst && node server-manager.mjs stop --quiet > /dev/null 2>&1)
+sleep 1
+python3 - "$DB" << 'EOF'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+for col in ('accuracy', 'distanceM', 'outOfRadius', 'locationMissing'):
+    try: db.execute(f'ALTER TABLE Checkin DROP COLUMN "{col}"')
+    except Exception as e: print('drop skipped:', e)
+db.commit()
+cols = [r[1] for r in db.execute('PRAGMA table_info(Checkin)')]
+assert 'accuracy' not in cols and 'locationMissing' not in cols, cols
+db.close()
+EOF
+RC=$?
+chk "G6 pre-G-6 schema simulated (Checkin columns dropped)" "[ $RC -eq 0 ]"
+(cd $W/inst && node server-manager.mjs start --no-open > $W/boot4.log 2>&1)
+for i in $(seq 1 40); do curl -s -o /dev/null "$BASE/" && break; sleep 1; done
+python3 - "$DB" << 'EOF'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+cols = [r[1] for r in db.execute('PRAGMA table_info(Checkin)')]
+db.close()
+need = {'accuracy', 'distanceM', 'outOfRadius', 'locationMissing'}
+sys.exit(0 if need.issubset(set(cols)) else 1)
+EOF
+RC=$?
+chk "G6 migration restored Checkin columns after reboot" "[ $RC -eq 0 ]"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Medpad-Token: $TOK_F" "$BASE/api/app/config")
+chk "G6 auth works against the migrated DB" "[ \"$CODE\" = 200 ]"
+curl -s -b $W/cj "$BASE/api/checkins?limit=300" -o $W/g6list.json
+chk "G6 admin checkins list carries the new fields" "grep -q 'locationMissing' $W/g6list.json"
+
 # ── teardown ─────────────────────────────────────────────────
 (cd $W/inst && node server-manager.mjs stop --quiet > /dev/null 2>&1)
 sleep 1
