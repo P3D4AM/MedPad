@@ -1,6 +1,7 @@
 {
   "/_global-error/page": "/_global-error",
   "/_not-found/page": "/_not-found",
+  "/api/admin/media-orphans/route": "/api/admin/media-orphans",
   "/api/admin/settings/route": "/api/admin/settings",
   "/api/admin/socket-auth/route": "/api/admin/socket-auth",
   "/api/app/checkin/route": "/api/app/checkin",

@@ -556,6 +556,124 @@ chk "G3 audit has timestamps" "grep -q '\"createdAt\"' $W/audit.json"
 CODE=$(curl -s -o /dev/null -w '%{http_code}' -b $W/cj "$BASE/api/stats")
 chk "G3 admin session unaffected (no self-lockout)" "[ \"$CODE\" = 200 ]"
 
+# ═════════════════════════════════════════════════════════════
+# G-4 — audio file authorization + orphan handling
+# ═════════════════════════════════════════════════════════════
+
+# setup: erin + customer + assignment + checkin WITH a voice file
+curl -s -b $W/cj -X POST $BASE/api/employees -H 'content-type: application/json' \
+  -d '{"username":"g4_erin","password":"erinpass1","name":"G4 Erin"}' -o $W/erin.json
+EMP_E=$(python3 -c "import json;print(json.load(open('$W/erin.json'))['employee']['id'])")
+curl -s -b $W/cj -X POST $BASE/api/customers -H 'content-type: application/json' \
+  -d '{"name":"G4 Erin Pharmacy","lat":35.90,"lng":51.60}' -o $W/ec.json
+CUS_E=$(python3 -c "import json;print(json.load(open('$W/ec.json'))['customer']['id'])")
+curl -s -b $W/cj -X POST $BASE/api/assignments -H 'content-type: application/json' \
+  -d "{\"employeeId\":\"$EMP_E\",\"customerId\":\"$CUS_E\"}" -o /dev/null
+curl -s -X POST $BASE/api/app/login -H 'content-type: application/json' \
+  -d '{"username":"g4_erin","password":"erinpass1"}' -o $W/el.json
+TOK_E=$(python3 -c "import json;print(json.load(open('$W/el.json'))['token'])")
+printf 'erin-voice-bytes-1234' > $W/erin-voice.m4a
+curl -s -X POST $BASE/api/app/checkin -H "X-Medpad-Token: $TOK_E" \
+  -F "customerId=$CUS_E" -F "note=g4 voice checkin" -F "localId=g4-e-$RANDOM" \
+  -F "lat=35.9001" -F "lng=51.6001" -F "voice=@$W/erin-voice.m4a;type=audio/mp4" -o $W/eci.json
+chk "G4 checkin with voice ok" "grep -q '\"ok\":true' $W/eci.json"
+VPATH=$(python3 -c "import json;print(json.load(open('$W/eci.json'))['checkin']['voicePath'])")
+chk "G4 voicePath returned" "[ -n \"$VPATH\" ]"
+
+# G4.1 the OWNER (assigned) can download their audio
+curl -s -H "X-Medpad-Token: $TOK_E" "$BASE/api/media/$VPATH" -o $W/got.m4a
+chk "G4 owner downloads own audio (assigned customer)" "cmp -s $W/erin-voice.m4a $W/got.m4a"
+# ... also via ?token= (the form the Android app uses)
+curl -s "$BASE/api/media/$VPATH?token=$TOK_E" -o $W/got2.m4a
+chk "G4 owner downloads via ?token= (app playback path)" "cmp -s $W/erin-voice.m4a $W/got2.m4a"
+
+# G4.2 another employee (not owner, not assigned) -> 403
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Medpad-Token: $TOK_B2" "$BASE/api/media/$VPATH")
+chk "G4 other employee -> 403" "[ \"$CODE\" = 403 ]"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/media/$VPATH")
+chk "G4 no auth -> 401" "[ \"$CODE\" = 401 ]"
+
+# G4.3 admin can download everything
+curl -s -b $W/cj "$BASE/api/media/$VPATH" -o $W/got-admin.m4a
+chk "G4 admin downloads any audio" "cmp -s $W/erin-voice.m4a $W/got-admin.m4a"
+
+# G4.4 assignment policy applies to OWN historical audio too
+curl -s -b $W/cj -X DELETE "$BASE/api/assignments?employeeId=$EMP_E&customerId=$CUS_E" -o /dev/null
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Medpad-Token: $TOK_E" "$BASE/api/media/$VPATH")
+chk "G4 own audio of UNASSIGNED customer -> 403" "[ \"$CODE\" = 403 ]"
+curl -s -b $W/cj -X POST $BASE/api/assignments -H 'content-type: application/json' \
+  -d "{\"employeeId\":\"$EMP_E\",\"customerId\":\"$CUS_E\"}" -o /dev/null
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Medpad-Token: $TOK_E" "$BASE/api/media/$VPATH")
+chk "G4 re-assigned -> owner access restored" "[ \"$CODE\" = 200 ]"
+
+# G4.5 orphaned file: employees denied, admin-only review.
+# NOTE: the RUNTIME uploads live at panel/.next/standalone/uploads (Next's
+# standalone server.js chdirs there) — derive the dir from the real VPATH.
+UP_ROOT="$W/inst/panel/.next/standalone/uploads"
+printf 'orphan-audio-bytes' > "$UP_ROOT/voice/orphan-test-12345.m4a"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Medpad-Token: $TOK_E" "$BASE/api/media/voice/orphan-test-12345.m4a")
+chk "G4 orphan: employee -> 404 (denied)" "[ \"$CODE\" = 404 ]"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Medpad-Token: $TOK_B2" "$BASE/api/media/voice/orphan-test-12345.m4a")
+chk "G4 orphan: another employee -> 404" "[ \"$CODE\" = 404 ]"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -b $W/cj "$BASE/api/media/voice/orphan-test-12345.m4a")
+chk "G4 orphan: admin can still download" "[ \"$CODE\" = 200 ]"
+
+# G4.6 admin orphan listing shows it (with metadata), employees get 401
+curl -s -b $W/cj "$BASE/api/admin/media-orphans" -o $W/orphans.json
+chk "G4 orphan listing (admin) contains the file" \
+  "python3 -c \"import json;o=[x['name'] for x in json.load(open('$W/orphans.json'))['orphans']];assert 'orphan-test-12345.m4a' in o\" 2>/dev/null"
+chk "G4 orphan listing has size+mtime" \
+  "python3 -c \"import json;o=json.load(open('$W/orphans.json'))['orphans'][0];assert o['size']>0 and 'modifiedAt' in o\" 2>/dev/null"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/admin/media-orphans")
+chk "G4 orphan listing without admin -> 401" "[ \"$CODE\" = 401 ]"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Medpad-Token: $TOK_E" "$BASE/api/admin/media-orphans")
+chk "G4 orphan listing with employee token -> 401" "[ \"$CODE\" = 401 ]"
+
+# G4.7 path traversal / identifier manipulation
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -b $W/cj "$BASE/api/media/voice/..%2F..%2Fserver.js")
+chk "G4 traversal ../.. -> 400/404" "[ \"$CODE\" = 400 ] || [ \"$CODE\" = 404 ]"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -b $W/cj "$BASE/api/media/voice/%2E%2E%5Cserver.js")
+chk "G4 encoded traversal -> 400/404" "[ \"$CODE\" = 400 ] || [ \"$CODE\" = 404 ]"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -b $W/cj "$BASE/api/media/other/whatever.m4a")
+chk "G4 non-voice dir -> 404" "[ \"$CODE\" = 404 ]"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Medpad-Token: $TOK_E" "$BASE/api/media/voice/nonexistent-file.m4a")
+chk "G4 nonexistent file -> 404" "[ \"$CODE\" = 404 ]"
+# the physical path must never be leaked in responses
+chk "G4 responses leak no physical path" "! grep -q 'uploads' $W/orphans.json"
+
+# G4.8 upload + playback regression via the reports flow (app path)
+curl -s -H "X-Medpad-Token: $TOK_E" "$BASE/api/app/reports" -o $W/ereports.json
+RURL=$(python3 -c "
+import json
+d = json.load(open('$W/ereports.json'))
+r = [x for x in d['reports'] if x.get('voicePath')]
+print(r[0]['voiceUrl'] if r else '')")
+chk "G4 reports include voiceUrl" "[ -n \"$RURL\" ]"
+curl -s -H "X-Medpad-Token: $TOK_E" "$BASE$RURL" -o $W/got3.m4a
+chk "G4 playback regression: voiceUrl works for owner" "cmp -s $W/erin-voice.m4a $W/got3.m4a"
+
+# G4.9 UPDATE-preservation regression: the installer must keep the RUNTIME
+# voice uploads (panel/.next/standalone/uploads) across an update — this used
+# to destroy every voice file because only the unused panel/uploads was kept.
+(cd $W/inst && node server-manager.mjs stop --quiet > /dev/null 2>&1)
+sleep 1
+VNAME=$(basename "$VPATH")
+(cd "$PKG" && node install.mjs --non-interactive --target local --dir $W/inst \
+   --port $PANEL_PORT --rt-port $RT_PORT \
+   --admin-user admin --admin-pass 'RemedT2!pass' > $W/update.log 2>&1)
+chk "G4 update install exit 0" "[ -f $W/inst/medpad-config.json ]"
+chk "G4 voice file SURVIVED the panel update" "[ -f \"$UP_ROOT/voice/$VNAME\" ]"
+cmp -s $W/erin-voice.m4a "$UP_ROOT/voice/$VNAME"
+chk "G4 voice content intact after update" "[ $? -eq 0 ]"
+chk "G4 orphan file survived the update too" "[ -f \"$UP_ROOT/voice/orphan-test-12345.m4a\" ]"
+chk "G4 database survived the update" "[ -f $W/inst/panel/db/custom.db ]"
+(cd $W/inst && node server-manager.mjs start --no-open > $W/boot3.log 2>&1)
+for i in $(seq 1 40); do curl -s -o /dev/null "$BASE/" && break; sleep 1; done
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Medpad-Token: $TOK_E" "$BASE/api/app/config")
+chk "G4 token still valid after update (db preserved)" "[ \"$CODE\" = 200 ]"
+curl -s -H "X-Medpad-Token: $TOK_E" "$BASE/api/media/$VPATH" -o $W/got4.m4a
+chk "G4 audio still downloadable after update" "cmp -s $W/erin-voice.m4a $W/got4.m4a"
+
 # ── teardown ─────────────────────────────────────────────────
 (cd $W/inst && node server-manager.mjs stop --quiet > /dev/null 2>&1)
 sleep 1

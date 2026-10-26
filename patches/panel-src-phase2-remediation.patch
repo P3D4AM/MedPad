@@ -18,6 +18,10 @@
 #        revocation, history preserved), password reset (revokes tokens),
 #        AuditLog model + /api/audit-log viewer + audit writes on
 #        create/update/lifecycle/revoke/settings, full EmployeesTab UI.
+#   G-4  audio authorization: own-record + assigned-customer only; orphaned
+#        files employee-denied (404) with an admin-only review listing
+#        (GET /api/admin/media-orphans); installer now preserves the RUNTIME
+#        uploads dir (panel/.next/standalone/uploads) across updates.
 #   (this file is regenerated per commit; see WORKLOG for per-commit state)
 diff -ru a/package-lock.json b/package-lock.json
 --- orig/package-lock.json	2026-10-26 08:03:29.878780200 +0000
@@ -277,6 +281,7 @@ diff -ru a/prisma/schema.prisma b/prisma/schema.prisma
 +  outcome    String   @default("success")
 +  createdAt  DateTime @default(now())
 +}
+Only in b/src/app/api/admin: media-orphans
 Only in b/src/app/api/admin: settings
 diff -ru a/src/app/api/app/checkin/route.ts b/src/app/api/app/checkin/route.ts
 --- orig/src/app/api/app/checkin/route.ts	2026-10-26 08:03:29.879780210 +0000
@@ -641,6 +646,62 @@ diff -ru a/src/app/api/logout/route.ts b/src/app/api/logout/route.ts
    return res
  }
 Only in b/src/app/api: logout-all
+diff -ru a/src/app/api/media/[...path]/route.ts b/src/app/api/media/[...path]/route.ts
+--- orig/src/app/api/media/[...path]/route.ts	2026-10-26 08:03:29.880780219 +0000
++++ b/src/app/api/media/[...path]/route.ts	2026-10-26 08:20:22.780734557 +0000
+@@ -7,8 +7,19 @@
+ 
+ /**
+  * Serve uploaded voice files.
+- * Access: admin cookie OR app token (?token=) — employee can read own files;
+- * admin cookie reads anything.
++ *
++ * phase 1 / task 2 (G-4) — authorization matrix (server-side, before any
++ * byte is read):
++ *   ADMIN      : every file, including orphans (review path).
++ *   EMPLOYEE   : only files referenced by a Checkin row that
++ *                (a) belongs to the employee AND
++ *                (b) is tied to a customer currently ASSIGNED to them
++ *                (the G-1 customer-assignment policy applied to audio).
++ *   ORPHAN     : a file with NO referencing record is employee-DENIED
++ *                (404 — no existence leak) and admin-only until its
++ *                association is resolved. Orphans are NEVER auto-deleted.
++ * An unpredictable filename is not authorization: every download is
++ * authorized against the DB, not the URL.
+  */
+ export async function GET(req: Request, ctx: { params: Promise<{ path: string[] }> }) {
+   const { path: parts } = await ctx.params
+@@ -25,11 +36,28 @@
+     if (!emp) {
+       return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
+     }
++    const row = await db.checkin.findFirst({
++      where: { voicePath: `voice/${safe}` },
++      select: { employeeId: true, customerId: true },
++    })
++    // orphaned file (no referencing record) -> employees never get it
++    if (!row) {
++      return NextResponse.json({ ok: false, error: 'not found' }, { status: 404 })
++    }
+     // employees may only fetch their own voice files
+-    const row = await db.checkin.findFirst({ where: { voicePath: `voice/${safe}` } })
+-    if (row && row.employeeId !== emp.id) {
++    if (row.employeeId !== emp.id) {
+       return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 })
+     }
++    // G-4: ...and only while the associated customer is assigned to them
++    if (row.customerId) {
++      const assigned = await db.assignment.findFirst({
++        where: { employeeId: emp.id, customerId: row.customerId },
++        select: { id: true },
++      })
++      if (!assigned) {
++        return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 })
++      }
++    }
+   }
+ 
+   const file = path.join(VOICE_DIR, safe)
 diff -ru a/src/components/panel/Dashboard.tsx b/src/components/panel/Dashboard.tsx
 --- orig/src/components/panel/Dashboard.tsx	2026-10-26 08:03:29.881780229 +0000
 +++ b/src/components/panel/Dashboard.tsx	2026-10-26 08:06:38.594626379 +0000

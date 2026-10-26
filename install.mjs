@@ -934,8 +934,15 @@ async function main() {
         const s = path.join(keepTmp, d)
         if (existsSync(s)) await cpRobust(s, path.join(panelDir, d), `restore ${d}`)
       }
+      // G-4 (phase 1 / task 2): the RUNTIME voice uploads live inside the
+      // standalone tree (Next's server.js chdirs there) — restore them too.
+      const su = path.join(keepTmp, 'standalone-uploads')
+      if (existsSync(su)) {
+        mkdirSync(path.join(panelDir, '.next', 'standalone'), { recursive: true })
+        await cpRobust(su, path.join(panelDir, '.next', 'standalone', 'uploads'), 'restore standalone-uploads')
+      }
       ok('Your data was restored from the interrupted-upgrade backup')
-      log('rescue: restored db/uploads/.env from .keep-tmp')
+      log('rescue: restored db/uploads/.env (+standalone uploads) from .keep-tmp')
     }
   }
 
@@ -950,6 +957,9 @@ async function main() {
       await die('Could not clear the temporary backup folder - close any program using it and run install again')
     }
     // v1.9.8 DATA SAFETY: back up AND VERIFY before touching the old panel.
+    // G-4 (phase 1 / task 2): also back up the REAL runtime uploads at
+    // panel/.next/standalone/uploads — voice files used to be destroyed on
+    // every update because only the (unused) panel/uploads was preserved.
     let backedUp = true
     for (const d of ['db', 'uploads', '.env']) {
       const s = path.join(panelDir, d)
@@ -960,6 +970,15 @@ async function main() {
           backedUp = false
           err(`Could not back up "${d}": ${e.code || e.message}`)
         }
+      }
+    }
+    const suSrc = path.join(panelDir, '.next', 'standalone', 'uploads')
+    if (existsSync(suSrc)) {
+      try {
+        await cpRobust(suSrc, path.join(tmp, 'standalone-uploads'), 'backup standalone-uploads')
+      } catch (e) {
+        backedUp = false
+        err(`Could not back up voice uploads: ${e.code || e.message}`)
       }
     }
     const dbSrc = path.join(panelDir, 'db', 'custom.db')
@@ -983,6 +1002,12 @@ async function main() {
     for (const d of ['db', 'uploads', '.env']) {
       const s = path.join(tmp, d)
       if (existsSync(s)) await cpRobust(s, path.join(panelDir, d), `restore ${d}`)
+    }
+    // G-4: restore the runtime voice uploads into the fresh standalone tree
+    const suBak = path.join(tmp, 'standalone-uploads')
+    if (existsSync(suBak)) {
+      mkdirSync(path.join(panelDir, '.next', 'standalone'), { recursive: true })
+      await cpRobust(suBak, path.join(panelDir, '.next', 'standalone', 'uploads'), 'restore standalone-uploads')
     }
     if (!await rmRobust(tmp, '.keep-tmp')) {
       warn('The .keep-tmp backup folder could not be removed - you can delete it manually later')
