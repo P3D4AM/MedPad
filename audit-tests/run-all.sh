@@ -12,6 +12,10 @@
 #   test-v1912.sh              the full phase 3-7 install/boot/login/CF suite
 #   test-functional-core.sh    phase 1 / task 1 functional core (auth, checkin
 #                              idempotency, offline clientAt, ACLs, isolation)
+#   test-remediation.sh        phase 1 / task 2 remediation suite (G-1..G-6:
+#                              assignment enforcement, token expiry/revocation,
+#                              admin logout auth, employee lifecycle, audio
+#                              authorization, GPS validation)
 #
 # NOTE: test-process-safety.mjs always imports services.mjs from the REPO
 # (../services.mjs relative to this folder); the pkgDir argument applies to
@@ -21,16 +25,18 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 PKG="${1:-}"
 RC=0
 
-echo "==== [1/5] process safety ===="
+echo "==== [1/6] process safety ===="
 node "$HERE/test-process-safety.mjs" || RC=1
-echo "==== [2/5] wizard security ===="
+echo "==== [2/6] wizard security ===="
 node "$HERE/test-wizard-security.mjs" ${PKG:+"$PKG"} || RC=1
-echo "==== [3/5] realtime security ===="
+echo "==== [3/6] realtime security ===="
 node "$HERE/test-realtime-security.mjs" ${PKG:+"$PKG"} || RC=1
-echo "==== [4/5] full v1.9.12 suite ===="
+echo "==== [4/6] full v1.9.12 suite ===="
 bash "$HERE/test-v1912.sh" ${PKG:+"$PKG"} || RC=1
-echo "==== [5/5] functional core (phase 1 / task 1) ===="
+echo "==== [5/6] functional core (phase 1 / task 1) ===="
 bash "$HERE/test-functional-core.sh" ${PKG:+"$PKG"} || RC=1
+echo "==== [6/6] remediation (phase 1 / task 2) ===="
+bash "$HERE/test-remediation.sh" ${PKG:+"$PKG"} || RC=1
 
 echo ""
 if [ "$RC" = "0" ]; then echo "ALL-SUITES-PASS"; else echo "SOME-SUITES-FAILED"; fi

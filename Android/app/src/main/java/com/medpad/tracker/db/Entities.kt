@@ -48,6 +48,10 @@ interface DoctorDao {
 
     @Query("DELETE FROM doctors")
     suspend fun clear()
+
+    /** G-1 (phase 1 / task 2): drop local rows whose id is no longer assigned. */
+    @Query("DELETE FROM doctors WHERE id NOT IN (:keepIds)")
+    suspend fun keepOnly(keepIds: List<String>)
 }
 
 /**

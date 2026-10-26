@@ -106,7 +106,7 @@
         "transform": "lodash/{{member}}"
       }
     },
-    "outputFileTracingRoot": "/home/z/my-project/audit/panel-src-hardened",
+    "outputFileTracingRoot": "/home/z/my-project/audit/panel-src",
     "enablePrerenderSourceMaps": true,
     "cacheComponents": false,
     "cacheLife": {
@@ -340,9 +340,9 @@
     ],
     "skipTrailingSlashRedirect": true,
     "turbopack": {
-      "root": "/home/z/my-project/audit/panel-src-hardened"
+      "root": "/home/z/my-project/audit/panel-src"
     },
-    "repoRoot": "/home/z/my-project/audit/panel-src-hardened",
+    "repoRoot": "/home/z/my-project/audit/panel-src",
     "distDirRoot": ".next",
     "_originalRewrites": {
       "beforeFiles": [],
@@ -363,7 +363,7 @@
       "fallback": []
     }
   },
-  "appDir": "/home/z/my-project/audit/panel-src-hardened",
+  "appDir": "/home/z/my-project/audit/panel-src",
   "relativeAppDir": "",
   "files": [
     ".next/package.json",

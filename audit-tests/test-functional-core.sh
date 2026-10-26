@@ -77,6 +77,14 @@ CUS1=$(python3 -c "import json;print(json.load(open('$W/cus1.json'))['customer']
 CUS2=$(python3 -c "import json;print(json.load(open('$W/cus2.json'))['customer']['id'])")
 chk "F0 customers created" "[ -n '$CUS1' ] && [ -n '$CUS2' ]"
 
+# phase 1 / task 2 (G-1): check-in now requires server-side assignment —
+# alice is assigned to BOTH customers so the check-in flows below stay valid.
+# The negative cases (unassigned -> 403) live in test-remediation.sh G1.
+curl -s -b $W/cj -X POST $BASE/api/assignments -H 'content-type: application/json' \
+  -d "{\"employeeId\":\"$EMP1\",\"customerId\":\"$CUS1\"}" -o /dev/null
+curl -s -b $W/cj -X POST $BASE/api/assignments -H 'content-type: application/json' \
+  -d "{\"employeeId\":\"$EMP1\",\"customerId\":\"$CUS2\"}" -o /dev/null
+
 # ── F2: password hashes never serialized ────────────────────
 curl -s -b $W/cj $BASE/api/employees -o $W/emps.json
 chk "F2 GET employees: no password hash" "! grep -qE '\"password\"|bcrypt\\$' $W/emps.json"

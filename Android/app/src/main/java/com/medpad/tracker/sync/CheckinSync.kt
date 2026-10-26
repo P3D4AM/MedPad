@@ -49,14 +49,22 @@ object CheckinSync {
             val db = AppDatabase.get(TrackerContext.app)
             var sent = 0
             for (item in db.pendingCheckinDao().all()) {
-                val ok = flushOne(db, item)
-                if (ok) sent++ else break // stop on first failure (keeps order)
+                when (flushOne(db, item)) {
+                    FlushResult.SENT -> sent++
+                    // G-1 (phase 1 / task 2): server permanently rejected the
+                    // item (e.g. customer no longer assigned) — drop it and
+                    // keep flushing; a 403 must not block the whole queue.
+                    FlushResult.DROPPED -> { /* continue with the next item */ }
+                    FlushResult.RETRY -> break // transient failure — keep order
+                }
             }
             sent
         } finally {
             inFlight = false
         }
     }
+
+    private enum class FlushResult { SENT, DROPPED, RETRY }
 
     suspend fun queueCount(): Int = withContext(Dispatchers.IO) {
         AppDatabase.get(TrackerContext.app).pendingCheckinDao().count()
@@ -65,8 +73,9 @@ object CheckinSync {
     /**
      * Send one item. multipart with voice → on HTTP 400/404 from an old panel,
      * fall back to JSON text-only (voice dropped, note preserved — never lost).
+     * G-1: 403 = permanently rejected (e.g. unassigned customer) → DROP.
      */
-    private suspend fun flushOne(db: AppDatabase, item: PendingCheckin): Boolean {
+    private suspend fun flushOne(db: AppDatabase, item: PendingCheckin): FlushResult {
         val voice = item.voicePath?.let { File(it) }?.takeIf { it.exists() }
         try {
             val resp: JSONObject = when (item.kind) {
@@ -89,18 +98,23 @@ object CheckinSync {
             if (resp.optBoolean("ok")) {
                 db.pendingCheckinDao().delete(item)
                 lastError = null
-                return true
+                return FlushResult.SENT
             }
             // ok=false with 200 — treat as failure
             lastError = resp.optString("error", "server said not ok")
             bump(db, item)
-            return false
+            return FlushResult.RETRY
         } catch (e: HttpException) {
             when (e.code) {
-                401 -> { // token invalid → stop flushing, keep data
+                401 -> { // token invalid/expired/revoked → stop flushing, keep data
                     lastError = "unauthorized"
                     bump(db, item)
-                    return false
+                    return FlushResult.RETRY
+                }
+                403 -> { // G-1: not assigned (server policy) — permanent, drop it
+                    lastError = e.message
+                    db.pendingCheckinDao().delete(item)
+                    return FlushResult.DROPPED
                 }
                 400, 404, 409 -> {
                     // old panel rejected multipart (or short note) → fallback JSON without voice
@@ -114,7 +128,7 @@ object CheckinSync {
                             if (resp.optBoolean("ok")) {
                                 db.pendingCheckinDao().delete(item)
                                 lastError = null
-                                return true
+                                return FlushResult.SENT
                             }
                         } catch (e2: Exception) {
                             lastError = e2.message
@@ -122,18 +136,18 @@ object CheckinSync {
                     }
                     lastError = e.message
                     bump(db, item)
-                    return false
+                    return FlushResult.RETRY
                 }
                 else -> {
                     lastError = e.message
                     bump(db, item)
-                    return false
+                    return FlushResult.RETRY
                 }
             }
         } catch (e: Exception) {
             lastError = e.message
             bump(db, item)
-            return false
+            return FlushResult.RETRY
         }
     }
 
@@ -173,11 +187,19 @@ object CheckinSync {
                         lng = o.optDouble("lng", 0.0),
                         radius = o.optDouble("radius", 150.0),
                         updatedAt = updatedMs,
-                        assigned = assignedIds.contains(o.getString("id")) || existing?.assigned == true,
+                        // G-1 (phase 1 / task 2): the server now only returns
+                        // ASSIGNED customers — `assigned` mirrors server truth.
+                        assigned = true,
                     )
                 )
             }
             if (list.isNotEmpty()) db.doctorDao().upsertAll(list)
+            // G-1 (phase 1 / task 2): reconcile with the server's assignment
+            // truth — drop local rows that are no longer assigned to this
+            // employee (works for both full and incremental syncs because the
+            // server always returns the complete assignedIds list).
+            if (assignedIds.isEmpty()) db.doctorDao().clear()
+            else db.doctorDao().keepOnly(assignedIds.toList())
             lastError = null
             true
         } catch (e: Exception) {
