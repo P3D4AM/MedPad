@@ -25,6 +25,7 @@
   "/api/employees/[id]/tokens/route": "/api/employees/[id]/tokens",
   "/api/employees/route": "/api/employees",
   "/api/login/route": "/api/login",
+  "/api/logout-all/route": "/api/logout-all",
   "/api/logout/route": "/api/logout",
   "/api/media/[...path]/route": "/api/media/[...path]",
   "/api/notifications/route": "/api/notifications",

@@ -391,6 +391,62 @@ chk "G2 migration re-added columns after reboot (instrumentation)" "[ $RC -eq 0 
 CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Medpad-Token: $TOK_A2" "$BASE/api/app/config")
 chk "G2 auth works against the migrated DB" "[ \"$CODE\" = 200 ]"
 
+# ═════════════════════════════════════════════════════════════
+# G-5 — authenticated admin logout (current + all sessions)
+# ═════════════════════════════════════════════════════════════
+
+# G5.1 unauthenticated logout -> 401 (was: 200 for anyone on the network)
+CODE=$(curl -s -o $W/lo1.json -w '%{http_code}' -X POST "$BASE/api/logout")
+chk "G5 logout without session -> 401" "[ \"$CODE\" = 401 ]"
+
+# G5.2 employee app token is NOT an admin session (header form)
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/logout" -H "X-Medpad-Token: $TOK_A2")
+chk "G5 logout with employee token (header) -> 401" "[ \"$CODE\" = 401 ]"
+
+# G5.3 a non-admin/foreign value in the admin cookie is rejected
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/logout" \
+  -H "Cookie: medpad_admin=$TOK_A2")
+chk "G5 logout with employee token as admin cookie -> 401" "[ \"$CODE\" = 401 ]"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/logout" \
+  -H "Cookie: medpad_admin=forged-session-value")
+chk "G5 logout with forged admin cookie -> 401" "[ \"$CODE\" = 401 ]"
+
+# G5.4 authenticated CURRENT-session logout -> 200, scope 'current'.
+# The untrusted body must be ignored: the target is always the CALLER's own
+# session — no parameter can select another administrator's session.
+CODE=$(curl -s -b $W/cj -o $W/lo2.json -w '%{http_code}' -X POST "$BASE/api/logout" \
+  -H 'content-type: application/json' -d '{"session":"someone-elses","user":"other"}')
+chk "G5 current-session logout -> 200 (untrusted body ignored)" "[ \"$CODE\" = 200 ]"
+chk "G5 current-session logout scope=current" "grep -q '\"scope\":\"current\"' $W/lo2.json"
+
+# G5.5 the session is REALLY invalidated afterwards
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -b $W/cj "$BASE/api/stats")
+chk "G5 admin request after logout -> 401" "[ \"$CODE\" = 401 ]"
+
+# G5.6 logging out again (now unauthenticated) -> 401, not a silent 200
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -b $W/cj -X POST "$BASE/api/logout")
+chk "G5 repeat logout after invalidation -> 401" "[ \"$CODE\" = 401 ]"
+
+# G5.7 unauthenticated logout-all -> 401
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/logout-all")
+chk "G5 logout-all without session -> 401" "[ \"$CODE\" = 401 ]"
+
+# G5.9 re-login, then authenticated ALL-sessions logout
+curl -s -c $W/cj2 -X POST $BASE/api/login -H 'content-type: application/json' \
+  -d '{"username":"admin","password":"RemedT2!pass"}' -o /dev/null
+CODE=$(curl -s -b $W/cj2 -o $W/lo3.json -w '%{http_code}' -X POST "$BASE/api/logout-all")
+chk "G5 all-sessions logout -> 200" "[ \"$CODE\" = 200 ]"
+chk "G5 all-sessions logout scope=all" "grep -q '\"scope\":\"all\"' $W/lo3.json"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -b $W/cj2 "$BASE/api/stats")
+chk "G5 admin request after logout-all -> 401" "[ \"$CODE\" = 401 ]"
+
+# G5.10 the admin can always log back in (workflow preserved)
+curl -s -c $W/cj -X POST $BASE/api/login -H 'content-type: application/json' \
+  -d '{"username":"admin","password":"RemedT2!pass"}' -o $W/adm-re.json
+chk "G5 admin re-login after logouts works" "grep -q '\"ok\":true' $W/adm-re.json"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -b $W/cj "$BASE/api/stats")
+chk "G5 re-authenticated admin request -> 200" "[ \"$CODE\" = 200 ]"
+
 # ── teardown ─────────────────────────────────────────────────
 (cd $W/inst && node server-manager.mjs stop --quiet > /dev/null 2>&1)
 sleep 1

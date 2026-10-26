@@ -226,6 +226,12 @@
       "namedRegex": "^/api/logout(?:/)?$"
     },
     {
+      "page": "/api/logout-all",
+      "regex": "^/api/logout\\-all(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/logout\\-all(?:/)?$"
+    },
+    {
       "page": "/api/notifications",
       "regex": "^/api/notifications(?:/)?$",
       "routeKeys": {},

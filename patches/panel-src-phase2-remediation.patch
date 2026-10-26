@@ -12,6 +12,8 @@
 #        admin-configurable TTL (appTokenTtlHours, 0..8760, default 720h,
 #        0 = never), admin settings API + revoke endpoint, src/lib/settings.ts,
 #        src/instrumentation.ts runtime migration for existing databases.
+#   G-5  admin logout requires a valid admin session; /api/logout scope
+#        'current' and /api/logout-all scope 'all' as separate endpoints.
 #   (this file is regenerated per commit; see WORKLOG for per-commit state)
 diff -ru a/package-lock.json b/package-lock.json
 --- orig/package-lock.json	2026-10-26 08:03:29.878780200 +0000
@@ -404,6 +406,45 @@ diff -ru a/src/app/api/employees/route.ts b/src/app/api/employees/route.ts
  } as const
  
  export async function GET() {
+diff -ru a/src/app/api/logout/route.ts b/src/app/api/logout/route.ts
+--- orig/src/app/api/logout/route.ts	2026-10-26 08:03:29.880780219 +0000
++++ b/src/app/api/logout/route.ts	2026-10-26 08:11:29.479520092 +0000
+@@ -1,9 +1,31 @@
+ import { NextResponse } from 'next/server'
+-import { ADMIN_COOKIE, setConfig } from '@/lib/auth'
++import { ADMIN_COOKIE, isAdmin, setConfig } from '@/lib/auth'
+ 
+-export async function POST() {
++/**
++ * phase 1 / task 2 (G-5): admin logout REQUIRES a valid admin session.
++ *
++ * Before this change POST /api/logout had no authentication at all — anyone
++ * on the network could clear Config.adminSession and force the admin out
++ * (a nuisance-level CSRF-adjacent abuse; SameSite=lax already blunted
++ * cross-site browsers, but the endpoint itself was unauthenticated).
++ *
++ * Scope of THIS endpoint: log out the CURRENT administrator session.
++ * The request body is intentionally ignored — a caller can never select
++ * another identity or session through untrusted parameters.
++ *
++ * Note on the architecture: the panel has ONE admin account with ONE
++ * session slot (Config.adminSession) — a new login replaces the previous
++ * token. "Logout all sessions" therefore shares the same storage slot and
++ * is exposed as a SEPARATE endpoint (/api/logout-all) with an explicit
++ * scope, so the two operations stay independently testable and the
++ * distinction survives any future multi-session extension.
++ */
++export async function POST(req: Request) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
+   await setConfig('adminSession', '')
+-  const res = NextResponse.json({ ok: true })
++  const res = NextResponse.json({ ok: true, scope: 'current' })
+   res.cookies.set(ADMIN_COOKIE, '', { httpOnly: true, path: '/', maxAge: 0 })
+   return res
+ }
+Only in b/src/app/api: logout-all
 diff -ru a/src/components/panel/Dashboard.tsx b/src/components/panel/Dashboard.tsx
 --- orig/src/components/panel/Dashboard.tsx	2026-10-26 08:03:29.881780229 +0000
 +++ b/src/components/panel/Dashboard.tsx	2026-10-26 08:06:38.594626379 +0000

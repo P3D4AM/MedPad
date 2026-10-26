@@ -25,6 +25,7 @@
   "/api/employees/[id]/tokens/route": "app/api/employees/[id]/tokens/route.js",
   "/api/employees/route": "app/api/employees/route.js",
   "/api/login/route": "app/api/login/route.js",
+  "/api/logout-all/route": "app/api/logout-all/route.js",
   "/api/logout/route": "app/api/logout/route.js",
   "/api/media/[...path]/route": "app/api/media/[...path]/route.js",
   "/api/notifications/route": "app/api/notifications/route.js",
