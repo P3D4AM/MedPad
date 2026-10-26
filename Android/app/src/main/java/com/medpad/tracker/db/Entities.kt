@@ -3,6 +3,7 @@ package com.medpad.tracker.db
 import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
@@ -100,6 +101,60 @@ interface PendingCheckinDao {
 
     @Query("SELECT COUNT(*) FROM pending_checkins WHERE kind = 'checkin' AND customerId = :customerId AND createdAt > :since")
     suspend fun recentCount(customerId: String, since: Long): Int
+}
+
+/**
+ * Planned visit cached from the server (phase 2 / task 2).
+ *
+ * READ-ONLY cache: the app can never write a plan — status 'done' is set
+ * exclusively by the server's check-in linkage, so the local table is a
+ * mirror of the last successful sync, nothing more. A sync REPLACES the
+ * whole table (plans for the requested window arrive complete from the
+ * server; there is no LWW to arbitrate because there is no local edit).
+ *
+ * All display fields are server-computed mirrors (dayKey / timeLocal /
+ * visitStartLocal) — the device never does timezone arithmetic on plan
+ * times, so a device clock or timezone can never shift a plan to another
+ * day. Customer data is denormalized here (NOT joined with `doctors`)
+ * because plans may reference customers that are no longer assigned —
+ * those arrive from the server already MASKED (name/address/phone null,
+ * customerAssigned=false).
+ */
+@Entity(tableName = "planned_visits", indices = [Index("dayKey")])
+data class PlannedVisitEntity(
+    @PrimaryKey val id: String,
+    val customerId: String,
+    val dayKey: String,               // server-local YYYY-MM-DD — canonical grouping key
+    val timeLocal: String,            // server-local HH:mm — rendered verbatim
+    val scheduledAtMs: Long,          // epoch ms — ordering only
+    val durationMin: Int,
+    val priority: String,             // low | normal | high
+    val status: String,               // scheduled | done | cancelled | needs_reschedule
+    val note: String? = null,
+    val visitId: String? = null,      // linked REAL visit (set by the server only)
+    val visitStartLocal: String? = null,
+    val visitOpen: Boolean = false,
+    val overdue: Boolean = false,     // computed on the SERVER clock — every device agrees
+    val customerName: String? = null, // null when the customer is no longer assigned (masked)
+    val customerType: String? = null,
+    val customerAddress: String? = null,
+    val customerPhone: String? = null,
+    val customerAssigned: Boolean = false,
+)
+
+@Dao
+interface PlannedVisitDao {
+    @Query("SELECT * FROM planned_visits WHERE dayKey = :dayKey ORDER BY timeLocal")
+    suspend fun byDay(dayKey: String): List<PlannedVisitEntity>
+
+    @Query("SELECT COUNT(*) FROM planned_visits")
+    suspend fun count(): Int
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(items: List<PlannedVisitEntity>)
+
+    @Query("DELETE FROM planned_visits")
+    suspend fun clear()
 }
 
 /**

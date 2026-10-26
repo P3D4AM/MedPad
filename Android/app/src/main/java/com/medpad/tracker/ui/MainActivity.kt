@@ -24,6 +24,7 @@ import com.medpad.tracker.R
 import com.medpad.tracker.Session
 import com.medpad.tracker.location.TrackingService
 import com.medpad.tracker.sync.CheckinSync
+import com.medpad.tracker.sync.PlansSync
 import com.medpad.tracker.sync.TrackerContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -66,6 +67,9 @@ class MainActivity : AppCompatActivity() {
             scope.launch(Dispatchers.IO) {
                 CheckinSync.flush()
                 CheckinSync.syncDoctors()
+                // phase 2 / task 2: refresh the plans cache too (read-only,
+                // separate table — a failure here cannot touch the queue)
+                PlansSync.sync()
                 withContext(Dispatchers.Main) { updateQueueStatus() }
             }
         }
@@ -104,6 +108,10 @@ class MainActivity : AppCompatActivity() {
         }
         findViewById<View>(R.id.cardReports).setOnClickListener {
             startActivity(Intent(this, ReportsActivity::class.java))
+        }
+        // phase 2 / task 2: planned visits screen
+        findViewById<View>(R.id.cardPlans).setOnClickListener {
+            startActivity(Intent(this, PlansActivity::class.java))
         }
         findViewById<View>(R.id.cardMap).setOnClickListener {
             startActivity(Intent(this, DoctorsMapActivity::class.java))

@@ -180,6 +180,13 @@ object ApiClient {
         return exec(req(path))
     }
 
+    // ── planned visits (phase 2 / task 2 — read-only) ─────
+    /** Own visit plans for an inclusive server-local day range
+     *  (YYYY-MM-DD). The server pins the employee to the token's identity. */
+    @Throws(Exception::class)
+    fun plannedVisits(from: String, to: String): JSONObject =
+        exec(req("/api/app/planned-visits?from=$from&to=$to"))
+
     @Throws(Exception::class)
     fun proximity(customerId: String, lat: Double?, lng: Double?): JSONObject {
         val body = JSONObject().put("customerId", customerId)

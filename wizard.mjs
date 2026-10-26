@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * MedPad Browser Installer (wizard) v1.9.12 — GUI backend, localhost only.
+ * MedPad Browser Installer (wizard) v1.9.13-dev.1 — GUI backend, localhost only.
  *
  * Brought back by user request: the installer can run either in the CLI or
  * as a SETUP PAGE IN THE BROWSER that opens automatically (install.mjs
@@ -42,7 +42,7 @@ import url from 'url'
 import { readConfig, openBrowser, portBusy } from './services.mjs'
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url))
-const WIZARD_VER = '1.9.12'
+const WIZARD_VER = '1.9.13-dev.1'
 const PORT = Number(process.env.MEDPAD_WIZARD_PORT || process.env.SETUP_PORT || 3199)
 
 function installerVer() {

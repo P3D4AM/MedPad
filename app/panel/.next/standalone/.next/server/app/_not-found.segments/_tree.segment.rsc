@@ -2,4 +2,4 @@
 :HL["/fonts/vazirmatn.css","style"]
 2:[["children",{"s":"__PAGE__","h":160}]]
 1:[["children",{"s":"/_not-found","h":96,"c":"$Q2"}]]
-0:{"b":"H7N0879p-ks7gUUyH_lfG","t":{"t":{"s":"","h":80,"c":"$Q1"}}}
+0:{"b":"RXERgdhxMKETbQXywWi7t","t":{"t":{"s":"","h":80,"c":"$Q1"}}}

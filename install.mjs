@@ -111,7 +111,7 @@ import readline from 'readline'
 import { stopMedPadServices, classifyPortOwners, portBusy, readConfig, openBrowser } from './services.mjs'
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url))
-export const INSTALLER_VER = '1.9.12'
+export const INSTALLER_VER = '1.9.13-dev.1'
 const PANEL_PORT_DEFAULT = 3000
 const RT_PORT_DEFAULT = 3003
 const LOG = path.join(__dirname, 'install.log')

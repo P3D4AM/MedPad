@@ -218,6 +218,12 @@
       "namedRegex": "^/api/app/notifications/read(?:/)?$"
     },
     {
+      "page": "/api/app/planned-visits",
+      "regex": "^/api/app/planned\\-visits(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/app/planned\\-visits(?:/)?$"
+    },
+    {
       "page": "/api/app/proximity",
       "regex": "^/api/app/proximity(?:/)?$",
       "routeKeys": {},

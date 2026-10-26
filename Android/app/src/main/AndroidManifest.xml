@@ -32,6 +32,7 @@
 
         <activity android:name=".ui.MainActivity" android:exported="false" />
         <activity android:name=".ui.ReportsActivity" android:exported="false" />
+        <activity android:name=".ui.PlansActivity" android:exported="false" />
         <activity android:name=".ui.DoctorsMapActivity" android:exported="false" />
 
         <service

@@ -33,8 +33,14 @@ import java.util.Locale
 /**
  * Check-in dialog with text + voice.
  * v1.9.1: startNow() actually called, live recording timer, localId idempotency.
+ * phase 2 / task 2: optional preselectCustomerId — when the dialog is opened
+ * from a planned visit, the customer is preselected in the spinner (the
+ * flow itself is UNCHANGED: same GPS/voice/queue/idempotency path).
  */
-class CheckinDialogFragment(private val onDone: () -> Unit) : DialogFragment() {
+class CheckinDialogFragment(
+    private val preselectCustomerId: String? = null,
+    private val onDone: () -> Unit,
+) : DialogFragment() {
 
     private val scope = CoroutineScope(Dispatchers.Main)
     private val handler = Handler(Looper.getMainLooper())
@@ -74,6 +80,14 @@ class CheckinDialogFragment(private val onDone: () -> Unit) : DialogFragment() {
             } else {
                 val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_dropdown_item, doctors.map { it.name })
                 spCustomer.adapter = adapter
+                // phase 2 / task 2: opened from a planned visit → preselect its
+                // customer (only if it is still in the assigned list; a masked /
+                // unassigned customer is surfaced honestly instead)
+                preselectCustomerId?.let { pid ->
+                    val idx = doctors.indexOfFirst { it.id == pid }
+                    if (idx >= 0) spCustomer.setSelection(idx)
+                    else tvRecState?.text = getString(R.string.plan_customer_not_in_list)
+                }
             }
         }
 

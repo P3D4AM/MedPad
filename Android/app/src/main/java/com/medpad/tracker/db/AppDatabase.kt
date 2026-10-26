@@ -8,14 +8,15 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [Doctor::class, PendingCheckin::class, PendingLocation::class],
-    version = 7,
+    entities = [Doctor::class, PendingCheckin::class, PendingLocation::class, PlannedVisitEntity::class],
+    version = 8,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun doctorDao(): DoctorDao
     abstract fun pendingCheckinDao(): PendingCheckinDao
     abstract fun pendingLocationDao(): PendingLocationDao
+    abstract fun plannedVisitDao(): PlannedVisitDao
 
     companion object {
         @Volatile private var inst: AppDatabase? = null
@@ -27,7 +28,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "medpad.db",
                 )
-                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                     .build()
                     .also { inst = it }
             }
@@ -52,6 +53,39 @@ abstract class AppDatabase : RoomDatabase() {
         private val MIGRATION_6_7 = object : Migration(6, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE pending_checkins ADD COLUMN accuracy REAL")
+            }
+        }
+
+        // phase 2 / task 2: server-planned visits cache. Purely ADDITIVE — a
+        // new table, nothing existing is touched: the check-in offline queue
+        // (pending_checkins), the doctors cache and the location points all
+        // survive byte-for-byte. Plans are READ-ONLY for the app, so a failed
+        // or interrupted sync can never lose check-in data.
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `planned_visits` (" +
+                        "`id` TEXT NOT NULL, " +
+                        "`customerId` TEXT NOT NULL, " +
+                        "`dayKey` TEXT NOT NULL, " +
+                        "`timeLocal` TEXT NOT NULL, " +
+                        "`scheduledAtMs` INTEGER NOT NULL, " +
+                        "`durationMin` INTEGER NOT NULL, " +
+                        "`priority` TEXT NOT NULL, " +
+                        "`status` TEXT NOT NULL, " +
+                        "`note` TEXT, " +
+                        "`visitId` TEXT, " +
+                        "`visitStartLocal` TEXT, " +
+                        "`visitOpen` INTEGER NOT NULL, " +
+                        "`overdue` INTEGER NOT NULL, " +
+                        "`customerName` TEXT, " +
+                        "`customerType` TEXT, " +
+                        "`customerAddress` TEXT, " +
+                        "`customerPhone` TEXT, " +
+                        "`customerAssigned` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`id`))"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_planned_visits_dayKey` ON `planned_visits` (`dayKey`)")
             }
         }
     }

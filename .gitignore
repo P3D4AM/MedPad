@@ -59,3 +59,10 @@ New Text Document.txt
 # OS junk
 Thumbs.db
 .DS_Store
+
+# Android build outputs (phase 2 / task 2: APK builds now happen in-tree)
+# — built locally or in CI, never source.
+Android/.gradle/
+Android/build/
+Android/app/build/
+Android/local.properties

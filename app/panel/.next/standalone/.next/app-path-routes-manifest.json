@@ -13,6 +13,7 @@
   "/api/app/login/route": "/api/app/login",
   "/api/app/notifications/read/route": "/api/app/notifications/read",
   "/api/app/notifications/route": "/api/app/notifications",
+  "/api/app/planned-visits/route": "/api/app/planned-visits",
   "/api/app/proximity/route": "/api/app/proximity",
   "/api/app/reports/route": "/api/app/reports",
   "/api/assignments/route": "/api/assignments",

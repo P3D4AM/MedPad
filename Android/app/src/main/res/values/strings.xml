@@ -84,4 +84,47 @@
     <!-- G-2 (phase 1 / task 2): server-side token revocation/expiry UX -->
     <string name="session_expired">نشست شما در سرور منقضی یا باطل شده است. برای ادامه باید دوباره وارد شوید.</string>
     <string name="login_again">ورود مجدد</string>
+
+    <!-- Planned visits (phase 2 / task 2) -->
+    <string name="plans_title">برنامهٔ بازدیدها</string>
+    <string name="plan_prev_day">روز قبل</string>
+    <string name="plan_next_day">روز بعد</string>
+    <string name="plan_today">امروز</string>
+    <string name="plan_refresh">به‌روزرسانی</string>
+    <string name="plan_section_remaining">باقی‌مانده</string>
+    <string name="plan_section_done">انجام‌شده</string>
+    <string name="plan_section_needs_reschedule">نیازمند برنامه‌ریزی مجدد</string>
+    <string name="plan_section_cancelled">لغوشده</string>
+    <string name="plan_empty">برنامه‌ای برای این روز ثبت نشده است</string>
+    <string name="plan_loading">در حال دریافت برنامه‌ها…</string>
+    <string name="plan_load_error">خطا در دریافت برنامه‌ها — اتصال اینترنت یا سرور را بررسی و دوباره تلاش کنید</string>
+    <string name="plan_offline_cache">آفلاین — آخرین دادهٔ همگام‌شده نمایش داده می‌شود</string>
+    <string name="plan_last_sync">آخرین همگام‌سازی: %s</string>
+    <string name="plan_never_synced">هنوز همگام‌سازی‌ای موفق ثبت نشده است</string>
+    <string name="plan_priority_low">کم</string>
+    <string name="plan_priority_normal">معمولی</string>
+    <string name="plan_priority_high">مهم</string>
+    <string name="plan_status_scheduled">برنامه‌ریزی‌شده</string>
+    <string name="plan_status_done">انجام‌شده</string>
+    <string name="plan_status_cancelled">لغوشده</string>
+    <string name="plan_status_needs_reschedule">نیازمند برنامه‌ریزی مجدد</string>
+    <string name="plan_overdue">عقب‌افتاده</string>
+    <string name="plan_duration_min">⏱ %s دقیقه</string>
+    <string name="plan_visit_at">✔ بازدید واقعی ثبت شد: %s</string>
+    <string name="plan_visit_open_now">✔ بازدید در جریان است</string>
+    <string name="plan_customer_masked">این مشتری دیگر به شما منتسب نیست — برای پیگیری با مدیر هماهنگ کنید</string>
+    <string name="plan_customer_masked_name">مشتری خارج از محدودهٔ شما</string>
+    <string name="plan_customer_not_in_list">این مشتری در فهرست چک‌این شما نیست (منتسب نیست)</string>
+    <string name="plan_start_visit">شروع بازدید (چک‌این)</string>
+    <string name="plan_details_title">جزئیات برنامه</string>
+    <string name="plan_call">تماس</string>
+    <string name="plan_close">بستن</string>
+    <string name="plan_checkin_queued_note">چک‌این در صف ارسال قرار گرفت — پس از اتصال به سرور، وضعیت برنامه به‌روز می‌شود</string>
+    <string name="plan_meta_line">مدت: %s دقیقه • اولویت: %s</string>
+    <string name="plan_type_doctor">پزشک</string>
+    <string name="plan_type_pharmacy">داروخانه</string>
+    <string name="plan_type_clinic">کلینیک</string>
+    <string name="plan_type_other">مشتری</string>
+    <string name="plan_status_hint_cancelled">این برنامه لغو شده است و قابل ثبت از اپ نیست.</string>
+    <string name="plan_status_hint_done">این برنامه با یک بازدید واقعی تکمیل شده است.</string>
 </resources>

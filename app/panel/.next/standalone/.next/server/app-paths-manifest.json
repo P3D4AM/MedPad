@@ -13,6 +13,7 @@
   "/api/app/login/route": "app/api/app/login/route.js",
   "/api/app/notifications/read/route": "app/api/app/notifications/read/route.js",
   "/api/app/notifications/route": "app/api/app/notifications/route.js",
+  "/api/app/planned-visits/route": "app/api/app/planned-visits/route.js",
   "/api/app/proximity/route": "app/api/app/proximity/route.js",
   "/api/app/reports/route": "app/api/app/reports/route.js",
   "/api/assignments/route": "app/api/assignments/route.js",

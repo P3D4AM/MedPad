@@ -36,6 +36,11 @@ object CheckinSync {
 
     fun markSessionAlive() { sessionExpired = false }
 
+    /** phase 2 / task 2: plans sync can also observe a 401 — route it through
+     *  the SAME signal so the existing session-expired UX (MainActivity) and
+     *  PlansActivity both react to one source of truth. */
+    fun markSessionExpired() { sessionExpired = true }
+
     suspend fun enqueue(kind: String, customerId: String?, note: String, voiceFile: File?, lat: Double?, lng: Double?, accuracyM: Double? = null): PendingCheckin {
         val db = AppDatabase.get(TrackerContext.app)
         val item = PendingCheckin(

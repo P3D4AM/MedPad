@@ -1,0 +1,201 @@
+# Panel source patch — phase 2 / task 2: Android planned visits + Dev release
+# Applies at panel-src root:  patch -p1 < this.patch
+# Base: git commit bd9c80b (medpad-full-1.9/inst-stage/panel-src)
+#        WITH patches/panel-src-phase1-task1.patch,
+#             patches/panel-src-phase2-remediation.patch AND
+#             patches/panel-src-phase2-task1.patch ALREADY applied.
+# Full reconstruction chain:
+#   bd9c80b -> +phase1-task1 -> +phase2-remediation -> +phase2-task1
+#            -> +THIS PATCH = complete source at v1.9.13-dev.1
+#
+# After applying: npm install && npx prisma generate && npm run build
+# (package.json/lock untouched — next 16.4.3 — this task adds NO dependency.)
+#
+# Contents — phase 2 / task 2 (employee app + dev packaging):
+#   * NEW src/app/api/app/planned-visits/route.ts — the employee app's
+#     READ-ONLY own-plans endpoint. Identity comes ONLY from the app token
+#     (appEmployee: expired/revoked/deactivated -> 401); employeeId is pinned
+#     server-side, a client-sent id is not even read. Customer contact data
+#     (name/address/phone) is disclosed ONLY for currently-assigned customers
+#     (plans for unassigned customers stay visible as the employee's own
+#     schedule but their customer object is masked — assigned:false, nulls).
+#     Window: ?date=YYYY-MM-DD or ?from&to (inclusive, span <= 31 days,
+#     malformed dates REJECTED 400 — never silently answered with another
+#     day); response capped at 200 rows with truncated:true. Every plan
+#     carries server-computed mirrors (dayKey, timeLocal, visitStartLocal)
+#     so the app never does timezone arithmetic; overdue is computed on the
+#     server clock so every device agrees. 'done' remains server-only —
+#     set exclusively by the existing check-in linkage (unchanged).
+#
+# Nothing else in the panel source changes in this task: the admin APIs,
+# the admin UI (PlansTab), the check-in linkage, prisma schema and
+# instrumentation are exactly as phase 2 / task 1 shipped them.
+diff -ruN -x node_modules -x .next -x dev.log -x server.log -x '.env*' panel-src-task1/src/app/api/app/planned-visits/route.ts panel-src/src/app/api/app/planned-visits/route.ts
+--- panel-src-task1/src/app/api/app/planned-visits/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ panel-src/src/app/api/app/planned-visits/route.ts	2026-10-26 10:42:17.846128619 +0000
+@@ -0,0 +1,165 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { appEmployee } from '@/lib/auth'
++import { localDayRange, localDayKey, parseDayParam } from '@/lib/planned-visit'
++
++/**
++ * phase 2 / task 2 — the employee app's own visit plans (READ-ONLY).
++ *
++ * GET /api/app/planned-visits
++ *   ?from=YYYY-MM-DD&to=YYYY-MM-DD   inclusive server-local day range
++ *   ?date=YYYY-MM-DD                  single server-local day
++ *   (no params → today, server-local)
++ *
++ * Authorization (all server-side, mirroring G-1/G-2 of phase 1):
++ *   - identity comes ONLY from the app token (appEmployee): expired,
++ *     revoked or deactivated → 401. Any client-supplied employee id is
++ *     ignored — the where-clause is pinned to the authenticated employee.
++ *   - plans are read-only for the app: 'done' is only ever set by the
++ *     check-in linkage on the server (see /api/app/checkin). The app can
++ *     never mark a plan done, edit, cancel or reschedule one.
++ *   - customer contact data (name/address/phone) is disclosed ONLY for
++ *     customers currently assigned to this employee. A plan for a customer
++ *     that is no longer assigned still appears (it is the employee's own
++ *     schedule), but its customer object is masked — assigned:false,
++ *     name/address/phone null — so the list can never be used to farm
++ *     customer data after an assignment is removed.
++ *   - the window is validated (real calendar dates, from ≤ to, span ≤ 31
++ *     days) and the response is capped (200 rows, truncated:true).
++ *
++ * Times are SERVER-LOCAL by definition (the same clock that groups days
++ * for the check-in linkage). The app renders the precomputed mirrors
++ * (dayKey / timeLocal / visitStartLocal) verbatim and never does its own
++ * timezone arithmetic — the device clock/timezone cannot shift a plan to
++ * another day.
++ */
++const APP_RANGE_LIMIT_DAYS = 31
++const APP_LIST_LIMIT = 200
++
++export async function GET(req: Request) {
++  const emp = await appEmployee(req)
++  if (!emp) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++
++  const url = new URL(req.url)
++
++  let range: { start: Date; end: Date }
++
++  // ── resolve the day window (default: today, server-local) ──
++  // Malformed date params are REJECTED (400), absent params default to
++  // today — a typo must never silently answer with a different day.
++  const dateRaw = url.searchParams.get('date')
++  if (dateRaw !== null) {
++    const day = parseDayParam(dateRaw)
++    if (!day) return NextResponse.json({ ok: false, error: 'تاریخ نامعتبر است (YYYY-MM-DD)' }, { status: 400 })
++    range = day
++  } else {
++    const fromRaw = url.searchParams.get('from')
++    const toRaw = url.searchParams.get('to')
++    if (fromRaw === null && toRaw === null) {
++      range = localDayRange(new Date())
++    } else {
++      const from = fromRaw !== null ? parseDayParam(fromRaw) : null
++      const to = toRaw !== null ? parseDayParam(toRaw) : null
++      if (!from || !to) {
++        return NextResponse.json(
++          { ok: false, error: 'بازهٔ تاریخ نامعتبر است — هر دو «از» و «تا» با قالب YYYY-MM-DD لازم است' },
++          { status: 400 },
++        )
++      }
++      if (to.start < from.start) {
++        return NextResponse.json({ ok: false, error: 'تاریخ «از» باید قبل از تاریخ «تا» باشد' }, { status: 400 })
++      }
++      const spanDays = Math.round((to.start.getTime() - from.start.getTime()) / 86_400_000) + 1
++      if (spanDays > APP_RANGE_LIMIT_DAYS) {
++        return NextResponse.json(
++          { ok: false, error: `بازهٔ درخواست حداکثر می‌تواند ${APP_RANGE_LIMIT_DAYS} روز باشد` },
++          { status: 400 },
++        )
++      }
++      range = { start: from.start, end: to.end } // the `to` day is inclusive
++    }
++  }
++
++  // employee is ALWAYS the authenticated one — a client-sent employeeId
++  // is not even read, so it can never widen the scope.
++  const rows = await db.plannedVisit.findMany({
++    where: { employeeId: emp.id, scheduledAt: { gte: range.start, lt: range.end } },
++    select: {
++      id: true,
++      customerId: true,
++      scheduledAt: true,
++      durationMin: true,
++      priority: true,
++      status: true,
++      note: true,
++      visitId: true,
++      customer: { select: { id: true, name: true, type: true, address: true, phone: true } },
++      visit: { select: { id: true, startAt: true, open: true } },
++    },
++    orderBy: [{ scheduledAt: 'asc' }, { createdAt: 'asc' }],
++    take: APP_LIST_LIMIT + 1,
++  })
++  const truncated = rows.length > APP_LIST_LIMIT
++  if (truncated) rows.pop()
++
++  // current assignment truth — the only customers whose data may leave
++  const assigned = await db.assignment.findMany({
++    where: { employeeId: emp.id },
++    select: { customerId: true },
++  })
++  const assignedIds = new Set(assigned.map((a) => a.customerId))
++
++  const now = new Date()
++  const p2 = (n: number) => String(n).padStart(2, '0')
++  const timeLocal = (d: Date) => `${p2(d.getHours())}:${p2(d.getMinutes())}`
++
++  const plans = rows.map((r) => {
++    const assignedNow = assignedIds.has(r.customerId)
++    return {
++      id: r.id,
++      customerId: r.customerId,
++      scheduledAt: r.scheduledAt.toISOString(),
++      dayKey: localDayKey(r.scheduledAt),
++      timeLocal: timeLocal(r.scheduledAt),
++      durationMin: r.durationMin,
++      priority: r.priority,
++      status: r.status,
++      note: r.note,
++      visitId: r.visitId,
++      // the linked REAL visit (server-local mirror, ready to render)
++      visitStartLocal: r.visit ? timeLocal(r.visit.startAt) : null,
++      visitOpen: r.visit ? r.visit.open : false,
++      // 'overdue' is computed on the server clock so every device agrees
++      overdue: r.status === 'scheduled' && r.scheduledAt.getTime() < now.getTime(),
++      customer: assignedNow
++        ? {
++            id: r.customer.id,
++            name: r.customer.name,
++            type: r.customer.type,
++            address: r.customer.address,
++            phone: r.customer.phone,
++            assigned: true,
++          }
++        : {
++            id: r.customer.id,
++            name: null,
++            type: null,
++            address: null,
++            phone: null,
++            assigned: false,
++          },
++    }
++  })
++
++  return NextResponse.json({
++    ok: true,
++    plans,
++    truncated,
++    window: {
++      from: localDayKey(range.start),
++      to: localDayKey(new Date(range.end.getTime() - 1)), // inclusive last day
++      today: localDayKey(now),
++    },
++    serverTime: now.toISOString(),
++  })
++}
