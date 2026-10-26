@@ -1,6 +1,7 @@
 {
   "/_global-error/page": "app/_global-error/page.js",
   "/_not-found/page": "app/_not-found/page.js",
+  "/api/admin/settings/route": "app/api/admin/settings/route.js",
   "/api/admin/socket-auth/route": "app/api/admin/socket-auth/route.js",
   "/api/app/checkin/route": "app/api/app/checkin/route.js",
   "/api/app/checkout/route": "app/api/app/checkout/route.js",
@@ -20,6 +21,8 @@
   "/api/customers/[id]/route": "app/api/customers/[id]/route.js",
   "/api/customers/route": "app/api/customers/route.js",
   "/api/employees/[id]/route": "app/api/employees/[id]/route.js",
+  "/api/employees/[id]/tokens/revoke/route": "app/api/employees/[id]/tokens/revoke/route.js",
+  "/api/employees/[id]/tokens/route": "app/api/employees/[id]/tokens/route.js",
   "/api/employees/route": "app/api/employees/route.js",
   "/api/login/route": "app/api/login/route.js",
   "/api/logout/route": "app/api/logout/route.js",

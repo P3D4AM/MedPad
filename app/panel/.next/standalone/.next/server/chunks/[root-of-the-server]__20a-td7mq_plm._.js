@@ -1,0 +1,3 @@
+module.exports=[83700,e=>{e.v(t=>Promise.all(["server/chunks/[externals]_@prisma_client_1ltre0sawm6cs._.js"].map(t=>e.l(t))).then(()=>t(63021)))},23322,e=>{"use strict";let t=['ALTER TABLE "AppToken" ADD COLUMN "expiresAt" DATETIME','ALTER TABLE "AppToken" ADD COLUMN "revokedAt" DATETIME'];async function a(){let{PrismaClient:a}=await e.A(83700),s=new a,r=0;for(let e of t)try{await s.$executeRawUnsafe(e),r++}catch(a){let t=a instanceof Error?a.message:String(a);if(/duplicate column name|already exists/i.test(t))continue;console.error(`[medpad][migrate] FAILED: ${e} -> ${t}`)}await s.$disconnect(),r>0&&console.log(`[medpad][migrate] applied ${r} column migration(s)`)}e.s(["register",0,a])}];
+
+//# sourceMappingURL=%5Broot-of-the-server%5D__20a-td7mq_plm._.js.map

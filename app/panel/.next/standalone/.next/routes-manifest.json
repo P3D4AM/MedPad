@@ -62,6 +62,22 @@
       "namedRegex": "^/api/employees/(?<nxtPid>[^/]+?)(?:/)?$"
     },
     {
+      "page": "/api/employees/[id]/tokens",
+      "regex": "^/api/employees/([^/]+?)/tokens(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/employees/(?<nxtPid>[^/]+?)/tokens(?:/)?$"
+    },
+    {
+      "page": "/api/employees/[id]/tokens/revoke",
+      "regex": "^/api/employees/([^/]+?)/tokens/revoke(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/employees/(?<nxtPid>[^/]+?)/tokens/revoke(?:/)?$"
+    },
+    {
       "page": "/api/media/[...path]",
       "regex": "^/api/media/(.+?)(?:/)?$",
       "routeKeys": {
@@ -94,6 +110,12 @@
       "regex": "^/api(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api(?:/)?$"
+    },
+    {
+      "page": "/api/admin/settings",
+      "regex": "^/api/admin/settings(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/admin/settings(?:/)?$"
     },
     {
       "page": "/api/admin/socket-auth",

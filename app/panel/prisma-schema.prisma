@@ -33,12 +33,19 @@ model Employee {
 }
 
 model AppToken {
-  id         String   @id @default(cuid())
-  token      String   @unique
+  id         String    @id @default(cuid())
+  token      String    @unique
   employeeId String
-  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  createdAt  DateTime @default(now())
-  lastUsedAt DateTime @default(now())
+  employee   Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime  @default(now())
+
+  // phase 1 / task 2 (G-2): configurable expiry + server-side revocation.
+  // NULL expiresAt = token never expires (pre-remediation rows and installs
+  // that deliberately disable the TTL — appTokenTtlHours = 0).
+  // revokedAt set = token is dead for every subsequent request, immediately.
+  expiresAt  DateTime?
+  revokedAt  DateTime?
 }
 
 model Customer {

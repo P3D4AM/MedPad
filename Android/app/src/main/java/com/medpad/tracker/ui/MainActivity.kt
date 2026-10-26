@@ -202,6 +202,21 @@ class MainActivity : AppCompatActivity() {
             val old = pv.isNotEmpty() && pv.split('.').firstOrNull()?.toIntOrNull()?.let { it < 1 } == true ||
                 pv.startsWith("1.6") || pv.startsWith("1.7")
             findViewById<TextView>(R.id.tvPanelWarning).visibility = if (old) View.VISIBLE else View.GONE
+            // G-2 (phase 1 / task 2): the server rejected our token (expired,
+            // revoked or the employee was deactivated) → send the user to the
+            // login screen instead of silently staying "logged in" offline.
+            if (CheckinSync.sessionExpired) {
+                AlertDialog.Builder(this@MainActivity)
+                    .setMessage(R.string.session_expired)
+                    .setCancelable(false)
+                    .setPositiveButton(R.string.login_again) { _, _ ->
+                        TrackingService.stop(this@MainActivity)
+                        Session.clear(this@MainActivity)
+                        startActivity(Intent(this@MainActivity, LoginActivity::class.java))
+                        finish()
+                    }
+                    .show()
+            }
         }
         // also check open visits for checkout UX hint (best-effort)
         scope.launch(Dispatchers.IO) {

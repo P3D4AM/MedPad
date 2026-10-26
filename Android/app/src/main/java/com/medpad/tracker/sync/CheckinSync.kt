@@ -26,6 +26,16 @@ object CheckinSync {
     @Volatile var lastError: String? = null
         private set
 
+    /** G-2 (phase 1 / task 2): set when the server answers 401 — the token
+     *  is expired/revoked/invalid and the user must log in again. The UI
+     *  (MainActivity) watches this and sends the user to the login screen.
+     *  Server-side revocation/deactivation therefore reaches the device on
+     *  the next flush or sync attempt, not just "silently" stops syncing. */
+    @Volatile var sessionExpired: Boolean = false
+        private set
+
+    fun markSessionAlive() { sessionExpired = false }
+
     suspend fun enqueue(kind: String, customerId: String?, note: String, voiceFile: File?, lat: Double?, lng: Double?): PendingCheckin {
         val db = AppDatabase.get(TrackerContext.app)
         val item = PendingCheckin(
@@ -98,6 +108,7 @@ object CheckinSync {
             if (resp.optBoolean("ok")) {
                 db.pendingCheckinDao().delete(item)
                 lastError = null
+                markSessionAlive()
                 return FlushResult.SENT
             }
             // ok=false with 200 — treat as failure
@@ -108,6 +119,7 @@ object CheckinSync {
             when (e.code) {
                 401 -> { // token invalid/expired/revoked → stop flushing, keep data
                     lastError = "unauthorized"
+                    sessionExpired = true
                     bump(db, item)
                     return FlushResult.RETRY
                 }
@@ -201,9 +213,11 @@ object CheckinSync {
             if (assignedIds.isEmpty()) db.doctorDao().clear()
             else db.doctorDao().keepOnly(assignedIds.toList())
             lastError = null
+            markSessionAlive() // a successful authed call proves the token works
             true
         } catch (e: Exception) {
             lastError = e.message
+            if (e is HttpException && e.code == 401) sessionExpired = true
             false
         }
     }

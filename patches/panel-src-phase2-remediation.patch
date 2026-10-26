@@ -8,9 +8,11 @@
 #   G-1  customer authorization: app/customers list returns only ASSIGNED
 #        customers; app PUT /api/app/customers/[id] and app check-in enforce
 #        server-side assignment (403 otherwise).
+#   G-2  app-token expiry + revocation: AppToken.expiresAt/revokedAt,
+#        admin-configurable TTL (appTokenTtlHours, 0..8760, default 720h,
+#        0 = never), admin settings API + revoke endpoint, src/lib/settings.ts,
+#        src/instrumentation.ts runtime migration for existing databases.
 #   (this file is regenerated per commit; see WORKLOG for per-commit state)
-diff -ru a/package-lock.json fixed/package-lock.json
---- orig/package-lock.json	2026-10-26 08:03:29.878780200 +0000
 diff -ru a/package-lock.json b/package-lock.json
 --- orig/package-lock.json	2026-10-26 08:03:29.878780200 +0000
 +++ b/package-lock.json	2026-10-26 07:56:24.770452186 +0000
@@ -221,6 +223,35 @@ diff -ru a/package.json b/package.json
    },
    "devDependencies": {
      "@tailwindcss/postcss": "^4",
+diff -ru a/prisma/schema.prisma b/prisma/schema.prisma
+--- orig/prisma/schema.prisma	2026-10-26 08:03:29.878780200 +0000
++++ b/prisma/schema.prisma	2026-10-26 08:04:45.891521751 +0000
+@@ -33,12 +33,19 @@
+ }
+ 
+ model AppToken {
+-  id         String   @id @default(cuid())
+-  token      String   @unique
++  id         String    @id @default(cuid())
++  token      String    @unique
+   employeeId String
+-  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+-  createdAt  DateTime @default(now())
+-  lastUsedAt DateTime @default(now())
++  employee   Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
++  createdAt  DateTime  @default(now())
++  lastUsedAt DateTime  @default(now())
++
++  // phase 1 / task 2 (G-2): configurable expiry + server-side revocation.
++  // NULL expiresAt = token never expires (pre-remediation rows and installs
++  // that deliberately disable the TTL — appTokenTtlHours = 0).
++  // revokedAt set = token is dead for every subsequent request, immediately.
++  expiresAt  DateTime?
++  revokedAt  DateTime?
+ }
+ 
+ model Customer {
+Only in b/src/app/api/admin: settings
 diff -ru a/src/app/api/app/checkin/route.ts b/src/app/api/app/checkin/route.ts
 --- orig/src/app/api/app/checkin/route.ts	2026-10-26 08:03:29.879780210 +0000
 +++ b/src/app/api/app/checkin/route.ts	2026-10-26 07:57:28.711078479 +0000
@@ -319,3 +350,255 @@ diff -ru a/src/app/api/app/customers/route.ts b/src/app/api/app/customers/route.
      serverTime: new Date().toISOString(),
    })
  }
+diff -ru a/src/app/api/app/login/route.ts b/src/app/api/app/login/route.ts
+--- orig/src/app/api/app/login/route.ts	2026-10-26 08:03:29.880780219 +0000
++++ b/src/app/api/app/login/route.ts	2026-10-26 08:05:46.698117441 +0000
+@@ -1,6 +1,7 @@
+ import { NextResponse } from 'next/server'
+ import { db } from '@/lib/db'
+ import { newToken, verifyPassword, hashPassword } from '@/lib/auth'
++import { getAdminSettings } from '@/lib/settings'
+ import { clientIp, lockoutRemaining, recordFailure, recordSuccess, sweep } from '@/lib/rate-limit'
+ 
+ export const dynamic = 'force-dynamic'
+@@ -9,7 +10,11 @@
+  *  v1.9.12: bcrypt with transparent legacy-SHA-256 migration (re-hash on login).
+  *  v1.9.12 (audit phase 3): rate limiting — 5 failures per IP+username per
+  *  15 min locks that pair out for 15 min (brute-force protection for the
+- *  4-digit-ish employee passwords used in the field). */
++ *  4-digit-ish employee passwords used in the field).
++ *  phase 1 / task 2 (G-2): new tokens carry expiresAt from the admin-
++ *  configurable TTL (appTokenTtlHours; 0 = never expires). Existing
++ *  sessions issued before the TTL was set (expiresAt NULL) stay valid —
++ *  deployment never silently logs users out. */
+ export async function POST(req: Request) {
+   sweep()
+   const { username, password } = await req.json().catch(() => ({ username: '', password: '' }))
+@@ -40,10 +45,15 @@
+     await db.employee.update({ where: { id: emp.id }, data: { password: hashPassword(String(password)) } })
+   }
+   const token = newToken()
+-  await db.appToken.create({ data: { token, employeeId: emp.id } })
++  // G-2: stamp the admin-configurable TTL onto the new token (0 = no expiry)
++  const { appTokenTtlHours } = await getAdminSettings()
++  const expiresAt =
++    appTokenTtlHours > 0 ? new Date(Date.now() + appTokenTtlHours * 3600 * 1000) : null
++  await db.appToken.create({ data: { token, employeeId: emp.id, expiresAt } })
+   return NextResponse.json({
+     ok: true,
+     token,
++    expiresAt: expiresAt ? expiresAt.toISOString() : null,
+     employee: { id: emp.id, name: emp.name, username: emp.username },
+   })
+ }
+Only in b/src/app/api/employees/[id]: tokens
+diff -ru a/src/app/api/employees/route.ts b/src/app/api/employees/route.ts
+--- orig/src/app/api/employees/route.ts	2026-10-26 08:03:29.880780219 +0000
++++ b/src/app/api/employees/route.ts	2026-10-26 08:06:07.214318444 +0000
+@@ -24,7 +24,7 @@
+       customer: { select: { id: true, name: true } },
+     },
+   },
+-  _count: { select: { checkins: true } },
++  _count: { select: { checkins: true, tokens: true } },
+ } as const
+ 
+ export async function GET() {
+diff -ru a/src/components/panel/Dashboard.tsx b/src/components/panel/Dashboard.tsx
+--- orig/src/components/panel/Dashboard.tsx	2026-10-26 08:03:29.881780229 +0000
++++ b/src/components/panel/Dashboard.tsx	2026-10-26 08:06:38.594626379 +0000
+@@ -3,14 +3,24 @@
+ import { useCallback, useEffect, useRef, useState } from 'react'
+ import { Badge } from '@/components/ui/badge'
+ import { Button } from '@/components/ui/button'
++import { Input } from '@/components/ui/input'
++import { Label } from '@/components/ui/label'
+ import { useToast } from '@/hooks/use-toast'
+ import {
++  Dialog,
++  DialogContent,
++  DialogFooter,
++  DialogHeader,
++  DialogTitle,
++} from '@/components/ui/dialog'
++import {
+   Bell,
+   CalendarCheck,
+   DoorOpen,
+   Download,
+   LogOut,
+   RadioTower,
++  Settings,
+ } from 'lucide-react'
+ import OverviewTab from './OverviewTab'
+ import CheckinsTab from './CheckinsTab'
+@@ -40,6 +50,10 @@
+   const [connected, setConnected] = useState(false)
+   const [live, setLive] = useState<Checkin[]>([]) // realtime events stream
+   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
++  // G-2 (phase 1 / task 2): admin settings dialog (app-token TTL)
++  const [showSettings, setShowSettings] = useState(false)
++  const [ttlHours, setTtlHours] = useState('')
++  const [savingSettings, setSavingSettings] = useState(false)
+ 
+   const bumpRefresh = useCallback(() => {
+     if (refreshTimer.current) clearTimeout(refreshTimer.current)
+@@ -87,6 +101,33 @@
+     onLogout()
+   }
+ 
++  // G-2: load settings when the dialog opens
++  useEffect(() => {
++    if (!showSettings) return
++    fetch('/api/admin/settings', { cache: 'no-store' })
++      .then((r) => r.json())
++      .then((d) => d.ok && setTtlHours(String(d.settings.appTokenTtlHours)))
++      .catch(() => {})
++  }, [showSettings])
++
++  async function saveSettings() {
++    setSavingSettings(true)
++    try {
++      const res = await fetch('/api/admin/settings', {
++        method: 'PUT',
++        headers: { 'content-type': 'application/json' },
++        body: JSON.stringify({ appTokenTtlHours: Number(ttlHours) }),
++      })
++      const data = await res.json()
++      if (data.ok) {
++        toast({ title: 'تنظیمات ذخیره شد' })
++        setShowSettings(false)
++      } else toast({ title: 'خطا', description: data.error, variant: 'destructive' })
++    } finally {
++      setSavingSettings(false)
++    }
++  }
++
+   return (
+     <div className="min-h-screen flex flex-col bg-gradient-to-b from-teal-50/60 to-background">
+       {/* Header */}
+@@ -113,6 +154,9 @@
+           <Button variant="ghost" size="icon" title="مرکز دانلود" onClick={() => window.open('/downloads.html', '_blank')}>
+             <Download className="h-4 w-4" />
+           </Button>
++          <Button variant="ghost" size="icon" title="تنظیمات" onClick={() => setShowSettings(true)}>
++            <Settings className="h-4 w-4" />
++          </Button>
+           <Button variant="ghost" size="icon" title="اعلان‌های مرورگر" onClick={requestNotifyPermission}>
+             <Bell className="h-4 w-4" />
+           </Button>
+@@ -151,6 +195,38 @@
+       <footer className="mt-auto border-t bg-background/60 py-3 text-center text-xs text-muted-foreground">
+         MedPad v{cfg.panelVersion} — سیستم کنترل کارمندها با گزارش صوتی و اعلان لحظه‌ای
+       </footer>
++
++      {/* G-2: admin settings dialog (app-token TTL) */}
++      <Dialog open={showSettings} onOpenChange={setShowSettings}>
++        <DialogContent dir="rtl" className="sm:max-w-sm">
++          <DialogHeader>
++            <DialogTitle>تنظیمات امنیتی</DialogTitle>
++          </DialogHeader>
++          <div className="grid gap-2">
++            <Label>انقضای نشست اپ (ساعت)</Label>
++            <Input
++              dir="ltr"
++              className="text-left"
++              inputMode="numeric"
++              value={ttlHours}
++              onChange={(e) => setTtlHours(e.target.value)}
++            />
++            <p className="text-xs text-muted-foreground">
++              نشست‌های جدید اپ بعد از این مدت منقضی می‌شوند و کاربر باید دوباره وارد شود.
++              ۰ = بدون انقضا · مجاز: ۰ تا ۸۷۶۰ (یک سال). تغییر این مقدار روی نشست‌های فعلی اثر
++              گذشته ندارد.
++            </p>
++          </div>
++          <DialogFooter>
++            <Button variant="outline" onClick={() => setShowSettings(false)}>
++              انصراف
++            </Button>
++            <Button className="bg-teal-600 hover:bg-teal-700" onClick={saveSettings} disabled={savingSettings}>
++              ذخیره
++            </Button>
++          </DialogFooter>
++        </DialogContent>
++      </Dialog>
+     </div>
+   )
+ }
+diff -ru a/src/components/panel/EmployeesTab.tsx b/src/components/panel/EmployeesTab.tsx
+--- orig/src/components/panel/EmployeesTab.tsx	2026-10-26 08:03:29.881780229 +0000
++++ b/src/components/panel/EmployeesTab.tsx	2026-10-26 08:06:18.183426052 +0000
+@@ -14,7 +14,7 @@
+   DialogTitle,
+ } from '@/components/ui/dialog'
+ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+-import { Link2, Plus, RefreshCw, Unlink, UserPlus } from 'lucide-react'
++import { KeyRound, Link2, Plus, RefreshCw, Unlink, UserPlus } from 'lucide-react'
+ import type { Assignment, Customer, Employee } from '@/lib/types'
+ 
+ export default function EmployeesTab({ refreshKey }: { refreshKey: number }) {
+@@ -90,6 +90,18 @@
+     await load()
+   }
+ 
++  // G-2 (phase 1 / task 2): revoke ALL active app tokens of an employee —
++  // takes effect immediately for subsequent server requests.
++  async function revokeTokens(emp: Employee) {
++    if (!confirm(`همهٔ نشست‌های اپ ${emp.name} فوراً باطل شود؟ (کاربر باید دوباره وارد شود)`)) return
++    const res = await fetch(`/api/employees/${emp.id}/tokens/revoke`, { method: 'POST' })
++    const data = await res.json().catch(() => ({ ok: false }))
++    if (data.ok) {
++      alert(data.revoked > 0 ? `${data.revoked} نشست باطل شد` : 'نشست فعالی وجود نداشت')
++      await load()
++    } else alert(data.error || 'خطا در ابطال نشست‌ها')
++  }
++
+   return (
+     <div className="space-y-4">
+       <div className="flex items-center gap-2">
+@@ -118,6 +130,18 @@
+                 <span className="text-xs text-muted-foreground">
+                   {e._count?.checkins ?? 0} چک‌این
+                 </span>
++                <span className="text-xs text-muted-foreground" title="نشست‌های اپ صادرشده">
++                  {e._count?.tokens ?? 0} نشست اپ
++                </span>
++                <Button
++                  variant="ghost"
++                  size="sm"
++                  className="text-destructive hover:text-destructive"
++                  onClick={() => revokeTokens(e)}
++                  title="ابطال همهٔ نشست‌های اپ این کارمند"
++                >
++                  <KeyRound className="h-4 w-4" /> قطع دسترسی اپ
++                </Button>
+                 <Button
+                   variant="ghost"
+                   size="sm"
+Only in b/src: instrumentation.ts
+diff -ru a/src/lib/auth.ts b/src/lib/auth.ts
+--- orig/src/lib/auth.ts	2026-10-26 08:03:29.882780238 +0000
++++ b/src/lib/auth.ts	2026-10-26 08:04:51.453576170 +0000
+@@ -55,7 +55,10 @@
+   return !!row && row.value === tok
+ }
+ 
+-/** Employee (app) auth via header or ?token= — returns employee or null */
++/** Employee (app) auth via header or ?token= — returns employee or null.
++ *  phase 1 / task 2 (G-2): the token row is checked for revocation and
++ *  expiry on EVERY request (DB lookup, no cache — a revoked or expired
++ *  token is rejected immediately, server-side). NULL expiresAt = no expiry. */
+ export async function appEmployee(req: Request) {
+   const url = new URL(req.url)
+   let tok = req.headers.get(APP_TOKEN_HEADER) || ''
+@@ -63,6 +66,8 @@
+   if (!tok) return null
+   const row = await db.appToken.findUnique({ where: { token: tok }, include: { employee: true } })
+   if (!row || !row.employee.active) return null
++  if (row.revokedAt !== null) return null
++  if (row.expiresAt !== null && row.expiresAt.getTime() <= Date.now()) return null
+   // refresh lastUsed (fire & forget)
+   db.appToken.update({ where: { token: tok }, data: { lastUsedAt: new Date() } }).catch(() => {})
+   return row.employee
+Only in b/src/lib: settings.ts

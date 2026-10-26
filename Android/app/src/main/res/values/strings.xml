@@ -81,4 +81,7 @@
     <string name="panel_incompatible">پنل شما قدیمی است — گزارش صوتی ارسال نمی‌شود</string>
     <string name="logout">خروج</string>
     <string name="logout_confirm">خروج از حساب؟</string>
+    <!-- G-2 (phase 1 / task 2): server-side token revocation/expiry UX -->
+    <string name="session_expired">نشست شما در سرور منقضی یا باطل شده است. برای ادامه باید دوباره وارد شوید.</string>
+    <string name="login_again">ورود مجدد</string>
 </resources>

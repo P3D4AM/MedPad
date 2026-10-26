@@ -1,6 +1,7 @@
 {
   "/_global-error/page": "/_global-error",
   "/_not-found/page": "/_not-found",
+  "/api/admin/settings/route": "/api/admin/settings",
   "/api/admin/socket-auth/route": "/api/admin/socket-auth",
   "/api/app/checkin/route": "/api/app/checkin",
   "/api/app/checkout/route": "/api/app/checkout",
@@ -20,6 +21,8 @@
   "/api/customers/[id]/route": "/api/customers/[id]",
   "/api/customers/route": "/api/customers",
   "/api/employees/[id]/route": "/api/employees/[id]",
+  "/api/employees/[id]/tokens/revoke/route": "/api/employees/[id]/tokens/revoke",
+  "/api/employees/[id]/tokens/route": "/api/employees/[id]/tokens",
   "/api/employees/route": "/api/employees",
   "/api/login/route": "/api/login",
   "/api/logout/route": "/api/logout",

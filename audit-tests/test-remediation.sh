@@ -223,6 +223,174 @@ curl -s -H "X-Medpad-Token: $TOK_N" "$BASE/api/app/customers" -o $W/none.json
 chk "G1 zero-assignment employee -> empty list, ok:true" \
   "python3 -c \"import json;d=json.load(open('$W/none.json'));assert d['ok'] and d['customers']==[]\" 2>/dev/null"
 
+# ═════════════════════════════════════════════════════════════
+# G-2 — app-token expiration + immediate server-side revocation
+# ═════════════════════════════════════════════════════════════
+DB=$W/inst/panel/db/custom.db
+
+# G2.1 default TTL is 720 (30 days)
+curl -s -b $W/cj "$BASE/api/admin/settings" -o $W/set.json
+chk "G2 settings default appTokenTtlHours=720" \
+  "python3 -c \"import json;assert json.load(open('$W/set.json'))['settings']['appTokenTtlHours']==720\" 2>/dev/null"
+
+# G2.2 settings require an admin session
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/admin/settings")
+chk "G2 settings GET without admin -> 401" "[ \"$CODE\" = 401 ]"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/admin/settings" \
+  -H 'content-type: application/json' -d '{"appTokenTtlHours":10}')
+chk "G2 settings PUT without admin -> 401" "[ \"$CODE\" = 401 ]"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/api/admin/settings" \
+  -H "X-Medpad-Token: $TOK_A" -H 'content-type: application/json' -d '{"appTokenTtlHours":10}')
+chk "G2 settings PUT with employee token -> 401" "[ \"$CODE\" = 401 ]"
+
+# G2.3 invalid TTL values rejected (server-side validation)
+for BAD in '-5' '8761' '12.5' 'abc'; do
+  CODE=$(curl -s -o /dev/null -w '%{http_code}' -b $W/cj -X PUT "$BASE/api/admin/settings" \
+    -H 'content-type: application/json' -d "{\"appTokenTtlHours\":\"$BAD\"}")
+  chk "G2 settings PUT invalid value '$BAD' -> 400" "[ \"$CODE\" = 400 ]"
+done
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -b $W/cj -X PUT "$BASE/api/admin/settings" \
+  -H 'content-type: application/json' -d '{"unknownSetting":5}')
+chk "G2 settings PUT unknown key -> 400" "[ \"$CODE\" = 400 ]"
+
+# G2.4 boundary values accepted
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -b $W/cj -X PUT "$BASE/api/admin/settings" \
+  -H 'content-type: application/json' -d '{"appTokenTtlHours":0}')
+chk "G2 settings PUT boundary 0 -> 200" "[ \"$CODE\" = 200 ]"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -b $W/cj -X PUT "$BASE/api/admin/settings" \
+  -H 'content-type: application/json' -d '{"appTokenTtlHours":8760}')
+chk "G2 settings PUT boundary 8760 -> 200" "[ \"$CODE\" = 200 ]"
+
+# G2.5 TTL=0 -> new token has NO expiry (pre-remediation behavior, opt-in)
+curl -s -b $W/cj -X PUT "$BASE/api/admin/settings" -H 'content-type: application/json' \
+  -d '{"appTokenTtlHours":0}' -o /dev/null
+curl -s -X POST $BASE/api/app/login -H 'content-type: application/json' \
+  -d '{"username":"g1_alice","password":"alicepass1"}' -o $W/al-ttl0.json
+chk "G2 TTL=0 -> expiresAt null" \
+  "python3 -c \"import json;assert json.load(open('$W/al-ttl0.json'))['expiresAt'] is None\" 2>/dev/null"
+TOK_TTL0=$(python3 -c "import json;print(json.load(open('$W/al-ttl0.json'))['token'])")
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Medpad-Token: $TOK_TTL0" "$BASE/api/app/config")
+chk "G2 TTL=0 token works" "[ \"$CODE\" = 200 ]"
+
+# G2.6 TTL=1h -> new token carries expiresAt ~1h in the future
+curl -s -b $W/cj -X PUT "$BASE/api/admin/settings" -H 'content-type: application/json' \
+  -d '{"appTokenTtlHours":1}' -o /dev/null
+curl -s -X POST $BASE/api/app/login -H 'content-type: application/json' \
+  -d '{"username":"g1_alice","password":"alicepass1"}' -o $W/al-ttl1.json
+chk "G2 TTL=1h -> expiresAt ~1h ahead" \
+  "python3 -c \"
+import json,datetime
+d=json.load(open('$W/al-ttl1.json'))['expiresAt']
+exp=datetime.datetime.fromisoformat(d.replace('Z','+00:00'))
+now=datetime.datetime.now(datetime.timezone.utc)
+assert 3500 < (exp-now).total_seconds() < 3700, (exp-now)\" 2>/dev/null"
+TOK_TTL1=$(python3 -c "import json;print(json.load(open('$W/al-ttl1.json'))['token'])")
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Medpad-Token: $TOK_TTL1" "$BASE/api/app/config")
+chk "G2 valid (unexpired) token works" "[ \"$CODE\" = 200 ]"
+
+# G2.7 malformed token -> 401
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Medpad-Token: malformed-token-xyz" "$BASE/api/app/config")
+chk "G2 malformed token -> 401" "[ \"$CODE\" = 401 ]"
+
+# G2.8 EXPIRED token -> 401 (age the token directly in SQLite, like time passing)
+python3 - "$DB" "$TOK_TTL1" << 'EOF'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+db.execute('UPDATE AppToken SET expiresAt = ? WHERE token = ?', (1710000000000, sys.argv[2]))
+db.commit(); db.close()
+EOF
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Medpad-Token: $TOK_TTL1" "$BASE/api/app/config")
+chk "G2 expired token -> 401 (immediately, no restart)" "[ \"$CODE\" = 401 ]"
+
+# G2.9 pre-remediation token (expiresAt NULL) keeps working — no mass logout on deploy
+python3 - "$DB" "$TOK_TTL0" << 'EOF'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+db.execute('UPDATE AppToken SET expiresAt = NULL, revokedAt = NULL WHERE token = ?', (sys.argv[2],))
+db.commit(); db.close()
+EOF
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Medpad-Token: $TOK_TTL0" "$BASE/api/app/config")
+chk "G2 legacy token (expiresAt NULL) still valid" "[ \"$CODE\" = 200 ]"
+
+# G2.10 ADMIN REVOCATION — immediate effect
+curl -s -b $W/cj -X POST "$BASE/api/employees/$EMP_A/tokens/revoke" -o $W/rev.json
+chk "G2 admin revoke-all -> ok with count" \
+  "python3 -c \"import json;d=json.load(open('$W/rev.json'));assert d['ok'] and d['revoked']>=1\" 2>/dev/null"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Medpad-Token: $TOK_TTL0" "$BASE/api/app/config")
+chk "G2 revoked token -> 401 IMMEDIATELY" "[ \"$CODE\" = 401 ]"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Medpad-Token: $TOK_TTL0" "$BASE/api/app/customers")
+chk "G2 revoked token rejected on ANOTHER endpoint too" "[ \"$CODE\" = 401 ]"
+
+# G2.11 unauthorized revocation attempts
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/employees/$EMP_A/tokens/revoke")
+chk "G2 revoke without admin session -> 401" "[ \"$CODE\" = 401 ]"
+curl -s -X POST $BASE/api/app/login -H 'content-type: application/json' \
+  -d '{"username":"g1_bob","password":"bobpass11"}' -o $W/bo2.json
+TOK_B2=$(python3 -c "import json;print(json.load(open('$W/bo2.json'))['token'])")
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/employees/$EMP_A/tokens/revoke" \
+  -H "X-Medpad-Token: $TOK_B2")
+chk "G2 revoke with employee token -> 401" "[ \"$CODE\" = 401 ]"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Medpad-Token: $TOK_B2" "$BASE/api/employees/$EMP_A/tokens")
+chk "G2 token LIST with employee token -> 401" "[ \"$CODE\" = 401 ]"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/employees/$EMP_A/tokens")
+chk "G2 token LIST without session -> 401" "[ \"$CODE\" = 401 ]"
+
+# G2.12 token list never leaks the secret
+curl -s -b $W/cj "$BASE/api/employees/$EMP_A/tokens" -o $W/toks.json
+chk "G2 token list has metadata only (no secret)" "! grep -q '\"token\"' $W/toks.json"
+chk "G2 token list shows revokedAt set" "grep -q 'revokedAt' $W/toks.json"
+
+# G2.13 after revocation the employee can log in again (new token works)
+curl -s -X POST $BASE/api/app/login -H 'content-type: application/json' \
+  -d '{"username":"g1_alice","password":"alicepass1"}' -o $W/al-new.json
+TOK_A2=$(python3 -c "import json;print(json.load(open('$W/al-new.json'))['token'])")
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Medpad-Token: $TOK_A2" "$BASE/api/app/config")
+chk "G2 re-login after revocation -> new token works" "[ \"$CODE\" = 200 ]"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Medpad-Token: $TOK_TTL0" "$BASE/api/app/config")
+chk "G2 old revoked token stays dead" "[ \"$CODE\" = 401 ]"
+
+# G2.14 corrupt stored setting falls back to the safe default (no unsafe widening)
+python3 - "$DB" << 'EOF'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+db.execute("UPDATE Config SET value='garbage' WHERE key='appTokenTtlHours'")
+db.commit(); db.close()
+EOF
+curl -s -b $W/cj "$BASE/api/admin/settings" -o $W/set2.json
+chk "G2 corrupt stored TTL -> safe default 720" \
+  "python3 -c \"import json;assert json.load(open('$W/set2.json'))['settings']['appTokenTtlHours']==720\" 2>/dev/null"
+
+# G2.15 runtime migration: an OLD (pre-G-2) database gains the columns on boot
+(cd $W/inst && node server-manager.mjs stop --quiet > /dev/null 2>&1)
+sleep 1
+python3 - "$DB" << 'EOF'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+# simulate the pre-G-2 schema: drop the two new columns
+for col in ('expiresAt', 'revokedAt'):
+    try: db.execute(f'ALTER TABLE AppToken DROP COLUMN "{col}"')
+    except Exception as e: print('drop skipped:', e)
+db.commit()
+cols = [r[1] for r in db.execute('PRAGMA table_info(AppToken)')]
+assert 'expiresAt' not in cols and 'revokedAt' not in cols, cols
+db.close()
+EOF
+RC=$?
+chk "G2 old schema simulated (columns dropped)" "[ $RC -eq 0 ]"
+(cd $W/inst && node server-manager.mjs start --no-open > $W/boot2.log 2>&1)
+for i in $(seq 1 40); do curl -s -o /dev/null "$BASE/" && break; sleep 1; done
+python3 - "$DB" << 'EOF'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+cols = [r[1] for r in db.execute('PRAGMA table_info(AppToken)')]
+db.close()
+sys.exit(0 if ('expiresAt' in cols and 'revokedAt' in cols) else 1)
+EOF
+RC=$?
+chk "G2 migration re-added columns after reboot (instrumentation)" "[ $RC -eq 0 ]"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Medpad-Token: $TOK_A2" "$BASE/api/app/config")
+chk "G2 auth works against the migrated DB" "[ \"$CODE\" = 200 ]"
+
 # ── teardown ─────────────────────────────────────────────────
 (cd $W/inst && node server-manager.mjs stop --quiet > /dev/null 2>&1)
 sleep 1
