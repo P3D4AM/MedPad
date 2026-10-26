@@ -100,6 +100,30 @@
         "nxtPpath": "nxtPpath"
       },
       "namedRegex": "^/api/media/(?<nxtPpath>.+?)(?:/)?$"
+    },
+    {
+      "page": "/api/planned-visits/[id]",
+      "regex": "^/api/planned\\-visits/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/planned\\-visits/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/planned-visits/[id]/cancel",
+      "regex": "^/api/planned\\-visits/([^/]+?)/cancel(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/planned\\-visits/(?<nxtPid>[^/]+?)/cancel(?:/)?$"
+    },
+    {
+      "page": "/api/planned-visits/[id]/reschedule",
+      "regex": "^/api/planned\\-visits/([^/]+?)/reschedule(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/planned\\-visits/(?<nxtPid>[^/]+?)/reschedule(?:/)?$"
     }
   ],
   "staticRoutes": [
@@ -264,6 +288,12 @@
       "regex": "^/api/notifications(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api/notifications(?:/)?$"
+    },
+    {
+      "page": "/api/planned-visits",
+      "regex": "^/api/planned\\-visits(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/planned\\-visits(?:/)?$"
     },
     {
       "page": "/api/stats",

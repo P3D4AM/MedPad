@@ -33,6 +33,10 @@
   "/api/logout/route": "/api/logout",
   "/api/media/[...path]/route": "/api/media/[...path]",
   "/api/notifications/route": "/api/notifications",
+  "/api/planned-visits/[id]/cancel/route": "/api/planned-visits/[id]/cancel",
+  "/api/planned-visits/[id]/reschedule/route": "/api/planned-visits/[id]/reschedule",
+  "/api/planned-visits/[id]/route": "/api/planned-visits/[id]",
+  "/api/planned-visits/route": "/api/planned-visits",
   "/api/route": "/api",
   "/api/stats/route": "/api/stats",
   "/page": "/"

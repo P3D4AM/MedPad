@@ -30,6 +30,7 @@ model Employee {
   visits       Visit[]
   assignments  Assignment[]
   notifications AppNotification[]
+  plannedVisits PlannedVisit[]
 }
 
 model AppToken {
@@ -63,6 +64,7 @@ model Customer {
   checkins    Checkin[]
   visits      Visit[]
   assignments Assignment[]
+  plannedVisits PlannedVisit[]
 }
 
 model Assignment {
@@ -121,6 +123,51 @@ model Visit {
 
   checkin  Checkin? @relation("VisitCheckin", fields: [checkinId], references: [id])
   checkout Checkin? @relation("VisitCheckout", fields: [checkoutId], references: [id])
+
+  // phase 2 / task 1 — back-relation only (NO column on Visit): the 1:1 link
+  // between a plan and the real visit is owned by PlannedVisit.visitId, so
+  // existing installs need zero ALTERs on the Visit table.
+  plannedVisit PlannedVisit?
+}
+
+// phase 2 / task 1 — PLANNED VISITS (the intent layer).
+//
+// Design decisions (see PHASE2-TASK1-REPORT-fa.md for the full rationale):
+//  * `Visit` keeps representing what ACTUALLY happened (created by check-in).
+//    PlannedVisit is the INTENT for the future — they are never merged.
+//  * The plan-to-visit link is owned HERE (visitId + UNIQUE): one plan can be
+//    completed by at most one real visit and one visit completes at most one
+//    plan. Owning the FK on the new table means NO migration on Visit at all.
+//  * status: 'scheduled' | 'done' | 'cancelled' | 'needs_reschedule'.
+//    'done' is set ONLY by the server when a real check-in links to the plan
+//    (admins cannot hand-mark done — keeps the done-count honest). Cancelled
+//    and rescheduled plans are NEVER counted as done.
+//  * Reschedule = same row, new scheduledAt (the plan keeps its identity and
+//    any later visit link); cancel = terminal state.
+//  * durationMin: estimated visit duration in minutes (5..480, default 30).
+//  * priority: 'low' | 'normal' | 'high' — small fixed enum, validated
+//    server-side on every write.
+//  * createdById: the admin username (Config.adminUser) at creation time —
+//    attribution/traceability in line with the AuditLog work from task 2.
+//  * Employee/Customer FKs are RESTRICT (default for required): history and
+//    plans are never silently destroyed — the delete endpoints guard with a
+//    409 instead (see employees/customers routes).
+model PlannedVisit {
+  id          String   @id @default(cuid())
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id])
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id])
+  scheduledAt DateTime
+  durationMin Int      @default(30)
+  priority    String   @default("normal") // low | normal | high
+  status      String   @default("scheduled") // scheduled | done | cancelled | needs_reschedule
+  note        String?
+  visitId     String?  @unique
+  visit       Visit?   @relation(fields: [visitId], references: [id])
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 model AppNotification {

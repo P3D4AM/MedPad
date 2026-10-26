@@ -1,0 +1,2437 @@
+# Panel source patch — phase 2 / task 1: Planned Visit Management — FINAL
+# Applies at panel-src root:  patch -p1 < this.patch
+# Base: git commit bd9c80b (medpad-full-1.9/inst-stage/panel-src)
+#        WITH patches/panel-src-phase1-task1.patch AND
+#        patches/panel-src-phase2-remediation.patch ALREADY applied.
+#
+# !!! COMPLETENESS FIX (documented honestly): panel-src-phase2-remediation.patch
+# only carried MODIFICATIONS to files that existed in bd9c80b. The NEW files
+# that task created (src/lib/settings.ts, src/lib/gps.ts, src/lib/audit.ts,
+# src/instrumentation.ts, and 8 new API routes) existed only in the working
+# tree and were missing from that patch. THIS patch carries those files too,
+# so the chain below reconstructs the full source again:
+#   bd9c80b -> +phase1-task1 -> +phase2-remediation -> +THIS PATCH = source
+#
+# After applying: npm install && npx prisma generate && npm run build
+# (package.json/lock identical to phase2-remediation — next 16.4.3 — and are
+# not touched by this patch.)
+#
+# Contents — phase 2 / task 1 (planned field visits):
+#   * prisma/schema.prisma: new PlannedVisit model (employee, customer,
+#     scheduledAt, durationMin, priority low|normal|high, status
+#     scheduled|done|cancelled|needs_reschedule, note, createdById, 1:1 link
+#     visitId UNIQUE owned BY PlannedVisit — Visit gets NO new column) +
+#     back-relations on Employee/Customer/Visit.
+#   * src/instrumentation.ts: idempotent CREATE TABLE IF NOT EXISTS +
+#     UNIQUE INDEX for existing installs (DDL byte-identical to
+#     `prisma db push` output; verified on an old-format database).
+#   * src/lib/planned-visit.ts (new): shared enums, server-side validation,
+#     duplicate guard, server-local day helpers, uniform Prisma select,
+#     scheduledAtLocal mirror for datetime-local prefill.
+#   * src/app/api/planned-visits/* (new routes, ALL admin-only, audited):
+#       GET    /api/planned-visits            day/range list + filters
+#                                             (employee/customer/status) +
+#                                             linked-visit + same-day
+#                                             unlinked-visit context
+#       POST   /api/planned-visits            create (status forced
+#                                             'scheduled'; duplicate 409)
+#       GET    /api/planned-visits/[id]       detail
+#       PUT    /api/planned-visits/[id]       edit open plans only; status
+#                                             limited to the two open states
+#       POST   /api/planned-visits/[id]/cancel        terminal cancel +reason
+#       POST   /api/planned-visits/[id]/reschedule    same row, new time,
+#                                             back to 'scheduled'
+#   * src/app/api/app/checkin/route.ts: automatic plan linkage — a check-in
+#     for the same employee+customer in the same SERVER-LOCAL day completes
+#     the earliest still-open 'scheduled' plan (conditional updateMany +
+#     UNIQUE visitId = race-safe); cancelled/needs-reschedule plans are
+#     never touched, so they are never mistaken for done visits.
+#   * src/app/api/employees/[id]/route.ts + customers/[id]/route.ts: delete
+#     guards extended to planned visits (409 with counts — never a raw FK
+#     500); customer guard also closes the pre-existing visit-restrict 500.
+#   * src/lib/types.ts + realtime.ts: PlannedVisit types + faDate (Jalali
+#     date via the SAME fa-IR Intl path — no new calendar code).
+#   * src/components/panel/PlansTab.tsx (new) + Dashboard.tsx: Persian RTL
+#     day-view UI — Jalali day label, prev/next/today + date box, employee/
+#     customer/status filters, done/remaining/overdue/cancelled summary,
+#     create/edit/reschedule/cancel dialogs, overdue highlighting, linked
+#     real-visit badges, assignment warning on unassigned pairs.
+#
+# Contents — carried from phase 1 / task 2 (completeness fix, see above):
+#   G-2 admin settings API + lib, G-3 audit-log API + lib + employee
+#   lifecycle routes (deactivate/reactivate/tokens), G-4 admin media-orphans
+#   route, G-5 logout-all route, G-6 src/lib/gps.ts, G-2 instrumentation
+#   runtime migrations (AppToken/Checkin columns + AuditLog table).
+diff -ruN orig/prisma/schema.prisma b/prisma/schema.prisma
+--- orig/prisma/schema.prisma	2026-10-26 10:00:50.817135381 +0000
++++ b/prisma/schema.prisma	2026-10-26 09:50:44.000000000 +0000
+@@ -30,6 +30,7 @@
+   visits       Visit[]
+   assignments  Assignment[]
+   notifications AppNotification[]
++  plannedVisits PlannedVisit[]
+ }
+ 
+ model AppToken {
+@@ -63,6 +64,7 @@
+   checkins    Checkin[]
+   visits      Visit[]
+   assignments Assignment[]
++  plannedVisits PlannedVisit[]
+ }
+ 
+ model Assignment {
+@@ -121,6 +123,51 @@
+ 
+   checkin  Checkin? @relation("VisitCheckin", fields: [checkinId], references: [id])
+   checkout Checkin? @relation("VisitCheckout", fields: [checkoutId], references: [id])
++
++  // phase 2 / task 1 — back-relation only (NO column on Visit): the 1:1 link
++  // between a plan and the real visit is owned by PlannedVisit.visitId, so
++  // existing installs need zero ALTERs on the Visit table.
++  plannedVisit PlannedVisit?
++}
++
++// phase 2 / task 1 — PLANNED VISITS (the intent layer).
++//
++// Design decisions (see PHASE2-TASK1-REPORT-fa.md for the full rationale):
++//  * `Visit` keeps representing what ACTUALLY happened (created by check-in).
++//    PlannedVisit is the INTENT for the future — they are never merged.
++//  * The plan-to-visit link is owned HERE (visitId + UNIQUE): one plan can be
++//    completed by at most one real visit and one visit completes at most one
++//    plan. Owning the FK on the new table means NO migration on Visit at all.
++//  * status: 'scheduled' | 'done' | 'cancelled' | 'needs_reschedule'.
++//    'done' is set ONLY by the server when a real check-in links to the plan
++//    (admins cannot hand-mark done — keeps the done-count honest). Cancelled
++//    and rescheduled plans are NEVER counted as done.
++//  * Reschedule = same row, new scheduledAt (the plan keeps its identity and
++//    any later visit link); cancel = terminal state.
++//  * durationMin: estimated visit duration in minutes (5..480, default 30).
++//  * priority: 'low' | 'normal' | 'high' — small fixed enum, validated
++//    server-side on every write.
++//  * createdById: the admin username (Config.adminUser) at creation time —
++//    attribution/traceability in line with the AuditLog work from task 2.
++//  * Employee/Customer FKs are RESTRICT (default for required): history and
++//    plans are never silently destroyed — the delete endpoints guard with a
++//    409 instead (see employees/customers routes).
++model PlannedVisit {
++  id          String   @id @default(cuid())
++  employeeId  String
++  employee    Employee @relation(fields: [employeeId], references: [id])
++  customerId  String
++  customer    Customer @relation(fields: [customerId], references: [id])
++  scheduledAt DateTime
++  durationMin Int      @default(30)
++  priority    String   @default("normal") // low | normal | high
++  status      String   @default("scheduled") // scheduled | done | cancelled | needs_reschedule
++  note        String?
++  visitId     String?  @unique
++  visit       Visit?   @relation(fields: [visitId], references: [id])
++  createdById String?
++  createdAt   DateTime @default(now())
++  updatedAt   DateTime @updatedAt
+ }
+ 
+ model AppNotification {
+diff -ruN orig/src/app/api/admin/media-orphans/route.ts b/src/app/api/admin/media-orphans/route.ts
+--- orig/src/app/api/admin/media-orphans/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/admin/media-orphans/route.ts	2026-10-26 08:20:37.000000000 +0000
+@@ -0,0 +1,48 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { isAdmin } from '@/lib/auth'
++import { VOICE_DIR, safeName } from '@/lib/media'
++import { readdir, stat } from 'fs/promises'
++
++/**
++ * phase 1 / task 2 (G-4): ADMIN-ONLY review path for orphaned audio files —
++ * files on disk under uploads/voice/ that no Checkin row references anymore
++ * (e.g. a crash between file write and row insert).
++ *
++ * Read-only by policy: orphaned files are NEVER deleted automatically. The
++ * admin can download any of them via /api/media/voice/<name> (admins bypass
++ * the employee authorization matrix) and decide case by case.
++ */
++export async function GET() {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  let files: string[] = []
++  try {
++    files = await readdir(VOICE_DIR)
++  } catch {
++    return NextResponse.json({ ok: true, orphans: [] })
++  }
++  // every referenced voice path (just the strings — LAN scale)
++  const rows = await db.checkin.findMany({
++    where: { voicePath: { not: null } },
++    select: { voicePath: true },
++  })
++  const referenced = new Set(rows.map((r) => r.voicePath as string))
++
++  const orphans: { name: string; size: number; modifiedAt: string }[] = []
++  for (const f of files) {
++    const safe = safeName(f)
++    if (!safe) continue // junk/impossible names are skipped, not served
++    if (referenced.has(`voice/${safe}`)) continue
++    try {
++      const st = await stat(VOICE_DIR + '/' + safe)
++      if (!st.isFile()) continue
++      orphans.push({ name: safe, size: st.size, modifiedAt: st.mtime.toISOString() })
++    } catch {
++      /* raced away — skip */
++    }
++  }
++  orphans.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt))
++  return NextResponse.json({ ok: true, orphans })
++}
+diff -ruN orig/src/app/api/admin/settings/route.ts b/src/app/api/admin/settings/route.ts
+--- orig/src/app/api/admin/settings/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/admin/settings/route.ts	2026-10-26 08:16:57.000000000 +0000
+@@ -0,0 +1,43 @@
++import { NextResponse } from 'next/server'
++import { isAdmin } from '@/lib/auth'
++import { getAdminSettings, saveAdminSettings } from '@/lib/settings'
++import { writeAudit } from '@/lib/audit'
++
++/**
++ * phase 1 / task 2 (G-2): admin-configurable server settings.
++ *   GET  /api/admin/settings  -> current values (with effective defaults)
++ *   PUT  /api/admin/settings  -> validate + persist { appTokenTtlHours }
++ * Admin-session only; every value is range-validated server-side and an
++ * invalid stored value falls back to the safe default on read.
++ */
++export async function GET() {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const settings = await getAdminSettings()
++  return NextResponse.json({ ok: true, settings })
++}
++
++export async function PUT(req: Request) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const body = await req.json().catch(() => null) as Record<string, unknown> | null
++  if (!body || typeof body !== 'object') {
++    return NextResponse.json({ ok: false, error: 'بدنهٔ درخواست نامعتبر است' }, { status: 400 })
++  }
++  try {
++    const settings = await saveAdminSettings(body)
++    // G-3: administrative audit trail (values only — never secrets)
++    await writeAudit({
++      action: 'settings.update',
++      targetType: 'Config',
++      detail: `به‌روزرسانی تنظیمات: ${Object.entries(body)
++        .map(([k, v]) => `${k}=${v}`)
++        .join('، ')}`,
++    })
++    return NextResponse.json({ ok: true, settings })
++  } catch (e) {
++    return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : 'خطای اعتبارسنجی' }, { status: 400 })
++  }
++}
+diff -ruN orig/src/app/api/app/checkin/route.ts b/src/app/api/app/checkin/route.ts
+--- orig/src/app/api/app/checkin/route.ts	2026-10-26 10:00:50.820135408 +0000
++++ b/src/app/api/app/checkin/route.ts	2026-10-26 09:54:45.000000000 +0000
+@@ -9,6 +9,7 @@
+ import { getAdminSettings } from '@/lib/settings'
+ import { emitEvent } from '@/lib/emit'
+ import { resolveEventTime } from '@/lib/client-time'
++import { localDayRange } from '@/lib/planned-visit'
+ 
+ const DEDUP_WINDOW_MS = 90_000 // same employee+customer within 90s = duplicate
+ 
+@@ -161,7 +162,7 @@
+   }
+ 
+   // ── New visit ────────────────────────────────────────────
+-  await db.visit.create({
++  const visit = await db.visit.create({
+     data: {
+       employeeId: emp.id,
+       customerId,
+@@ -171,6 +172,38 @@
+     },
+   })
+ 
++  // ── phase 2 / task 1: link this visit to today's matching plan ──
++  // A 'scheduled' plan for the SAME employee + customer whose scheduledAt
++  // falls in the same SERVER-LOCAL day as the check-in event time gets
++  // completed by this visit (status 'done' + the 1:1 visitId link).
++  // Cancelled / needs-reschedule plans are never touched, so they can never
++  // be mistaken for a completed visit. Double-booked days link in order
++  // (earliest plan first; the next check-in takes the next plan). The
++  // conditional updateMany makes the link atomic: only a plan that is STILL
++  // 'scheduled' and STILL unlinked can be completed — the UNIQUE index on
++  // PlannedVisit.visitId is the database-level backstop against double
++  // links under concurrency.
++  const day = localDayRange(eventTime)
++  const matchingPlan = await db.plannedVisit.findFirst({
++    where: {
++      employeeId: emp.id,
++      customerId,
++      status: 'scheduled',
++      visitId: null,
++      scheduledAt: { gte: day.start, lt: day.end },
++    },
++    orderBy: { scheduledAt: 'asc' },
++    select: { id: true },
++  })
++  let planLinked = false
++  if (matchingPlan) {
++    const linked = await db.plannedVisit.updateMany({
++      where: { id: matchingPlan.id, status: 'scheduled', visitId: null },
++      data: { status: 'done', visitId: visit.id },
++    })
++    planLinked = linked.count === 1
++  }
++
+   await emitEvent('checkin', {
+     id: ci.id,
+     employeeName: emp.name,
+@@ -184,6 +217,8 @@
+     locationMissing: ci.locationMissing,
+     distanceM: ci.distanceM,
+     outOfRadius: ci.outOfRadius,
++    // phase 2 / task 1: this check-in completed a planned visit
++    planLinked,
+   })
+ 
+   return NextResponse.json({ ok: true, checkin: ci })
+diff -ruN orig/src/app/api/audit-log/route.ts b/src/app/api/audit-log/route.ts
+--- orig/src/app/api/audit-log/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/audit-log/route.ts	2026-10-26 08:16:42.000000000 +0000
+@@ -0,0 +1,21 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { isAdmin } from '@/lib/auth'
++
++/**
++ * phase 1 / task 2 (G-3): admin audit-log viewer.
++ * GET /api/audit-log?limit=200 — newest first. Admin-session only.
++ */
++export async function GET(req: Request) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const url = new URL(req.url)
++  const limitRaw = Number(url.searchParams.get('limit') || 200)
++  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(Math.trunc(limitRaw), 1), 500) : 200
++  const rows = await db.auditLog.findMany({
++    orderBy: { createdAt: 'desc' },
++    take: limit,
++  })
++  return NextResponse.json({ ok: true, entries: rows })
++}
+diff -ruN orig/src/app/api/customers/[id]/route.ts b/src/app/api/customers/[id]/route.ts
+--- orig/src/app/api/customers/[id]/route.ts	2026-10-26 10:00:50.823135436 +0000
++++ b/src/app/api/customers/[id]/route.ts	2026-10-26 09:55:01.000000000 +0000
+@@ -32,6 +32,26 @@
+     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
+   }
+   const { id } = await ctx.params
++  // phase 2 / task 1: Visit and PlannedVisit both reference Customer with
++  // ON DELETE RESTRICT — deleting such a customer used to surface as an
++  // unhandled FK error (500). Refuse with a clear, actionable 409 instead.
++  // (Checkin.customerId is optional → SetNull, so plain check-in history does
++  // NOT block deletion; assignments cascade as before.)
++  const [visits, planned] = await Promise.all([
++    db.visit.count({ where: { customerId: id } }),
++    db.plannedVisit.count({ where: { customerId: id } }),
++  ])
++  if (visits > 0 || planned > 0) {
++    return NextResponse.json(
++      {
++        ok: false,
++        error: `این مشتری سابقهٔ بازدید دارد (${visits} ویزیت و ${planned} برنامهٔ بازدید) و حذفش ممکن نیست — سوابق واقعی حفظ می‌شوند`,
++        visits,
++        planned,
++      },
++      { status: 409 },
++    )
++  }
+   await db.customer.delete({ where: { id } })
+   return NextResponse.json({ ok: true })
+ }
+diff -ruN orig/src/app/api/employees/[id]/deactivate/route.ts b/src/app/api/employees/[id]/deactivate/route.ts
+--- orig/src/app/api/employees/[id]/deactivate/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/employees/[id]/deactivate/route.ts	2026-10-26 08:16:31.000000000 +0000
+@@ -0,0 +1,41 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { isAdmin } from '@/lib/auth'
++import { writeAudit } from '@/lib/audit'
++
++/**
++ * phase 1 / task 2 (G-3): deactivate an employee.
++ *
++ * - takes effect IMMEDIATELY for subsequent protected requests (appEmployee
++ *   checks employee.active on every call)
++ * - revokes ALL of the employee's app tokens at the same moment
++ * - preserves ALL history (check-ins, visits, audio, audit rows) — nothing
++ *   is deleted or rewritten
++ * - reactivation never restores the revoked tokens (employee logs in again)
++ * - the panel admin account is Config-based, so this can never lock the
++ *   admin out; deactivating the last active employee is allowed and
++ *   reversible
++ */
++export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const { id } = await ctx.params
++  const emp = await db.employee.findUnique({ where: { id } })
++  if (!emp) return NextResponse.json({ ok: false, error: 'پیدا نشد' }, { status: 404 })
++  if (!emp.active) {
++    return NextResponse.json({ ok: false, error: 'این کارمند از قبل غیرفعال است' }, { status: 409 })
++  }
++  const res = await db.appToken.updateMany({
++    where: { employeeId: id, revokedAt: null },
++    data: { revokedAt: new Date() },
++  })
++  await db.employee.update({ where: { id }, data: { active: false } })
++  await writeAudit({
++    action: 'employee.deactivate',
++    targetType: 'Employee',
++    targetId: id,
++    detail: `غیرفعال‌سازی ${emp.username} — ${res.count} نشست اپ فوراً باطل شد`,
++  })
++  return NextResponse.json({ ok: true, revokedTokens: res.count })
++}
+diff -ruN orig/src/app/api/employees/[id]/reactivate/route.ts b/src/app/api/employees/[id]/reactivate/route.ts
+--- orig/src/app/api/employees/[id]/reactivate/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/employees/[id]/reactivate/route.ts	2026-10-26 08:16:38.000000000 +0000
+@@ -0,0 +1,33 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { isAdmin } from '@/lib/auth'
++import { writeAudit } from '@/lib/audit'
++
++/**
++ * phase 1 / task 2 (G-3): reactivate a previously deactivated employee.
++ *
++ * The employee may log in again through the normal authentication flow
++ * (POST /api/app/login — bcrypt + rate limiting) and receives a FRESH
++ * token. Previously revoked tokens are NOT restored: revocation is
++ * one-way by design (a stolen-phone token must stay dead across a
++ * deactivate/reactivate cycle).
++ */
++export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const { id } = await ctx.params
++  const emp = await db.employee.findUnique({ where: { id } })
++  if (!emp) return NextResponse.json({ ok: false, error: 'پیدا نشد' }, { status: 404 })
++  if (emp.active) {
++    return NextResponse.json({ ok: false, error: 'این کارمند از قبل فعال است' }, { status: 409 })
++  }
++  await db.employee.update({ where: { id }, data: { active: true } })
++  await writeAudit({
++    action: 'employee.reactivate',
++    targetType: 'Employee',
++    targetId: id,
++    detail: `فعال‌سازی مجدد ${emp.username} — نشست‌های قبلی باطل‌شده باقی می‌مانند`,
++  })
++  return NextResponse.json({ ok: true })
++}
+diff -ruN orig/src/app/api/employees/[id]/route.ts b/src/app/api/employees/[id]/route.ts
+--- orig/src/app/api/employees/[id]/route.ts	2026-10-26 10:00:50.824135445 +0000
++++ b/src/app/api/employees/[id]/route.ts	2026-10-26 09:54:53.000000000 +0000
+@@ -126,17 +126,21 @@
+   const { id } = await ctx.params
+   const emp = await db.employee.findUnique({ where: { id } })
+   if (!emp) return NextResponse.json({ ok: false, error: 'پیدا نشد' }, { status: 404 })
+-  const [checkins, visits] = await Promise.all([
++  const [checkins, visits, planned] = await Promise.all([
+     db.checkin.count({ where: { employeeId: id } }),
+     db.visit.count({ where: { employeeId: id } }),
++    // phase 2 / task 1: plans reference the employee with ON DELETE RESTRICT —
++    // count them here so the guard stays ahead of the FK (409, not a 500).
++    db.plannedVisit.count({ where: { employeeId: id } }),
+   ])
+-  if (checkins > 0 || visits > 0) {
++  if (checkins > 0 || visits > 0 || planned > 0) {
+     return NextResponse.json(
+       {
+         ok: false,
+-        error: `این کارمند سابقهٔ حضور و غیاب دارد (${checkins} ثبت و ${visits} ویزیت) و حذفش ممکن نیست — برای قطع دسترسی، همان را غیرفعال (active=false) کنید`,
++        error: `این کارمند سابقهٔ حضور و غیاب دارد (${checkins} ثبت و ${visits} ویزیت و ${planned} برنامهٔ بازدید) و حذفش ممکن نیست — برای قطع دسترسی، همان را غیرفعال (active=false) کنید`,
+         checkins,
+         visits,
++        planned,
+       },
+       { status: 409 },
+     )
+diff -ruN orig/src/app/api/employees/[id]/tokens/revoke/route.ts b/src/app/api/employees/[id]/tokens/revoke/route.ts
+--- orig/src/app/api/employees/[id]/tokens/revoke/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/employees/[id]/tokens/revoke/route.ts	2026-10-26 08:17:06.000000000 +0000
+@@ -0,0 +1,36 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { isAdmin } from '@/lib/auth'
++import { writeAudit } from '@/lib/audit'
++
++/**
++ * phase 1 / task 2 (G-2): revoke ALL active app tokens of an employee
++ * (admin only). Takes effect IMMEDIATELY for subsequent requests —
++ * appEmployee() checks revokedAt on every call (no cache in between).
++ * Deleting a token on the Android device is NOT server-side revocation;
++ * this endpoint is. Revocation is one-way: reactivation never restores
++ * revoked tokens — the employee simply logs in again (new token).
++ * G-3: the operation is recorded in the admin audit trail.
++ */
++export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const { id } = await ctx.params
++  const emp = await db.employee.findUnique({ where: { id }, select: { id: true, name: true, username: true } })
++  if (!emp) return NextResponse.json({ ok: false, error: 'پیدا نشد' }, { status: 404 })
++  const now = new Date()
++  // only tokens that are currently usable get stamped — historical revoked
++  // rows keep their original revocation timestamp
++  const res = await db.appToken.updateMany({
++    where: { employeeId: id, revokedAt: null },
++    data: { revokedAt: now },
++  })
++  await writeAudit({
++    action: 'employee.revoke-tokens',
++    targetType: 'Employee',
++    targetId: id,
++    detail: `ابطال دسترسی اپ ${emp.username} — ${res.count} نشست باطل شد`,
++  })
++  return NextResponse.json({ ok: true, revoked: res.count })
++}
+diff -ruN orig/src/app/api/employees/[id]/tokens/route.ts b/src/app/api/employees/[id]/tokens/route.ts
+--- orig/src/app/api/employees/[id]/tokens/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/employees/[id]/tokens/route.ts	2026-10-26 08:05:29.000000000 +0000
+@@ -0,0 +1,33 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { isAdmin } from '@/lib/auth'
++
++/**
++ * phase 1 / task 2 (G-2): list an employee's app tokens (admin only).
++ * The token SECRET is never included in the response — only metadata.
++ */
++export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const { id } = await ctx.params
++  const emp = await db.employee.findUnique({ where: { id }, select: { id: true } })
++  if (!emp) return NextResponse.json({ ok: false, error: 'پیدا نشد' }, { status: 404 })
++  const tokens = await db.appToken.findMany({
++    where: { employeeId: id },
++    select: {
++      id: true,
++      createdAt: true,
++      lastUsedAt: true,
++      expiresAt: true,
++      revokedAt: true,
++    },
++    orderBy: { createdAt: 'desc' },
++    take: 200,
++  })
++  const now = Date.now()
++  const active = tokens.filter(
++    (t) => !t.revokedAt && (t.expiresAt === null || t.expiresAt.getTime() > now),
++  ).length
++  return NextResponse.json({ ok: true, tokens, active })
++}
+diff -ruN orig/src/app/api/logout-all/route.ts b/src/app/api/logout-all/route.ts
+--- orig/src/app/api/logout-all/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/logout-all/route.ts	2026-10-26 08:11:38.000000000 +0000
+@@ -0,0 +1,28 @@
++import { NextResponse } from 'next/server'
++import { ADMIN_COOKIE, isAdmin, setConfig } from '@/lib/auth'
++
++/**
++ * phase 1 / task 2 (G-5): log out ALL administrator sessions.
++ *
++ * Requires a valid admin session (identity + role + session validity are
++ * verified server-side by isAdmin()). Unauthenticated or non-admin callers
++ * get 401 — nobody can force the administrator out from outside.
++ *
++ * Single-session architecture: Config.adminSession holds THE one valid
++ * admin token, so "all sessions" = clearing that slot. The endpoint is
++ * kept separate from /api/logout (scope: 'current') so the two operations
++ * have clearly defined, independently testable scopes and the distinction
++ * survives a future multi-session/multi-admin extension unchanged.
++ * No untrusted request parameter can select another administrator's
++ * identity or session — the target is always the caller's own session
++ * storage.
++ */
++export async function POST(req: Request) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  await setConfig('adminSession', '')
++  const res = NextResponse.json({ ok: true, scope: 'all' })
++  res.cookies.set(ADMIN_COOKIE, '', { httpOnly: true, path: '/', maxAge: 0 })
++  return res
++}
+diff -ruN orig/src/app/api/planned-visits/[id]/cancel/route.ts b/src/app/api/planned-visits/[id]/cancel/route.ts
+--- orig/src/app/api/planned-visits/[id]/cancel/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/planned-visits/[id]/cancel/route.ts	2026-10-26 09:56:23.000000000 +0000
+@@ -0,0 +1,74 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { isAdmin } from '@/lib/auth'
++import { writeAudit } from '@/lib/audit'
++import { PLAN_OPEN_STATUSES, PLAN_SELECT, withScheduledAtLocal } from '@/lib/planned-visit'
++
++/**
++ * phase 2 / task 1 — cancel a planned visit (admin panel).
++ *
++ * POST /api/planned-visits/[id]/cancel   body: { reason?: string }
++ *
++ * Cancel is TERMINAL: a cancelled plan can never be edited, rescheduled or
++ * completed afterwards — and it is never counted as a done visit. Allowed
++ * only while the plan is still open ('scheduled' | 'needs_reschedule');
++ * cancelling a 'done' plan is refused (the visit really happened — the
++ * record must stay). The optional Persian reason is APPENDED to the plan's
++ * note (visible in the UI, never silently overwriting it) and recorded in
++ * the audit trail.
++ *
++ * Race safety: the transition runs as one conditional updateMany — a
++ * concurrent reschedule/cancel that wins first makes this one return 409.
++ */
++export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const { id } = await ctx.params
++  const body = await req.json().catch(() => null) as { reason?: string } | null
++
++  const existing = await db.plannedVisit.findUnique({ where: { id }, select: PLAN_SELECT })
++  if (!existing) return NextResponse.json({ ok: false, error: 'پیدا نشد' }, { status: 404 })
++
++  if (!PLAN_OPEN_STATUSES.includes(existing.status as (typeof PLAN_OPEN_STATUSES)[number])) {
++    return NextResponse.json(
++      {
++        ok: false,
++        error:
++          existing.status === 'done'
++            ? 'این برنامه انجام شده است و قابل لغو نیست — بازدید واقعی ثبت شده است'
++            : 'این برنامه قبلاً لغو شده است',
++      },
++      { status: 409 },
++    )
++  }
++
++  const reason = (body?.reason || '').trim().slice(0, 500)
++  const note = reason
++    ? existing.note
++      ? `${existing.note}\nدلیل لغو: ${reason}`
++      : `دلیل لغو: ${reason}`
++    : existing.note
++
++  const res = await db.plannedVisit.updateMany({
++    where: { id, status: { in: PLAN_OPEN_STATUSES } }, // atomic re-check
++    data: { status: 'cancelled', note },
++  })
++  if (res.count === 0) {
++    return NextResponse.json(
++      { ok: false, error: 'وضعیت برنامه هم‌اکنون تغییر کرده است — دوباره بارگذاری کنید' },
++      { status: 409 },
++    )
++  }
++
++  const planRow = await db.plannedVisit.findUnique({ where: { id }, select: PLAN_SELECT })
++  const plan = planRow ? withScheduledAtLocal(planRow) : null
++  await writeAudit({
++    action: 'plannedvisit.cancel',
++    targetType: 'PlannedVisit',
++    targetId: id,
++    detail: `لغو برنامهٔ ${plan?.employee.name ?? ''} → ${plan?.customer.name ?? ''}${reason ? ` — دلیل: ${reason}` : ''}`,
++  })
++
++  return NextResponse.json({ ok: true, plan })
++}
+diff -ruN orig/src/app/api/planned-visits/[id]/reschedule/route.ts b/src/app/api/planned-visits/[id]/reschedule/route.ts
+--- orig/src/app/api/planned-visits/[id]/reschedule/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/planned-visits/[id]/reschedule/route.ts	2026-10-26 09:56:23.000000000 +0000
+@@ -0,0 +1,104 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { isAdmin } from '@/lib/auth'
++import { writeAudit } from '@/lib/audit'
++import {
++  PLAN_OPEN_STATUSES,
++  PLAN_SELECT,
++  isDuplicatePlan,
++  validatePlanInput,
++  withScheduledAtLocal,
++} from '@/lib/planned-visit'
++
++/**
++ * phase 2 / task 1 — reschedule a planned visit (admin panel).
++ *
++ * POST /api/planned-visits/[id]/reschedule
++ *   body: { scheduledAt: ISO-8601 (required), durationMin?, note? }
++ *
++ * Rescheduling keeps the SAME row (the plan keeps its identity, its audit
++ * trail and any future visit link) and moves it to a new time. The status
++ * always returns to 'scheduled' — including from 'needs_reschedule', which
++ * is exactly the workflow that flag exists for. Done/cancelled plans are
++ * refused: they are history, a NEW plan must be created instead. A
++ * rescheduled plan is never counted as done by itself.
++ *
++ * Race safety: conditional updateMany re-checks the open statuses atomically;
++ * the duplicate guard rejects colliding with another scheduled plan at the
++ * same exact employee+customer+time.
++ */
++export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const { id } = await ctx.params
++  const body = await req.json().catch(() => null) as {
++    scheduledAt?: string
++    durationMin?: number
++    note?: string
++  } | null
++
++  const existing = await db.plannedVisit.findUnique({ where: { id }, select: PLAN_SELECT })
++  if (!existing) return NextResponse.json({ ok: false, error: 'پیدا نشد' }, { status: 404 })
++
++  if (!PLAN_OPEN_STATUSES.includes(existing.status as (typeof PLAN_OPEN_STATUSES)[number])) {
++    return NextResponse.json(
++      {
++        ok: false,
++        error:
++          existing.status === 'done'
++            ? 'این برنامه انجام شده است — برای زمان جدید برنامهٔ جدید بسازید'
++            : 'این برنامه لغو شده است — برای زمان جدید برنامهٔ جدید بسازید',
++      },
++      { status: 409 },
++    )
++  }
++
++  if (!body?.scheduledAt) {
++    return NextResponse.json({ ok: false, error: 'زمان جدید برنامه لازم است' }, { status: 400 })
++  }
++
++  // reuse the shared validator: parses + range-checks the new timestamp,
++  // validates optional durationMin / note
++  const { error, fields } = await validatePlanInput(
++    { scheduledAt: body.scheduledAt, durationMin: body.durationMin, note: body.note },
++    { requireAll: false },
++  )
++  if (error || !fields?.scheduledAt) {
++    return NextResponse.json({ ok: false, error: error || 'زمان جدید برنامه نامعتبر است' }, { status: 400 })
++  }
++  const newTime = fields.scheduledAt
++
++  if (await isDuplicatePlan(existing.employeeId, existing.customerId, newTime, id)) {
++    return NextResponse.json(
++      { ok: false, error: 'برنامهٔ یکسان (کارمند، مشتری و زمان) از قبل برای این زمان ثبت شده است' },
++      { status: 409 },
++    )
++  }
++
++  const data: Record<string, unknown> = { scheduledAt: newTime, status: 'scheduled' }
++  if (fields.durationMin !== undefined) data.durationMin = fields.durationMin
++  if (fields.note !== undefined) data.note = fields.note
++
++  const res = await db.plannedVisit.updateMany({
++    where: { id, status: { in: PLAN_OPEN_STATUSES } }, // atomic re-check
++    data,
++  })
++  if (res.count === 0) {
++    return NextResponse.json(
++      { ok: false, error: 'وضعیت برنامه هم‌اکنون تغییر کرده است — دوباره بارگذاری کنید' },
++      { status: 409 },
++    )
++  }
++
++  const planRow = await db.plannedVisit.findUnique({ where: { id }, select: PLAN_SELECT })
++  const plan = planRow ? withScheduledAtLocal(planRow) : null
++  await writeAudit({
++    action: 'plannedvisit.reschedule',
++    targetType: 'PlannedVisit',
++    targetId: id,
++    detail: `برنامه‌ریزی مجدد ${plan?.employee.name ?? ''} → ${plan?.customer.name ?? ''}: ${existing.scheduledAt.toISOString()} ← ${newTime.toISOString()}`,
++  })
++
++  return NextResponse.json({ ok: true, plan })
++}
+diff -ruN orig/src/app/api/planned-visits/[id]/route.ts b/src/app/api/planned-visits/[id]/route.ts
+--- orig/src/app/api/planned-visits/[id]/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/planned-visits/[id]/route.ts	2026-10-26 09:56:23.000000000 +0000
+@@ -0,0 +1,140 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { isAdmin } from '@/lib/auth'
++import { writeAudit } from '@/lib/audit'
++import {
++  PLAN_OPEN_STATUSES,
++  PLAN_PUT_STATUSES,
++  PLAN_SELECT,
++  isDuplicatePlan,
++  validatePlanInput,
++  withScheduledAtLocal,
++  type PlanStatus,
++} from '@/lib/planned-visit'
++
++/**
++ * phase 2 / task 1 — single planned visit (admin panel).
++ *
++ * GET  /api/planned-visits/[id] — full detail (employee, customer, linked
++ *      real visit). 404 when the id does not exist. Admin-only.
++ *
++ * PUT  /api/planned-visits/[id] — edit any plan field (employee, customer,
++ *      scheduledAt, durationMin, priority, note) while the plan is still
++ *      OPEN ('scheduled' | 'needs_reschedule'). Closed plans ('done' |
++ *      'cancelled') are immutable — the admin creates a NEW plan instead
++ *      (keeps the done-count and the audit trail honest).
++ *      PUT also accepts `status` restricted to the two open states, i.e. an
++ *      admin can flag 'needs_reschedule' from here; 'done'/'cancelled' can
++ *      ONLY be reached through the server linkage / the cancel endpoint.
++ *
++ * Race safety: the status guard is re-checked INSIDE the conditional update
++ * (`updateMany({ where: { id, status: { in: OPEN } } })`), so two concurrent
++ * edits cannot both pass a stale check — the loser gets 409, not corruption.
++ */
++export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const { id } = await ctx.params
++  const plan = await db.plannedVisit.findUnique({ where: { id }, select: PLAN_SELECT })
++  if (!plan) return NextResponse.json({ ok: false, error: 'پیدا نشد' }, { status: 404 })
++  return NextResponse.json({ ok: true, plan: withScheduledAtLocal(plan) })
++}
++
++export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const { id } = await ctx.params
++  const body = await req.json().catch(() => null) as {
++    employeeId?: string
++    customerId?: string
++    scheduledAt?: string
++    durationMin?: number
++    priority?: string
++    note?: string | null
++    status?: string
++  } | null
++
++  const existing = await db.plannedVisit.findUnique({ where: { id }, select: PLAN_SELECT })
++  if (!existing) return NextResponse.json({ ok: false, error: 'پیدا نشد' }, { status: 404 })
++
++  if (!PLAN_OPEN_STATUSES.includes(existing.status as (typeof PLAN_OPEN_STATUSES)[number])) {
++    return NextResponse.json(
++      {
++        ok: false,
++        error:
++          existing.status === 'done'
++            ? 'این برنامه انجام شده و قابل ویرایش نیست — برای بازدید بعدی برنامهٔ جدید بسازید'
++            : 'این برنامه لغو شده و قابل ویرایش نیست — برای بازدید بعدی برنامهٔ جدید بسازید',
++      },
++      { status: 409 },
++    )
++  }
++
++  // optional status transition (open <-> open only)
++  let newStatus: PlanStatus | undefined
++  if (body?.status !== undefined) {
++    if (!PLAN_PUT_STATUSES.includes(body.status as (typeof PLAN_PUT_STATUSES)[number])) {
++      return NextResponse.json(
++        { ok: false, error: 'وضعیت فقط می‌تواند «برنامه‌ریزی‌شده» یا «نیازمند برنامه‌ریزی مجدد» باشد' },
++        { status: 400 },
++      )
++    }
++    newStatus = body.status as PlanStatus
++  }
++
++  // shared field validation (only provided keys are touched)
++  const { error, fields } = await validatePlanInput(body, { requireAll: false })
++  if (error) return NextResponse.json({ ok: false, error }, { status: 400 })
++  const data: Record<string, unknown> = { ...fields }
++  if (newStatus) data.status = newStatus
++
++  // duplicate guard when the timestamp (or worker/target pair) changes
++  const empId = (fields?.employeeId as string) ?? existing.employeeId
++  const custId = (fields?.customerId as string) ?? existing.customerId
++  const when = (fields?.scheduledAt as Date | undefined) ?? existing.scheduledAt
++  if (fields?.scheduledAt || fields?.employeeId || fields?.customerId) {
++    if (await isDuplicatePlan(empId, custId, when, id)) {
++      return NextResponse.json(
++        { ok: false, error: 'برنامهٔ یکسان (کارمند، مشتری و زمان) از قبل برای این زمان ثبت شده است' },
++        { status: 409 },
++      )
++    }
++  }
++
++  if (Object.keys(data).length === 0) {
++    return NextResponse.json({ ok: true, plan: withScheduledAtLocal(existing) }) // nothing to change
++  }
++
++  // conditional update — re-checks openness atomically
++  const res = await db.plannedVisit.updateMany({
++    where: { id, status: { in: PLAN_OPEN_STATUSES } },
++    data,
++  })
++  if (res.count === 0) {
++    return NextResponse.json(
++      { ok: false, error: 'وضعیت برنامه هم‌اکنون تغییر کرده است — دوباره بارگذاری کنید' },
++      { status: 409 },
++    )
++  }
++
++  const planRow = await db.plannedVisit.findUnique({ where: { id }, select: PLAN_SELECT })
++  const plan = planRow ? withScheduledAtLocal(planRow) : null
++  const changed: string[] = []
++  if (fields?.employeeId) changed.push('کارمند')
++  if (fields?.customerId) changed.push('مشتری')
++  if (fields?.scheduledAt) changed.push('زمان')
++  if (fields?.durationMin !== undefined) changed.push('مدت')
++  if (fields?.priority) changed.push('اولویت')
++  if (fields?.note !== undefined) changed.push('توضیحات')
++  if (newStatus) changed.push(`وضعیت→${newStatus === 'scheduled' ? 'برنامه‌ریزی‌شده' : 'نیازمند برنامه‌ریزی مجدد'}`)
++  await writeAudit({
++    action: 'plannedvisit.update',
++    targetType: 'PlannedVisit',
++    targetId: id,
++    detail: `ویرایش برنامهٔ ${plan?.employee.name ?? ''} → ${plan?.customer.name ?? ''}: ${changed.join('، ')}`,
++  })
++
++  return NextResponse.json({ ok: true, plan })
++}
+diff -ruN orig/src/app/api/planned-visits/route.ts b/src/app/api/planned-visits/route.ts
+--- orig/src/app/api/planned-visits/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/planned-visits/route.ts	2026-10-26 09:56:23.000000000 +0000
+@@ -0,0 +1,175 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { isAdmin, getConfig } from '@/lib/auth'
++import { writeAudit } from '@/lib/audit'
++import {
++  PLAN_LIST_LIMIT,
++  PLAN_STATUSES,
++  PLAN_SELECT,
++  isDuplicatePlan,
++  localDayRange,
++  localDayKey,
++  parseDayParam,
++  validatePlanInput,
++  withScheduledAtLocal,
++} from '@/lib/planned-visit'
++
++/**
++ * phase 2 / task 1 — planned field visits (admin panel).
++ *
++ * GET /api/planned-visits
++ *   Filters (all optional, combinable):
++ *     date=YYYY-MM-DD        plans whose scheduledAt falls in that server-local
++ *                            day (default: TODAY)
++ *     from=YYYY-MM-DD&to=…   inclusive day range instead of a single day
++ *     employeeId=<id>         only this employee's plans
++ *     customerId=<id>         only this customer's plans
++ *     status=<status>         scheduled|done|cancelled|needs_reschedule
++ *   Each row carries employee/customer summaries, the linked real visit (if
++ *   any) and `actualVisit` — a same-day real visit for the same employee +
++ *   customer that is NOT linked to this plan (surfaces missed linkages to the
++ *   admin). Responses are capped at PLAN_LIST_LIMIT with `truncated:true`.
++ *
++ * POST /api/planned-visits
++ *   Creates a plan. Status always starts 'scheduled' (the client cannot
++ *   choose it). Duplicate-submit guard: an identical scheduled plan (same
++ *   employee+customer+exact timestamp) returns 409 instead of a second row.
++ *   Both endpoints are ADMIN-ONLY — server-side check, not a hidden button.
++ */
++export async function GET(req: Request) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const url = new URL(req.url)
++  const employeeId = url.searchParams.get('employeeId')
++  const customerId = url.searchParams.get('customerId')
++  const status = url.searchParams.get('status')
++
++  // ── resolve the date window (single day by default) ──
++  let range = parseDayParam(url.searchParams.get('date'))
++  let rangeMode: 'day' | 'range' | 'today' = 'today'
++  if (!range) {
++    const from = parseDayParam(url.searchParams.get('from'))
++    const to = parseDayParam(url.searchParams.get('to'))
++    if (from && to) {
++      if (to.start < from.start) {
++        return NextResponse.json({ ok: false, error: 'تاریخ «از» باید قبل از تاریخ «تا» باشد' }, { status: 400 })
++      }
++      range = { start: from.start, end: to.end } // `to` day is inclusive
++      rangeMode = 'range'
++    } else if (from || to) {
++      return NextResponse.json(
++        { ok: false, error: 'بازهٔ تاریخ نامعتبر است — هر دو «از» و «تا» لازم است' },
++        { status: 400 },
++      )
++    } else {
++      range = localDayRange(new Date())
++    }
++  } else {
++    rangeMode = 'day'
++  }
++
++  // ── filters (validated server-side; unknown values are rejected) ──
++  const where: Record<string, unknown> = { scheduledAt: { gte: range.start, lt: range.end } }
++  if (employeeId) where.employeeId = employeeId
++  if (customerId) where.customerId = customerId
++  if (status) {
++    if (!PLAN_STATUSES.includes(status as (typeof PLAN_STATUSES)[number])) {
++      return NextResponse.json({ ok: false, error: 'وضعیت برنامه نامعتبر است' }, { status: 400 })
++    }
++    where.status = status
++  }
++
++  const [rows, total] = await Promise.all([
++    db.plannedVisit.findMany({
++      where,
++      select: PLAN_SELECT,
++      orderBy: [{ scheduledAt: 'asc' }, { createdAt: 'asc' }],
++      take: PLAN_LIST_LIMIT + 1,
++    }),
++    db.plannedVisit.count({ where }),
++  ])
++  const truncated = rows.length > PLAN_LIST_LIMIT
++  if (truncated) rows.pop()
++
++  // ── same-day UNLINKED real visits (context for missed linkages) ──
++  // Two queries for the whole window, matched in memory — no N+1.
++  const [visits, linked] = await Promise.all([
++    db.visit.findMany({
++      where: { startAt: { gte: range.start, lt: range.end } },
++      select: { id: true, employeeId: true, customerId: true, startAt: true, endAt: true, open: true },
++      orderBy: { startAt: 'asc' },
++    }),
++    db.plannedVisit.findMany({ where: { visitId: { not: null } }, select: { visitId: true } }),
++  ])
++  const linkedIds = new Set(linked.map((p) => p.visitId as string))
++  const unlinkedByKey = new Map<string, (typeof visits)[number]>()
++  for (const v of visits) {
++    if (linkedIds.has(v.id)) continue
++    const key = `${v.employeeId}|${v.customerId}`
++    if (!unlinkedByKey.has(key)) unlinkedByKey.set(key, v) // earliest first
++  }
++
++  const plans = rows.map((p) =>
++    withScheduledAtLocal({
++      ...p,
++      actualVisit: p.visitId ? null : (unlinkedByKey.get(`${p.employeeId}|${p.customerId}`) ?? null),
++    }),
++  )
++
++  return NextResponse.json({
++    ok: true,
++    plans,
++    total,
++    truncated,
++    window: {
++      mode: rangeMode,
++      dayKey: localDayKey(range.start),
++      start: range.start.toISOString(),
++      end: range.end.toISOString(),
++    },
++  })
++}
++
++export async function POST(req: Request) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const body = await req.json().catch(() => null)
++  const { error, fields } = await validatePlanInput(body, { requireAll: true })
++  if (error || !fields?.employeeId || !fields.customerId || !fields.scheduledAt) {
++    return NextResponse.json({ ok: false, error: error || 'اطلاعات ناقص است' }, { status: 400 })
++  }
++
++  // duplicate-submit guard (same employee+customer+exact time, still scheduled)
++  if (await isDuplicatePlan(fields.employeeId, fields.customerId, fields.scheduledAt)) {
++    return NextResponse.json(
++      { ok: false, error: 'برنامهٔ یکسان (کارمند، مشتری و زمان) از قبل برای این زمان ثبت شده است' },
++      { status: 409 },
++    )
++  }
++
++  const planRow = await db.plannedVisit.create({
++    data: {
++      employeeId: fields.employeeId,
++      customerId: fields.customerId,
++      scheduledAt: fields.scheduledAt,
++      durationMin: fields.durationMin ?? 30,
++      priority: fields.priority ?? 'normal',
++      note: fields.note ?? null,
++      status: 'scheduled', // always starts scheduled — the client cannot pick a status
++      createdById: await getConfig('adminUser', 'admin'),
++    },
++    select: PLAN_SELECT,
++  })
++
++  const plan = withScheduledAtLocal(planRow)
++  await writeAudit({
++    action: 'plannedvisit.create',
++    targetType: 'PlannedVisit',
++    targetId: plan.id,
++    detail: `ایجاد برنامهٔ بازدید: ${plan.employee.name} → ${plan.customer.name} — ${plan.scheduledAt.toISOString()}`,
++  })
++
++  return NextResponse.json({ ok: true, plan }, { status: 201 })
++}
+diff -ruN orig/src/components/panel/Dashboard.tsx b/src/components/panel/Dashboard.tsx
+--- orig/src/components/panel/Dashboard.tsx	2026-10-26 10:00:50.825135455 +0000
++++ b/src/components/panel/Dashboard.tsx	2026-10-26 09:58:11.000000000 +0000
+@@ -16,6 +16,7 @@
+ import {
+   Bell,
+   CalendarCheck,
++  CalendarClock,
+   DoorOpen,
+   Download,
+   LogOut,
+@@ -26,6 +27,7 @@
+ import CheckinsTab from './CheckinsTab'
+ import CustomersTab from './CustomersTab'
+ import EmployeesTab from './EmployeesTab'
++import PlansTab from './PlansTab'
+ import type { Checkin, PanelConfigInfo, RealtimeEvent } from '@/lib/types'
+ import {
+   browserNotify,
+@@ -34,10 +36,12 @@
+   useRealtimeSocket,
+ } from '@/lib/realtime'
+ 
+-type TabKey = 'overview' | 'checkins' | 'customers' | 'employees'
++type TabKey = 'overview' | 'plans' | 'checkins' | 'customers' | 'employees'
+ 
+ const TABS: { key: TabKey; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+   { key: 'overview', label: 'نمای کلی', icon: RadioTower },
++  // phase 2 / task 1 — planned field visits
++  { key: 'plans', label: 'برنامهٔ بازدیدها', icon: CalendarClock },
+   { key: 'checkins', label: 'چک‌این‌ها', icon: CalendarCheck },
+   { key: 'customers', label: 'مشتریان', icon: DoorOpen },
+   { key: 'employees', label: 'کارمندان', icon: LogOut },
+@@ -199,6 +203,7 @@
+       {/* Content */}
+       <main className="mx-auto w-full max-w-7xl flex-1 p-4">
+         {tab === 'overview' && <OverviewTab refreshKey={refreshKey} />}
++        {tab === 'plans' && <PlansTab refreshKey={refreshKey} />}
+         {tab === 'checkins' && <CheckinsTab refreshKey={refreshKey} />}
+         {tab === 'customers' && <CustomersTab refreshKey={refreshKey} />}
+         {tab === 'employees' && <EmployeesTab refreshKey={refreshKey} />}
+diff -ruN orig/src/components/panel/PlansTab.tsx b/src/components/panel/PlansTab.tsx
+--- orig/src/components/panel/PlansTab.tsx	1970-01-01 00:00:00.000000000 +0000
++++ b/src/components/panel/PlansTab.tsx	2026-10-26 09:59:05.000000000 +0000
+@@ -0,0 +1,724 @@
++'use client'
++
++import { useCallback, useEffect, useMemo, useState } from 'react'
++import { Badge } from '@/components/ui/badge'
++import { Button } from '@/components/ui/button'
++import { Input } from '@/components/ui/input'
++import { Label } from '@/components/ui/label'
++import { Textarea } from '@/components/ui/textarea'
++import { ScrollArea } from '@/components/ui/scroll-area'
++import {
++  Dialog,
++  DialogContent,
++  DialogFooter,
++  DialogHeader,
++  DialogTitle,
++} from '@/components/ui/dialog'
++import {
++  Select,
++  SelectContent,
++  SelectItem,
++  SelectTrigger,
++  SelectValue,
++} from '@/components/ui/select'
++import { useToast } from '@/hooks/use-toast'
++import {
++  CalendarClock,
++  CalendarPlus,
++  Check,
++  ChevronLeft,
++  ChevronRight,
++  Clock,
++  Pencil,
++  RefreshCw,
++  X,
++} from 'lucide-react'
++import type { Customer, Employee, PlanPriority, PlanStatus, PlannedVisit } from '@/lib/types'
++import { faDate, faTime } from '@/lib/realtime'
++
++/**
++ * phase 2 / task 1 — planned-visit management (Persian, RTL).
++ *
++ * Day view: one server-local day at a time (prev / next / today + a native
++ * date box; the selected day is labelled in Jalali through the SAME fa-IR
++ * Intl path the rest of the panel uses). Filters: employee, customer,
++ * status. Summary chips give the done / remaining / overdue / cancelled
++ * counts of the current view — the numbers the feature exists for. Rows
++ * clearly separate plan states; overdue scheduled plans are highlighted
++ * and every completed plan shows the REAL visit time that completed it.
++ * All mutations go through the admin API; the server re-validates
++ * everything (this UI never assumes trust).
++ */
++
++const STATUS_META: Record<PlanStatus, { label: string; cls: string }> = {
++  scheduled: { label: 'برنامه‌ریزی‌شده', cls: 'bg-teal-600 hover:bg-teal-700' },
++  done: { label: 'انجام‌شده', cls: 'bg-emerald-600 hover:bg-emerald-700' },
++  cancelled: { label: 'لغوشده', cls: 'bg-gray-400 hover:bg-gray-500' },
++  needs_reschedule: { label: 'نیازمند برنامه‌ریزی مجدد', cls: 'bg-amber-500 hover:bg-amber-600' },
++}
++
++const PRIORITY_META: Record<PlanPriority, { label: string; cls: string }> = {
++  low: { label: 'اولویت کم', cls: 'bg-gray-100 text-gray-600' },
++  normal: { label: 'اولویت معمولی', cls: 'bg-sky-100 text-sky-700' },
++  high: { label: 'اولویت مهم', cls: 'bg-rose-100 text-rose-700' },
++}
++
++const CUSTOMER_TYPE_LABEL: Record<string, string> = {
++  doctor: 'پزشک',
++  pharmacy: 'داروخانه',
++  clinic: 'کلینیک',
++  other: 'سایر',
++}
++
++function shiftDay(dayKey: string, days: number): string {
++  const d = new Date(`${dayKey}T12:00:00Z`) // noon-UTC keeps the civil date stable
++  d.setUTCDate(d.getUTCDate() + days)
++  return d.toISOString().slice(0, 10)
++}
++
++function isOverdue(p: PlannedVisit, now: number): boolean {
++  if (p.status !== 'scheduled') return false
++  const end = new Date(p.scheduledAt).getTime() + p.durationMin * 60_000
++  return end < now
++}
++
++interface FormState {
++  employeeId: string
++  customerId: string
++  scheduledAtLocal: string
++  durationMin: string
++  priority: PlanPriority
++  note: string
++}
++
++const EMPTY_FORM: FormState = {
++  employeeId: '',
++  customerId: '',
++  scheduledAtLocal: '',
++  durationMin: '30',
++  priority: 'normal',
++  note: '',
++}
++
++export default function PlansTab({ refreshKey }: { refreshKey: number }) {
++  const { toast } = useToast()
++  const [plans, setPlans] = useState<PlannedVisit[]>([])
++  const [loading, setLoading] = useState(true)
++  const [loadError, setLoadError] = useState<string | null>(null)
++  const [truncated, setTruncated] = useState(false)
++  const [serverToday, setServerToday] = useState<string | null>(null)
++
++  // day view + filters
++  const [dayKey, setDayKey] = useState<string>('') // '' = let the server pick today
++  const [fEmployee, setFEmployee] = useState('all')
++  const [fCustomer, setFCustomer] = useState('all')
++  const [fStatus, setFStatus] = useState<'all' | PlanStatus>('all')
++
++  const [employees, setEmployees] = useState<Employee[]>([])
++  const [customers, setCustomers] = useState<Customer[]>([])
++
++  // dialogs
++  const [formOpen, setFormOpen] = useState(false)
++  const [editing, setEditing] = useState<PlannedVisit | null>(null)
++  const [form, setForm] = useState<FormState>(EMPTY_FORM)
++  const [saving, setSaving] = useState(false)
++  const [reschedPlan, setReschedPlan] = useState<PlannedVisit | null>(null)
++  const [reschedAt, setReschedAt] = useState('')
++  const [cancelPlan, setCancelPlan] = useState<PlannedVisit | null>(null)
++  const [cancelReason, setCancelReason] = useState('')
++
++  const load = useCallback(async () => {
++    setLoading(true)
++    setLoadError(null)
++    try {
++      const params = new URLSearchParams()
++      if (dayKey) params.set('date', dayKey)
++      if (fEmployee !== 'all') params.set('employeeId', fEmployee)
++      if (fCustomer !== 'all') params.set('customerId', fCustomer)
++      if (fStatus !== 'all') params.set('status', fStatus)
++      const res = await fetch(`/api/planned-visits?${params.toString()}`, { cache: 'no-store' })
++      const data = await res.json().catch(() => null)
++      if (!data) throw new Error('پاسخ نامعتبر از سرور')
++      if (!data.ok) throw new Error(data.error || 'خطا در دریافت برنامه‌ها')
++      setPlans(data.plans)
++      setTruncated(!!data.truncated)
++      if (data.window?.dayKey) {
++        setServerToday(data.window.dayKey)
++        if (!dayKey) setDayKey(data.window.dayKey) // first load: adopt the server's today
++      }
++    } catch (e) {
++      setLoadError(e instanceof Error ? e.message : 'خطا در دریافت برنامه‌ها')
++    } finally {
++      setLoading(false)
++    }
++  }, [dayKey, fEmployee, fCustomer, fStatus])
++
++  useEffect(() => {
++    load()
++  }, [load, refreshKey])
++
++  // dropdown data (admin lists — one fetch, cached in state)
++  useEffect(() => {
++    Promise.all([
++      fetch('/api/employees', { cache: 'no-store' }).then((r) => r.json()).catch(() => null),
++      fetch('/api/customers', { cache: 'no-store' }).then((r) => r.json()).catch(() => null),
++    ]).then(([e, c]) => {
++      if (e?.ok) setEmployees(e.employees)
++      if (c?.ok) setCustomers(c.customers)
++    })
++  }, [refreshKey])
++
++  const now = Date.now()
++  const summary = useMemo(() => {
++    const s = { total: plans.length, done: 0, remaining: 0, overdue: 0, cancelled: 0, needsResched: 0 }
++    for (const p of plans) {
++      if (p.status === 'done') s.done++
++      else if (p.status === 'cancelled') s.cancelled++
++      else if (p.status === 'needs_reschedule') s.needsResched++
++      else {
++        s.remaining++
++        if (isOverdue(p, now)) s.overdue++
++      }
++    }
++    return s
++  }, [plans, now])
++
++  function openCreate() {
++    const active = employees.filter((e) => e.active)
++    setEditing(null)
++    const hh = String(new Date().getHours()).padStart(2, '0')
++    const mm = String(new Date().getMinutes()).padStart(2, '0')
++    setForm({
++      ...EMPTY_FORM,
++      employeeId: active.length === 1 ? active[0].id : '',
++      scheduledAtLocal: `${dayKey || serverToday || ''}T${hh}:${mm}`,
++      durationMin: '30',
++      priority: 'normal',
++    })
++    setFormOpen(true)
++  }
++
++  function openEdit(p: PlannedVisit) {
++    setEditing(p)
++    setForm({
++      employeeId: p.employeeId,
++      customerId: p.customerId,
++      scheduledAtLocal: p.scheduledAtLocal || p.scheduledAt.slice(0, 16),
++      durationMin: String(p.durationMin),
++      priority: p.priority,
++      note: p.note || '',
++    })
++    setFormOpen(true)
++  }
++
++  function selectedEmployeeAssigned(): boolean | null {
++    if (!form.employeeId || !form.customerId) return null
++    const emp = employees.find((e) => e.id === form.employeeId)
++    return !!emp?.assignments?.some((a) => a.customer.id === form.customerId)
++  }
++
++  async function saveForm() {
++    if (!form.employeeId || !form.customerId || !form.scheduledAtLocal) {
++      toast({ title: 'خطا', description: 'کارمند، مشتری و زمان برنامه لازم است', variant: 'destructive' })
++      return
++    }
++    setSaving(true)
++    try {
++      const payload = {
++        employeeId: form.employeeId,
++        customerId: form.customerId,
++        scheduledAt: form.scheduledAtLocal, // server-local naive — parsed server-side
++        durationMin: Number(form.durationMin) || 30,
++        priority: form.priority,
++        note: form.note.trim() || null,
++      }
++      const res = await fetch(editing ? `/api/planned-visits/${editing.id}` : '/api/planned-visits', {
++        method: editing ? 'PUT' : 'POST',
++        headers: { 'content-type': 'application/json' },
++        body: JSON.stringify(payload),
++      })
++      const data = await res.json().catch(() => null)
++      if (data?.ok) {
++        setFormOpen(false)
++        toast({ title: editing ? 'برنامه ویرایش شد' : 'برنامه ثبت شد' })
++        // keep the view on the plan's new day after an edit/reschedule
++        if (data.plan?.scheduledAtLocal) setDayKey(data.plan.scheduledAtLocal.slice(0, 10))
++        await load()
++      } else {
++        toast({ title: 'خطا', description: data?.error || 'ثبت برنامه ممکن نشد', variant: 'destructive' })
++      }
++    } finally {
++      setSaving(false)
++    }
++  }
++
++  async function saveReschedule() {
++    if (!reschedPlan || !reschedAt) return
++    setSaving(true)
++    try {
++      const res = await fetch(`/api/planned-visits/${reschedPlan.id}/reschedule`, {
++        method: 'POST',
++        headers: { 'content-type': 'application/json' },
++        body: JSON.stringify({ scheduledAt: reschedAt }),
++      })
++      const data = await res.json().catch(() => null)
++      if (data?.ok) {
++        setReschedPlan(null)
++        toast({ title: 'برنامه به زمان جدید منتقل شد' })
++        if (data.plan?.scheduledAtLocal) setDayKey(data.plan.scheduledAtLocal.slice(0, 10))
++        await load()
++      } else {
++        toast({ title: 'خطا', description: data?.error || 'برنامه‌ریزی مجدد ممکن نشد', variant: 'destructive' })
++      }
++    } finally {
++      setSaving(false)
++    }
++  }
++
++  async function saveCancel() {
++    if (!cancelPlan) return
++    setSaving(true)
++    try {
++      const res = await fetch(`/api/planned-visits/${cancelPlan.id}/cancel`, {
++        method: 'POST',
++        headers: { 'content-type': 'application/json' },
++        body: JSON.stringify({ reason: cancelReason.trim() || undefined }),
++      })
++      const data = await res.json().catch(() => null)
++      if (data?.ok) {
++        setCancelPlan(null)
++        setCancelReason('')
++        toast({ title: 'برنامه لغو شد' })
++        await load()
++      } else {
++        toast({ title: 'خطا', description: data?.error || 'لغو برنامه ممکن نشد', variant: 'destructive' })
++      }
++    } finally {
++      setSaving(false)
++    }
++  }
++
++  const activeEmployees = employees.filter((e) => e.active)
++  const jalaliLabel = dayKey ? faDate(`${dayKey}T12:00:00Z`) : ''
++  const isToday = !!serverToday && dayKey === serverToday
++
++  return (
++    <div className="space-y-4">
++      {/* ── day navigation + filters ── */}
++      <div className="flex flex-wrap items-center gap-2">
++        <div className="flex items-center gap-1">
++          <Button
++            variant="outline"
++            size="icon"
++            title="روز قبل"
++            disabled={!dayKey}
++            onClick={() => setDayKey(shiftDay(dayKey, -1))}
++          >
++            <ChevronRight className="h-4 w-4" />
++          </Button>
++          <Input
++            dir="ltr"
++            type="date"
++            className="w-[150px] text-left"
++            value={dayKey}
++            onChange={(e) => e.target.value && setDayKey(e.target.value)}
++          />
++          <Button
++            variant="outline"
++            size="icon"
++            title="روز بعد"
++            disabled={!dayKey}
++            onClick={() => setDayKey(shiftDay(dayKey, 1))}
++          >
++            <ChevronLeft className="h-4 w-4" />
++          </Button>
++          <Button variant="outline" size="sm" onClick={() => setDayKey(serverToday || dayKey)}>
++            امروز
++          </Button>
++        </div>
++        <div className="text-sm font-medium text-muted-foreground">
++          {jalaliLabel}
++          {isToday && <span className="mr-1 text-teal-600">(امروز)</span>}
++        </div>
++
++        <div className="flex flex-wrap items-center gap-2 mr-auto">
++          <Select value={fEmployee} onValueChange={setFEmployee}>
++            <SelectTrigger className="w-[150px]">
++              <SelectValue placeholder="کارمند" />
++            </SelectTrigger>
++            <SelectContent>
++              <SelectItem value="all">همهٔ کارمندان</SelectItem>
++              {employees.map((e) => (
++                <SelectItem key={e.id} value={e.id}>
++                  {e.name}
++                </SelectItem>
++              ))}
++            </SelectContent>
++          </Select>
++          <Select value={fCustomer} onValueChange={setFCustomer}>
++            <SelectTrigger className="w-[150px]">
++              <SelectValue placeholder="مشتری" />
++            </SelectTrigger>
++            <SelectContent>
++              <SelectItem value="all">همهٔ مشتریان</SelectItem>
++              {customers.map((c) => (
++                <SelectItem key={c.id} value={c.id}>
++                  {c.name}
++                </SelectItem>
++              ))}
++            </SelectContent>
++          </Select>
++          <Select value={fStatus} onValueChange={(v) => setFStatus(v as 'all' | PlanStatus)}>
++            <SelectTrigger className="w-[160px]">
++              <SelectValue placeholder="وضعیت" />
++            </SelectTrigger>
++            <SelectContent>
++              <SelectItem value="all">همهٔ وضعیت‌ها</SelectItem>
++              <SelectItem value="scheduled">برنامه‌ریزی‌شده</SelectItem>
++              <SelectItem value="done">انجام‌شده</SelectItem>
++              <SelectItem value="cancelled">لغوشده</SelectItem>
++              <SelectItem value="needs_reschedule">نیازمند برنامه‌ریزی مجدد</SelectItem>
++            </SelectContent>
++          </Select>
++          <Button variant="outline" size="sm" onClick={load} disabled={loading}>
++            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
++            به‌روزرسانی
++          </Button>
++          <Button size="sm" className="bg-teal-600 hover:bg-teal-700" onClick={openCreate}>
++            <CalendarPlus className="h-4 w-4" />
++            برنامهٔ جدید
++          </Button>
++        </div>
++      </div>
++
++      {/* ── day summary (plain numbers — no decorative charts) ── */}
++      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border bg-muted/30 px-4 py-2 text-sm">
++        <span className="font-medium">{summary.total.toLocaleString('fa-IR')} برنامه</span>
++        <span className="text-emerald-700">انجام‌شده: {summary.done.toLocaleString('fa-IR')}</span>
++        <span className="text-teal-700">باقی‌مانده: {summary.remaining.toLocaleString('fa-IR')}</span>
++        <span className={summary.overdue > 0 ? 'font-medium text-rose-700' : 'text-muted-foreground'}>
++          عقب‌افتاده: {summary.overdue.toLocaleString('fa-IR')}
++        </span>
++        <span className="text-amber-700">نیازمند برنامه‌ریزی مجدد: {summary.needsResched.toLocaleString('fa-IR')}</span>
++        <span className="text-muted-foreground">لغوشده: {summary.cancelled.toLocaleString('fa-IR')}</span>
++        {truncated && (
++          <span className="text-rose-700">(نمایش ۵۰۰ برنامهٔ اول — برای دیدن همه، فیلتر دقیق‌تری بزنید)</span>
++        )}
++      </div>
++
++      {loadError && (
++        <div className="rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-800">
++          <p className="font-medium">خطا در بارگذاری برنامه‌ها:</p>
++          <p className="mt-1">{loadError}</p>
++        </div>
++      )}
++
++      {/* ── plans list ── */}
++      <ScrollArea className="h-[56vh] rounded-xl border">
++        <div className="divide-y mp-scroll">
++          {plans.length === 0 && !loading && (
++            <p className="p-8 text-center text-muted-foreground">برنامه‌ای برای این روز ثبت نشده است</p>
++          )}
++          {plans.map((p) => {
++            const overdue = isOverdue(p, now)
++            const assigned = employees
++              .find((e) => e.id === p.employeeId)
++              ?.assignments?.some((a) => a.customer.id === p.customerId)
++            return (
++              <div
++                key={p.id}
++                className={`flex flex-col gap-2 p-4 sm:flex-row sm:items-center ${
++                  overdue ? 'border-r-4 border-r-rose-400 bg-rose-50/40' : ''
++                }`}
++              >
++                {/* time + duration */}
++                <div className="flex min-w-[120px] flex-col items-start gap-0.5">
++                  <span className="font-mono text-lg font-bold" dir="ltr">
++                    {faTime(p.scheduledAt)}
++                  </span>
++                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
++                    <Clock className="h-3 w-3" />
++                    {p.durationMin.toLocaleString('fa-IR')} دقیقه
++                  </span>
++                </div>
++
++                {/* employee + customer */}
++                <div className="flex min-w-[220px] flex-col gap-0.5 text-sm">
++                  <span className="font-medium">
++                    {p.employee.name}
++                    {!p.employee.active && (
++                      <Badge variant="outline" className="mr-1 bg-gray-100 text-gray-500">
++                        غیرفعال
++                      </Badge>
++                    )}
++                  </span>
++                  <span className="text-muted-foreground">
++                    {p.customer.name}
++                    <span className="text-xs">
++                      {' '}
++                      ({CUSTOMER_TYPE_LABEL[p.customer.type] || p.customer.type})
++                    </span>
++                    {assigned === false && (
++                      <Badge variant="outline" className="mr-1 bg-amber-50 text-amber-700" title="چک‌این فقط برای مشتریان منتسب امکان‌پذیر است">
++                        منتسب نیست
++                      </Badge>
++                    )}
++                  </span>
++                </div>
++
++                {/* status / priority / overdue / linked-visit badges */}
++                <div className="flex flex-1 flex-wrap items-center gap-1.5">
++                  <Badge className={`gap-1 ${STATUS_META[p.status]?.cls ?? ''}`}>
++                    {p.status === 'done' ? <Check className="h-3 w-3" /> : null}
++                    {STATUS_META[p.status]?.label ?? p.status}
++                  </Badge>
++                  <Badge variant="outline" className={PRIORITY_META[p.priority]?.cls ?? ''}>
++                    {PRIORITY_META[p.priority]?.label ?? p.priority}
++                  </Badge>
++                  {overdue && (
++                    <Badge variant="outline" className="border-rose-300 bg-rose-100 text-rose-700">
++                      عقب‌افتاده
++                    </Badge>
++                  )}
++                  {p.status === 'done' && p.visit && (
++                    <Badge variant="outline" className="bg-emerald-50 text-emerald-700" title="بازدید واقعی ثبت‌شده">
++                      بازدید واقعی: {faTime(p.visit.startAt)}
++                    </Badge>
++                  )}
++                  {p.status !== 'done' && p.actualVisit && (
++                    <Badge
++                      variant="outline"
++                      className="bg-sky-50 text-sky-700"
++                      title="بازدید واقعی هم‌روز بدون اتصال به این برنامه — پیوند خودکار انجام نشده است"
++                    >
++                      بازدید ثبت‌شده بدون پیوند: {faTime(p.actualVisit.startAt)}
++                    </Badge>
++                  )}
++                </div>
++
++                {/* note */}
++                <div className="min-w-[160px] max-w-[280px] flex-1 text-sm">
++                  {p.note ? (
++                    <p className="line-clamp-2 whitespace-pre-line">{p.note}</p>
++                  ) : (
++                    <p className="text-muted-foreground">بدون توضیح</p>
++                  )}
++                </div>
++
++                {/* actions */}
++                <div className="flex items-center gap-1">
++                  {(p.status === 'scheduled' || p.status === 'needs_reschedule') && (
++                    <>
++                      <Button variant="ghost" size="icon" title="ویرایش" onClick={() => openEdit(p)}>
++                        <Pencil className="h-4 w-4" />
++                      </Button>
++                      <Button
++                        variant="ghost"
++                        size="icon"
++                        title="برنامه‌ریزی مجدد"
++                        onClick={() => {
++                          setReschedPlan(p)
++                          setReschedAt(p.scheduledAtLocal || p.scheduledAt.slice(0, 16))
++                        }}
++                      >
++                        <CalendarClock className="h-4 w-4 text-amber-600" />
++                      </Button>
++                      <Button
++                        variant="ghost"
++                        size="icon"
++                        title="لغو برنامه"
++                        onClick={() => {
++                          setCancelPlan(p)
++                          setCancelReason('')
++                        }}
++                      >
++                        <X className="h-4 w-4 text-destructive" />
++                      </Button>
++                    </>
++                  )}
++                </div>
++              </div>
++            )
++          })}
++        </div>
++      </ScrollArea>
++
++      {/* ── create / edit dialog ── */}
++      <Dialog open={formOpen} onOpenChange={setFormOpen}>
++        <DialogContent dir="rtl" className="sm:max-w-md">
++          <DialogHeader>
++            <DialogTitle>{editing ? 'ویرایش برنامهٔ بازدید' : 'برنامهٔ بازدید جدید'}</DialogTitle>
++          </DialogHeader>
++          <div className="grid gap-3">
++            <div className="grid gap-1.5">
++              <Label>کارمند</Label>
++              <Select value={form.employeeId} onValueChange={(v) => setForm((f) => ({ ...f, employeeId: v }))}>
++                <SelectTrigger>
++                  <SelectValue placeholder="انتخاب کارمند فعال" />
++                </SelectTrigger>
++                <SelectContent>
++                  {activeEmployees.map((e) => (
++                    <SelectItem key={e.id} value={e.id}>
++                      {e.name} ({e.username})
++                    </SelectItem>
++                  ))}
++                </SelectContent>
++              </Select>
++            </div>
++            <div className="grid gap-1.5">
++              <Label>مشتری</Label>
++              <Select value={form.customerId} onValueChange={(v) => setForm((f) => ({ ...f, customerId: v }))}>
++                <SelectTrigger>
++                  <SelectValue placeholder="انتخاب مشتری" />
++                </SelectTrigger>
++                <SelectContent>
++                  {customers.map((c) => (
++                    <SelectItem key={c.id} value={c.id}>
++                      {c.name} ({CUSTOMER_TYPE_LABEL[c.type] || c.type})
++                    </SelectItem>
++                  ))}
++                </SelectContent>
++              </Select>
++              {selectedEmployeeAssigned() === false && (
++                <p className="text-xs text-amber-700">
++                  این مشتری به این کارمند منتسب نیست — چک‌این او توسط سرور رد می‌شود و برنامهٔ به‌طور خودکار
++                  «انجام‌شده» نمی‌شود. ابتدا انتساب را در تب کارمندان انجام دهید.
++                </p>
++              )}
++            </div>
++            <div className="grid grid-cols-2 gap-3">
++              <div className="grid gap-1.5">
++                <Label>تاریخ و ساعت</Label>
++                <Input
++                  dir="ltr"
++                  className="text-left"
++                  type="datetime-local"
++                  value={form.scheduledAtLocal}
++                  onChange={(e) => setForm((f) => ({ ...f, scheduledAtLocal: e.target.value }))}
++                />
++              </div>
++              <div className="grid gap-1.5">
++                <Label>مدت تخمینی (دقیقه)</Label>
++                <Input
++                  dir="ltr"
++                  className="text-left"
++                  inputMode="numeric"
++                  value={form.durationMin}
++                  onChange={(e) => setForm((f) => ({ ...f, durationMin: e.target.value.replace(/[^0-9]/g, '') }))}
++                />
++              </div>
++            </div>
++            <div className="grid gap-1.5">
++              <Label>اولویت</Label>
++              <Select
++                value={form.priority}
++                onValueChange={(v) => setForm((f) => ({ ...f, priority: v as PlanPriority }))}
++              >
++                <SelectTrigger>
++                  <SelectValue />
++                </SelectTrigger>
++                <SelectContent>
++                  <SelectItem value="low">کم</SelectItem>
++                  <SelectItem value="normal">معمولی</SelectItem>
++                  <SelectItem value="high">مهم</SelectItem>
++                </SelectContent>
++              </Select>
++            </div>
++            <div className="grid gap-1.5">
++              <Label>توضیحات (اختیاری)</Label>
++              <Textarea
++                rows={2}
++                value={form.note}
++                onChange={(e) => setForm((f) => ({ ...f, note: e.target.value.slice(0, 1000) }))}
++                placeholder="مثلاً: تحویل کاتالوگ و پیگیری سفارش قبلی"
++              />
++            </div>
++          </div>
++          <DialogFooter>
++            <Button variant="outline" onClick={() => setFormOpen(false)}>
++              انصراف
++            </Button>
++            <Button className="bg-teal-600 hover:bg-teal-700" onClick={saveForm} disabled={saving}>
++              {saving ? 'در حال ذخیره…' : editing ? 'ذخیرهٔ تغییرات' : 'ثبت برنامه'}
++            </Button>
++          </DialogFooter>
++        </DialogContent>
++      </Dialog>
++
++      {/* ── reschedule dialog ── */}
++      <Dialog open={!!reschedPlan} onOpenChange={(o) => !o && setReschedPlan(null)}>
++        <DialogContent dir="rtl" className="sm:max-w-sm">
++          <DialogHeader>
++            <DialogTitle>برنامه‌ریزی مجدد</DialogTitle>
++          </DialogHeader>
++          {reschedPlan && (
++            <p className="text-sm text-muted-foreground">
++              {reschedPlan.employee.name} → {reschedPlan.customer.name} — زمان فعلی:{' '}
++              <span dir="ltr" className="font-mono">
++                {reschedPlan.scheduledAtLocal?.replace('T', ' ')}
++              </span>
++            </p>
++          )}
++          <div className="grid gap-1.5">
++            <Label>زمان جدید</Label>
++            <Input
++              dir="ltr"
++              className="text-left"
++              type="datetime-local"
++              value={reschedAt}
++              onChange={(e) => setReschedAt(e.target.value)}
++            />
++            <p className="text-xs text-muted-foreground">
++              برنامه به زمان جدید منتقل می‌شود و وضعیت آن به «برنامه‌ریزی‌شده» برمی‌گردد؛ سابقهٔ آن حفظ می‌شود.
++            </p>
++          </div>
++          <DialogFooter>
++            <Button variant="outline" onClick={() => setReschedPlan(null)}>
++              انصراف
++            </Button>
++            <Button className="bg-amber-600 hover:bg-amber-700" onClick={saveReschedule} disabled={saving}>
++              {saving ? 'در حال انتقال…' : 'انتقال به زمان جدید'}
++            </Button>
++          </DialogFooter>
++        </DialogContent>
++      </Dialog>
++
++      {/* ── cancel dialog ── */}
++      <Dialog open={!!cancelPlan} onOpenChange={(o) => !o && setCancelPlan(null)}>
++        <DialogContent dir="rtl" className="sm:max-w-sm">
++          <DialogHeader>
++            <DialogTitle>لغو برنامه</DialogTitle>
++          </DialogHeader>
++          {cancelPlan && (
++            <p className="text-sm text-muted-foreground">
++              {cancelPlan.employee.name} → {cancelPlan.customer.name} —{' '}
++              <span dir="ltr" className="font-mono">
++                {cancelPlan.scheduledAtLocal?.replace('T', ' ')}
++              </span>
++            </p>
++          )}
++          <div className="grid gap-1.5">
++            <Label>دلیل لغو (اختیاری)</Label>
++            <Textarea
++              rows={2}
++              value={cancelReason}
++              onChange={(e) => setCancelReason(e.target.value.slice(0, 500))}
++              placeholder="مثلاً: مشتری در دسترس نیست"
++            />
++            <p className="text-xs text-muted-foreground">
++              لغو نهایی است: برنامهٔ لغوشده دیگر قابل ویرایش یا بازگشت نیست و هرگز «انجام‌شده» شمرده نمی‌شود.
++            </p>
++          </div>
++          <DialogFooter>
++            <Button variant="outline" onClick={() => setCancelPlan(null)}>
++              انصراف
++            </Button>
++            <Button variant="destructive" onClick={saveCancel} disabled={saving}>
++              {saving ? 'در حال لغو…' : 'لغو برنامه'}
++            </Button>
++          </DialogFooter>
++        </DialogContent>
++      </Dialog>
++    </div>
++  )
++}
+diff -ruN orig/src/instrumentation.ts b/src/instrumentation.ts
+--- orig/src/instrumentation.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/instrumentation.ts	2026-10-26 09:51:04.000000000 +0000
+@@ -0,0 +1,97 @@
++/**
++ * phase 1 / task 2 — runtime database migration (Next.js instrumentation).
++ *
++ * MedPad ships a prebuilt standalone bundle; existing installs keep their
++ * SQLite database (panel/db/custom.db) across updates. New columns are
++ * therefore added with idempotent `ALTER TABLE ... ADD COLUMN` statements
++ * here, executed ONCE at server boot before any request is handled.
++ * Fresh installs get the full schema from db/template.db (regenerated from
++ * prisma/schema.prisma at build time), so the ALTERs are no-ops there.
++ *
++ * Every statement is wrapped in try/catch: "duplicate column name" (or
++ * "table already exists") means the migration already ran — anything else
++ * is logged loudly and the boot CONTINUES only when the missing column is
++ * non-critical... no: a failed ALTER means the new code will hit "no such
++ * column" at query time, so failures are logged as FATAL warnings. They
++ * are not thrown to avoid bricking an otherwise-working panel; the
++ * operator sees the message and can restore a backup or re-run install.
++ *
++ * G-2: AppToken.expiresAt / AppToken.revokedAt
++ * (later findings append their statements below — see git history)
++ *
++ * phase 2 / task 1: PlannedVisit table (planned field visits). A brand-new
++ * table — `CREATE TABLE IF NOT EXISTS` is fully idempotent and touches NO
++ * existing table (the plan→visit FK lives ON PlannedVisit, so Visit gets no
++ * new column). The DDL below is byte-identical to what `prisma db push`
++ * generates from prisma/schema.prisma (verified against a probe database at
++ * build time) so fresh installs (template.db) and upgraded installs end up
++ * with the exact same table. The unique index on visitId enforces the 1:1
++ * plan↔visit link at the database level even under concurrent check-ins.
++ */
++
++const MIGRATIONS: string[] = [
++  // G-2 — token expiry + revocation
++  'ALTER TABLE "AppToken" ADD COLUMN "expiresAt" DATETIME',
++  'ALTER TABLE "AppToken" ADD COLUMN "revokedAt" DATETIME',
++  // G-6 — GPS validation columns (nullable / defaulted -> safe on old rows:
++  // legacy rows keep their stored coordinates; locationMissing defaults to
++  // false which correctly describes them — they were recorded as located)
++  'ALTER TABLE "Checkin" ADD COLUMN "accuracy" REAL',
++  'ALTER TABLE "Checkin" ADD COLUMN "distanceM" REAL',
++  'ALTER TABLE "Checkin" ADD COLUMN "outOfRadius" BOOLEAN NOT NULL DEFAULT 0',
++  'ALTER TABLE "Checkin" ADD COLUMN "locationMissing" BOOLEAN NOT NULL DEFAULT 0',
++]
++
++// G-3 — admin audit trail (new table; Prisma column layout, DateTime =
++// epoch-ms INTEGER like every other MedPad table)
++const AUDIT_TABLE_DDL = `CREATE TABLE IF NOT EXISTS "AuditLog" (
++  "id" TEXT NOT NULL PRIMARY KEY,
++  "actorType" TEXT NOT NULL DEFAULT 'admin',
++  "actorId" TEXT NOT NULL,
++  "action" TEXT NOT NULL,
++  "targetType" TEXT,
++  "targetId" TEXT,
++  "detail" TEXT,
++  "outcome" TEXT NOT NULL DEFAULT 'success',
++  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
++)`
++
++// phase 2 / task 1 — planned visits (new table; layout = prisma db push output)
++const PLANNED_VISIT_DDL = `CREATE TABLE IF NOT EXISTS "PlannedVisit" (
++  "id" TEXT NOT NULL PRIMARY KEY,
++  "employeeId" TEXT NOT NULL,
++  "customerId" TEXT NOT NULL,
++  "scheduledAt" DATETIME NOT NULL,
++  "durationMin" INTEGER NOT NULL DEFAULT 30,
++  "priority" TEXT NOT NULL DEFAULT 'normal',
++  "status" TEXT NOT NULL DEFAULT 'scheduled',
++  "note" TEXT,
++  "visitId" TEXT,
++  "createdById" TEXT,
++  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
++  "updatedAt" DATETIME NOT NULL,
++  CONSTRAINT "PlannedVisit_employeeId_fkey" FOREIGN KEY ("employeeId") REFERENCES "Employee" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
++  CONSTRAINT "PlannedVisit_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
++  CONSTRAINT "PlannedVisit_visitId_fkey" FOREIGN KEY ("visitId") REFERENCES "Visit" ("id") ON DELETE SET NULL ON UPDATE CASCADE
++)`
++const PLANNED_VISIT_INDEX_DDL =
++  'CREATE UNIQUE INDEX IF NOT EXISTS "PlannedVisit_visitId_key" ON "PlannedVisit"("visitId")'
++
++export async function register() {
++  if (process.env.NEXT_RUNTIME !== 'nodejs') return
++  const { PrismaClient } = await import('@prisma/client')
++  const db = new PrismaClient()
++  let applied = 0
++  for (const sql of [...MIGRATIONS, AUDIT_TABLE_DDL, PLANNED_VISIT_DDL, PLANNED_VISIT_INDEX_DDL]) {
++    try {
++      await db.$executeRawUnsafe(sql)
++      applied++
++    } catch (e) {
++      const msg = e instanceof Error ? e.message : String(e)
++      if (/duplicate column name|already exists/i.test(msg)) continue // already migrated
++      console.error(`[medpad][migrate] FAILED: ${sql} -> ${msg}`)
++    }
++  }
++  await db.$disconnect()
++  if (applied > 0) console.log(`[medpad][migrate] applied ${applied} migration statement(s)`)
++}
+diff -ruN orig/src/lib/audit.ts b/src/lib/audit.ts
+--- orig/src/lib/audit.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/lib/audit.ts	2026-10-26 08:16:01.000000000 +0000
+@@ -0,0 +1,42 @@
++import { db } from '@/lib/db'
++import { getConfig } from '@/lib/auth'
++
++/**
++ * phase 1 / task 2 (G-3): administrative audit trail.
++ *
++ * Records WHO (the panel's single admin account — Config.adminUser), WHAT
++ * (action), on WHICH target, WHEN and with which outcome. `detail` is a
++ * short human-readable summary; it must NEVER contain passwords, token
++ * values or other secrets (tests assert this).
++ *
++ * Audit writes are best-effort by design: a failing audit row must not
++ * abort the security operation itself — but the failure is logged loudly
++ * to the server console so an operator notices.
++ */
++
++export interface AuditInput {
++  action: string
++  targetType?: string
++  targetId?: string
++  detail?: string
++  outcome?: 'success' | 'failure'
++}
++
++export async function writeAudit(input: AuditInput): Promise<void> {
++  try {
++    const actorId = await getConfig('adminUser', 'admin')
++    await db.auditLog.create({
++      data: {
++        actorType: 'admin',
++        actorId,
++        action: input.action,
++        targetType: input.targetType ?? null,
++        targetId: input.targetId ?? null,
++        detail: input.detail ?? null,
++        outcome: input.outcome ?? 'success',
++      },
++    })
++  } catch (e) {
++    console.error('[medpad][audit] failed to write audit row:', input.action, e)
++  }
++}
+diff -ruN orig/src/lib/gps.ts b/src/lib/gps.ts
+--- orig/src/lib/gps.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/lib/gps.ts	2026-10-26 08:25:41.000000000 +0000
+@@ -0,0 +1,49 @@
++import { isValidLatLng } from '@/lib/geo'
++import { getAdminSettings } from '@/lib/settings'
++
++/**
++ * phase 1 / task 2 (G-6): server-side GPS validation.
++ *
++ * Contract:
++ *  - lat/lng in the database are ONLY ever real device coordinates. When no
++ *    trustworthy fix exists they are NULL and locationMissing=true. The
++ *    customer's coordinates are NEVER substituted for the employee's GPS.
++ *  - accuracy (meters, optional) is kept separate from the distance policy.
++ *    Structurally impossible values (<= 0, non-finite, > 100000 m) always
++ *    make the location untrustworthy. When the admin sets a tolerance
++ *    (gpsMaxAccuracyM > 0), reported accuracy above it also discards the fix.
++ *  - Spoofing caveat: coordinate STRUCTURE is validated, physical presence
++ *    is NOT proven — a rooted device can emit arbitrary coordinates. This
++ *    is documented as an inherent limitation of client-provided GPS.
++ */
++
++const IMPOSSIBLE_ACCURACY_M = 100_000
++
++export interface ResolvedLocation {
++  lat: number | null
++  lng: number | null
++  accuracy: number | null
++  locationMissing: boolean
++}
++
++export async function resolveGpsLocation(
++  latRaw: number,
++  lngRaw: number,
++  accuracyRaw: number,
++): Promise<ResolvedLocation> {
++  const { gpsMaxAccuracyM } = await getAdminSettings()
++  const hasAccuracy = Number.isFinite(accuracyRaw)
++  const accuracyImpossible = hasAccuracy && (accuracyRaw <= 0 || accuracyRaw > IMPOSSIBLE_ACCURACY_M)
++  const accuracyOverTolerance = gpsMaxAccuracyM > 0 && hasAccuracy && accuracyRaw > gpsMaxAccuracyM
++
++  if (isValidLatLng(latRaw, lngRaw) && !accuracyImpossible && !accuracyOverTolerance) {
++    return {
++      lat: latRaw,
++      lng: lngRaw,
++      accuracy: hasAccuracy ? accuracyRaw : null,
++      locationMissing: false,
++    }
++  }
++  // no trustworthy fix -> explicitly missing, never fabricated
++  return { lat: null, lng: null, accuracy: null, locationMissing: true }
++}
+diff -ruN orig/src/lib/planned-visit.ts b/src/lib/planned-visit.ts
+--- orig/src/lib/planned-visit.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/lib/planned-visit.ts	2026-10-26 09:56:03.000000000 +0000
+@@ -0,0 +1,223 @@
++import { db } from '@/lib/db'
++
++/**
++ * phase 2 / task 1 — planned field visits: shared constants + server-side
++ * validation. Every write path (create / edit / cancel / reschedule) and the
++ * automatic check-in linkage goes through this module so the rules exist in
++ * exactly ONE place — the API routes stay thin and cannot drift apart.
++ *
++ * STATUS MODEL (fixed, validated — no free-text):
++ *   scheduled        the plan is on the calendar
++ *   needs_reschedule admin marked it as needing a new time (not done, not lost)
++ *   done             a REAL visit was linked by the server on check-in.
++ *                    Only the server sets 'done' — an admin can never
++ *                    hand-mark a plan done, so the done-count always equals
++ *                    real, linked visits (the whole point of the feature).
++ *   cancelled        terminal; never counted as done.
++ *
++ * RESCHEDULE = the SAME row gets a new scheduledAt (identity + future visit
++ * link survive); CANCEL = terminal state. A rescheduled or cancelled plan is
++ * therefore never mistaken for a completed visit.
++ */
++
++export const PLAN_STATUSES = ['scheduled', 'done', 'cancelled', 'needs_reschedule'] as const
++export const PLAN_PRIORITIES = ['low', 'normal', 'high'] as const
++export type PlanStatus = (typeof PLAN_STATUSES)[number]
++export type PlanPriority = (typeof PLAN_PRIORITIES)[number]
++
++/** Statuses an admin may still act on (edit / cancel / reschedule). */
++export const PLAN_OPEN_STATUSES: PlanStatus[] = ['scheduled', 'needs_reschedule']
++
++/** The only transitions an admin may request through PUT {status}. */
++export const PLAN_PUT_STATUSES: PlanStatus[] = ['scheduled', 'needs_reschedule']
++
++export const PLAN_DEFAULT_DURATION_MIN = 30
++export const PLAN_MIN_DURATION_MIN = 5
++export const PLAN_MAX_DURATION_MIN = 480
++export const PLAN_NOTE_MAX = 1000
++
++/** scheduledAt sanity window: plans may be backfilled up to 365 days into the
++ *  past and created up to 730 days ahead. Anything outside is rejected as a
++ *  likely input error ( protects the day-view grouping from garbage dates). */
++export const PLAN_PAST_MS = 365 * 24 * 3600 * 1000
++export const PLAN_FUTURE_MS = 730 * 24 * 3600 * 1000
++
++/** List hard cap — protects the panel from unbounded responses; a real
++ *  deployment never approaches this for a day/range view. */
++export const PLAN_LIST_LIMIT = 500
++
++export interface PlanWriteInput {
++  employeeId?: string
++  customerId?: string
++  scheduledAt?: string
++  durationMin?: number
++  priority?: string
++  note?: string | null
++}
++
++export interface ValidatedPlanFields {
++  employeeId: string
++  customerId: string
++  scheduledAt: Date
++  durationMin: number
++  priority: PlanPriority
++  note: string | null
++}
++
++/** Parse + range-check an ISO 8601 timestamp. Returns null when invalid. */
++export function parsePlanDate(raw: unknown): Date | null {
++  if (typeof raw !== 'string' || !raw.trim()) return null
++  const d = new Date(raw.trim())
++  if (isNaN(d.getTime())) return null
++  return d
++}
++
++/** Validate a plan payload fragment. Returns { error } (Persian, ready for
++ *  the API response) or { fields } with ONLY the keys that were provided. */
++export async function validatePlanInput(
++  body: PlanWriteInput | null,
++  opts: { requireAll: boolean },
++): Promise<{ error?: string; fields?: Partial<ValidatedPlanFields> }> {
++  const f: Partial<ValidatedPlanFields> = {}
++
++  if (body?.employeeId !== undefined || opts.requireAll) {
++    const id = String(body?.employeeId ?? '')
++    if (!id) return { error: 'کارمند انتخاب نشده است' }
++    const emp = await db.employee.findUnique({ where: { id }, select: { id: true, active: true, name: true } })
++    if (!emp) return { error: 'کارمند پیدا نشد' }
++    if (!emp.active) return { error: 'این کارمند غیرفعال است — ابتدا او را فعال کنید' }
++    f.employeeId = emp.id
++  }
++
++  if (body?.customerId !== undefined || opts.requireAll) {
++    const id = String(body?.customerId ?? '')
++    if (!id) return { error: 'مشتری انتخاب نشده است' }
++    const cust = await db.customer.findUnique({ where: { id }, select: { id: true, name: true } })
++    if (!cust) return { error: 'مشتری پیدا نشد' }
++    f.customerId = cust.id
++  }
++
++  if (body?.scheduledAt !== undefined || opts.requireAll) {
++    const d = parsePlanDate(body?.scheduledAt)
++    if (!d) return { error: 'تاریخ و ساعت برنامه نامعتبر است (ISO 8601)' }
++    const now = Date.now()
++    if (d.getTime() < now - PLAN_PAST_MS) return { error: 'تاریخ برنامه بیش از یک سال در گذشته است' }
++    if (d.getTime() > now + PLAN_FUTURE_MS) return { error: 'تاریخ برنامه بیش از دو سال در آینده است' }
++    f.scheduledAt = d
++  }
++
++  if (body?.durationMin !== undefined) {
++    const n = Number(body.durationMin)
++    if (!Number.isFinite(n) || Math.trunc(n) !== n || n < PLAN_MIN_DURATION_MIN || n > PLAN_MAX_DURATION_MIN) {
++      return { error: `مدت بازدید باید عددی صحیح بین ${PLAN_MIN_DURATION_MIN} و ${PLAN_MAX_DURATION_MIN} دقیقه باشد` }
++    }
++    f.durationMin = n
++  } else if (opts.requireAll) {
++    f.durationMin = PLAN_DEFAULT_DURATION_MIN
++  }
++
++  if (body?.priority !== undefined) {
++    if (!PLAN_PRIORITIES.includes(body.priority as PlanPriority)) {
++      return { error: 'اولویت باید یکی از مقادیر کم / معمولی / مهم باشد' }
++    }
++    f.priority = body.priority as PlanPriority
++  } else if (opts.requireAll) {
++    f.priority = 'normal'
++  }
++
++  if (body?.note !== undefined) {
++    const note = typeof body.note === 'string' ? body.note.trim() : ''
++    if (note.length > PLAN_NOTE_MAX) {
++      return { error: `توضیحات حداکثر می‌تواند ${PLAN_NOTE_MAX} نویسه باشد` }
++    }
++    f.note = note || null
++  }
++
++  return { fields: f }
++}
++
++/** True when an existing 'scheduled' plan already covers the exact same
++ *  employee + customer + timestamp (double-click / duplicate submit guard). */
++export async function isDuplicatePlan(
++  employeeId: string,
++  customerId: string,
++  scheduledAt: Date,
++  excludeId?: string,
++): Promise<boolean> {
++  const dup = await db.plannedVisit.findFirst({
++    where: {
++      employeeId,
++      customerId,
++      scheduledAt,
++      status: 'scheduled',
++      ...(excludeId ? { id: { not: excludeId } } : {}),
++    },
++    select: { id: true },
++  })
++  return !!dup
++}
++
++/** Server-local-day range [start, end) around a moment. Day grouping follows
++ *  the SERVER's local timezone — the same clock MedPad already trusts for the
++ *  clientAt health window and every timestamp it stores. */
++export function localDayRange(at: Date): { start: Date; end: Date } {
++  const start = new Date(at)
++  start.setHours(0, 0, 0, 0)
++  const end = new Date(start)
++  end.setDate(end.getDate() + 1)
++  return { start, end }
++}
++
++/** Parse a YYYY-MM-DD string into a server-local day range. Null when the
++ *  string is not a real calendar date. */
++export function parseDayParam(raw: string | null): { start: Date; end: Date } | null {
++  if (!raw) return null
++  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null
++  const [y, m, d] = raw.split('-').map(Number)
++  const start = new Date(y, m - 1, d, 0, 0, 0, 0)
++  // reject e.g. 2026-02-31 (Date auto-rolls it)
++  if (start.getFullYear() !== y || start.getMonth() !== m - 1 || start.getDate() !== d) return null
++  const end = new Date(start)
++  end.setDate(end.getDate() + 1)
++  return { start, end }
++}
++
++/** Prisma select shared by list + detail so responses stay uniform. */
++export const PLAN_SELECT = {
++  id: true,
++  employeeId: true,
++  customerId: true,
++  scheduledAt: true,
++  durationMin: true,
++  priority: true,
++  status: true,
++  note: true,
++  visitId: true,
++  createdById: true,
++  createdAt: true,
++  updatedAt: true,
++  employee: { select: { id: true, name: true, username: true, active: true } },
++  customer: { select: { id: true, name: true, type: true } },
++  visit: { select: { id: true, startAt: true, endAt: true, open: true } },
++} as const
++
++/** Server-local "YYYY-MM-DDTHH:mm" mirror of scheduledAt — the exact format a
++ *  <input type="datetime-local"> expects and the exact format the server
++ *  parses back. Returning it precomputed keeps the BROWSER entirely out of
++ *  timezone arithmetic (the panel may run on a machine with a different
++ *  timezone than the server; plan times are defined in SERVER-local time,
++ *  consistent with the day grouping and the clientAt policy). */
++export function withScheduledAtLocal<T extends { scheduledAt: Date }>(plan: T): T & { scheduledAtLocal: string } {
++  const p = (n: number) => String(n).padStart(2, '0')
++  const d = plan.scheduledAt
++  return {
++    ...plan,
++    scheduledAtLocal: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`,
++  }
++}
++
++/** Server-local "YYYY-MM-DD" of a moment (the API's canonical day key). */
++export function localDayKey(d: Date): string {
++  const p = (n: number) => String(n).padStart(2, '0')
++  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
++}
+diff -ruN orig/src/lib/realtime.ts b/src/lib/realtime.ts
+--- orig/src/lib/realtime.ts	2026-10-26 10:00:50.832135519 +0000
++++ b/src/lib/realtime.ts	2026-10-26 09:55:12.000000000 +0000
+@@ -129,3 +129,12 @@
+ export function faTime(iso: string | Date): string {
+   return new Date(iso).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })
+ }
++
++/** Persian (Jalali) date only — phase 2 / task 1: the plans day-view label.
++ *  Reuses the SAME Intl 'fa-IR' machinery as faDateTime (no new calendar
++ *  conversion library, no second date implementation to drift out of sync). */
++export function faDate(iso: string | Date): string {
++  return new Date(iso).toLocaleDateString('fa-IR', {
++    year: 'numeric', month: 'long', day: 'numeric', weekday: 'long',
++  })
++}
+diff -ruN orig/src/lib/settings.ts b/src/lib/settings.ts
+--- orig/src/lib/settings.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/lib/settings.ts	2026-10-26 08:25:27.000000000 +0000
+@@ -0,0 +1,97 @@
++import { db } from '@/lib/db'
++
++/**
++ * phase 1 / task 2: admin-configurable server settings.
++ *
++ * Stored in the existing Config KV table (single source of truth, survives
++ * restarts, no new infrastructure). Every setting has:
++ *   - a server-side default (used when the row is missing/corrupt),
++ *   - a permitted range enforced on write AND defensively on read,
++ *   - a "safe" failure mode: an invalid stored value NEVER widens policy,
++ *     it falls back to the default.
++ *
++ * appTokenTtlHours (G-2) — how long a newly issued app token lives:
++ *   0        = tokens never expire (pre-remediation behavior, opt-in)
++ *   1..8760  = 1 hour .. 1 year
++ *   default  = 720 (30 days)
++ * The TTL applies at ISSUANCE time only; changing it never retroactively
++ * expires existing tokens (no silent mass-logout on deployment).
++ *
++ * gpsMaxAccuracyM (G-6) — GPS accuracy tolerance in meters. A reported
++ * accuracy worse than this tolerance makes the location UNAVAILABLE (the
++ * event is still recorded, explicitly marked as missing its location).
++ *   0        = accuracy filtering disabled (record any fix + its accuracy)
++ *   10..500  = tolerance window
++ *   default  = 50 (typical urban GPS fixes are 10–30 m; 50 m is lenient
++ *   enough to keep valid fixes, strict enough to drop garbage). This is a
++ *   NEW threshold — the app had no accuracy concept before G-6 (documented
++ *   decision; the admin can change it at any time).
++ * Structurally IMPOSSIBLE accuracy values (<= 0, NaN, > 100000 m) are
++ * ALWAYS discarded regardless of this setting.
++ *
++ * gpsStrictRadius (G-6) — what happens when a check-in is outside the
++ * customer's permitted radius (per-customer `radius` field, default 150 m —
++ * the existing admin-configurable mechanism; no new global radius invented):
++ *   0 (off)  = record the event WITH an explicit outOfRadius flag +
++ *              distance (default — field reality: GPS drift, offline queue;
++ *              attendance data must not be lost, but the violation is
++ *              surfaced in the API, UI and realtime event)
++ *   1 (on)   = REJECT with 422 (strict mode)
++ */
++
++export interface AdminSettings {
++  appTokenTtlHours: number
++  gpsMaxAccuracyM: number
++  gpsStrictRadius: number
++}
++
++export const SETTING_DEFS = {
++  appTokenTtlHours: { def: 720, min: 0, max: 8760 },
++  gpsMaxAccuracyM: { def: 50, min: 0, max: 500 },
++  gpsStrictRadius: { def: 0, min: 0, max: 1 },
++} as const
++
++export type SettingKey = keyof typeof SETTING_DEFS
++
++function clampToRange(key: SettingKey, value: number): number {
++  const { min, max } = SETTING_DEFS[key]
++  if (!Number.isFinite(value)) return SETTING_DEFS[key].def
++  return Math.min(max, Math.max(min, Math.trunc(value)))
++}
++
++/** Read all settings with range validation (invalid stored value -> default). */
++export async function getAdminSettings(): Promise<AdminSettings> {
++  const rows = await db.config.findMany({
++    where: { key: { in: Object.keys(SETTING_DEFS) } },
++  })
++  const out: Record<string, number> = {}
++  for (const k of Object.keys(SETTING_DEFS) as SettingKey[]) {
++    const row = rows.find((r) => r.key === k)
++    const raw = row ? Number(row.value) : NaN
++    out[k] = Number.isFinite(raw) ? clampToRange(k, raw) : SETTING_DEFS[k].def
++  }
++  return out as unknown as AdminSettings
++}
++
++/** Validate + persist one or more settings. Throws Error with a Persian
++ *  message on invalid input (the route maps it to HTTP 400). */
++export async function saveAdminSettings(patch: Partial<Record<SettingKey, unknown>>): Promise<AdminSettings> {
++  for (const [key, value] of Object.entries(patch)) {
++    if (!(key in SETTING_DEFS)) {
++      throw new Error(`تنظیمات ناشناخته: ${key}`)
++    }
++    const num = typeof value === 'string' ? Number(value.trim()) : Number(value)
++    const { min, max } = SETTING_DEFS[key as SettingKey]
++    if (!Number.isFinite(num) || Math.trunc(num) !== num || num < min || num > max) {
++      throw new Error(`مقدار ${key} باید عددی صحیح بین ${min} و ${max} باشد`)
++    }
++  }
++  for (const [key, value] of Object.entries(patch)) {
++    await db.config.upsert({
++      where: { key },
++      update: { value: String(value) },
++      create: { key, value: String(value) },
++    })
++  }
++  return getAdminSettings()
++}
+diff -ruN orig/src/lib/types.ts b/src/lib/types.ts
+--- orig/src/lib/types.ts	2026-10-26 10:00:50.831135510 +0000
++++ b/src/lib/types.ts	2026-10-26 09:56:30.000000000 +0000
+@@ -50,6 +50,35 @@
+   customer: { id: string; name: string }
+ }
+ 
++// phase 2 / task 1 — planned field visits (the INTENT layer; Visit stays the
++// source of truth for what actually happened).
++export type PlanStatus = 'scheduled' | 'done' | 'cancelled' | 'needs_reschedule'
++export type PlanPriority = 'low' | 'normal' | 'high'
++
++export interface PlannedVisit {
++  id: string
++  employeeId: string
++  employee: { id: string; name: string; username: string; active: boolean }
++  customerId: string
++  customer: { id: string; name: string; type: string }
++  scheduledAt: string
++  // server-local "YYYY-MM-DDTHH:mm" — precomputed by the API for
++  // <input type="datetime-local"> prefill (no browser timezone math)
++  scheduledAtLocal?: string
++  durationMin: number
++  priority: PlanPriority
++  status: PlanStatus
++  note?: string | null
++  visitId?: string | null
++  visit?: { id: string; startAt: string; endAt?: string | null; open: boolean } | null
++  // same-day UNLINKED real visit for the same employee+customer (server-side
++  // context — surfaces missed plan↔visit linkages to the admin)
++  actualVisit?: { id: string; startAt: string; endAt?: string | null; open: boolean } | null
++  createdById?: string | null
++  createdAt: string
++  updatedAt: string
++}
++
+ export interface PanelConfig {
+   panelVersion: string
+   apkVersion: string
