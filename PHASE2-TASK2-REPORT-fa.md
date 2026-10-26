@@ -150,7 +150,7 @@ git archive --format=zip --prefix=MedPad-Web-Offline-v1.9.13-dev.1/ \
 
 ## ۱۲. وضعیت Git
 
-- شاخه: `develop` · commit این تسک: **`<SHA>`** · پوش شد و با GitHub API مستقل تأیید شد · `main` = `8db3319` دست‌نخورده · بدون force push.
+- شاخه: `develop` · commit قابلیت: **`af94c58`** + commit مستندات/انتشار (همان commit هدف tag ریلیز — SHA در بخش ۰ جدول Release) · هر دو پوش شدند و با GitHub API مستقل تأیید شدند · `main` = `8db3319` دست‌نخورده · بدون force push.
 - فایل‌های تغییرکرده: سورس اندروید (۷ تغییر + ۱۲ جدید)، `Android/gradlew` (exec-bit)، `.gitignore` (خروجی‌های build اندروید)، باندل `app/panel/.next` (بازسازی کامل)، `app/APP-VERSION`، `app/panel/db/template.db`، `app/panel/prisma-schema.prisma` (بدون تغییر معنایی — همان اسکیمای task1)، `patches/panel-src-phase2-task2.patch` (جدید)، `install.mjs/bat/ps1/sh` + `wizard.mjs` + `server-manager.mjs` + `ui/installer.html` (نسخه‌های Dev)، `WORKLOG-MedPad.md` (Task 26 — فقط الحاق)، همین گزارش.
 
 **جمع‌بندی:** اپ اندروید برنامه‌های بازدید را می‌بیند و از دلشان چک‌این می‌زند؛ سرور مجوز را سخت‌گیرانه اعمال می‌کند؛ جریان چک‌این و صف آفلاین موجود دست‌نخورده است؛ بستهٔ واقعی پنل و APK تازه ساخته، هش و به‌صورت Pre-release منتشر شدند؛ مستندات و worklog به‌روز شدند. آمادهٔ آزمون مالک.
