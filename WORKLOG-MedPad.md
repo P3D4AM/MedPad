@@ -779,4 +779,16 @@ Work Log (بخش ۲ — Stage A اجرا و تست شد):
 - Stage A regression: bash audit-tests/run-all.sh → ALL-SUITES-PASS = ۱۸+۱۵+۱۵+۴۶+۳۴+۸۰ = ۲۰۸ چک، خروج ۰
 - تذکر: هر سه کامیت شامل باندل بازسازی‌شده کامل است (BUILD_ID جدید در هر rebuild) + وصلهٔ سورس تجمعی patches/panel-src-phase2-remediation.patch (مبنای bd9c80b+فاز۱؛ این بار package.json/lock داخل وصله است)
 
-Stage Summary (این بخش پس از اتمام تسک کامل می‌شود):
+Work Log (بخش ۳ — Stage B اجرا و تست شد):
+- G-3 کامیت b37d919 — deactivate/reactivate اختصاصی (ابطال توکن + حفظ سابقه + audit؛ reactivation توکن‌ها را برنمی‌گرداند) + PUT سخت‌شده (اعتبارسنجی؛ تغییر رمز = ابطال توکن‌ها) + مدل AuditLog + نمایشگر + UI کامل EmployeesTab — تست: ۳۵ چک
+- G-4 کامیت 27a85a9 — ماتریس مجوز صوت (مالک + مشتری منتسب؛ یتیم=۴۰۴ کارمند/فقط ادمین) + GET /api/admin/media-orphans + کشف و فیکس باگ مهم ازدست‌رفتن صوت‌ها در آپدیت (بکاپ/بازیابی standalone-uploads در install.mjs) — تست: ۳۰ چک شامل رگرسیون کامل آپدیت واقعی
+- G-6 کامیت 60f3766 — src/lib/gps.ts (هرگز جایگزینی مختصات مشتری؛ دقت ناممکن/بدتر از تحمل → locationMissing) + ستون‌های Checkin + distanceM/outOfRadius بر اساس radius موجود مشتری + strict اختیاری (422) + تنظیمات gpsMaxAccuracyM/gpsStrictRadius + UI + اپ: DeviceGps (fix واقعی ≤۵ دقیقه با accuracy؛ Room v6→v7) — تست: ۳۵ چک شامل مهاجرت واقعی
+- باگ‌های تست خودم در مسیر (ترتیب G2.5، پرانتز g6ago، json.load بدون open، برخورد با پنجرهٔ dedup ۹۰ ثانیه‌ای در G6) شناسایی و اصلاح شدند — سرور در همهٔ موارد درست عمل کرده بود
+- Stage B regression: bash audit-tests/run-all.sh → ALL-SUITES-PASS = ۱۸+۱۵+۱۵+۴۶+۳۴+۱۸۰ = ۳۰۸ چک، خروج ۰
+- گزارش کامل فارسی: PHASE1-TASK2-REPORT-fa.md
+
+Stage Summary:
+- شش یافتهٔ G-1..G-6 پیاده‌سازی، تست و در ۶ کامیت مستقل ثبت شدند: 6e8d6a9 · a694ff7 · 76e8d66 (Stage A) · b37d919 · 27a85a9 · 60f3766 (Stage B) + کامیت‌های docs
+- جمع تست‌های نهایی: ۳۰۸ چک سبز (۱۲۸ چک قبلی + ۱۸۰ چک جدید Remediation) + ۱۲ چک سخت‌سازی بیلد در هر rebuild
+- کشف جانبی مهم و فیکس‌شده: نابودی فایل‌های صوتی در هر آپدیت پنل (uploads واقعی داخل standalone بود و بکاپ نمی‌شد)
+- محدودیت‌ها: تست دستگاه اندروید واقعی/ویندوز واقعی ممکن نبود؛ HTTP بدون TLS در LAN باقی است؛ GPS spoofing ذاتی حل‌شدنی نیست (مستند)
