@@ -85,7 +85,9 @@ h1{font-size:20px;margin-bottom:4px;display:flex;align-items:center;gap:10px;fle
       <span>پورت پنل</span><b id="infoPort">—</b>
       <span>پورت سوکت</span><b id="infoRt">—</b>
       <span>آدرس عمومی</span><b id="infoPublic">—</b>
+      <span>فایروال ویندوز</span><b id="infoFw">…</b>
     </div>
+    <p class="hint" id="fwHint">استثنای فایروال برای دسترسی گوشی‌ها و اپ اندروید، موقع نصب اضافه می‌شود و با هر استارت سرور دوباره بررسی و در صورت حذف‌شدن، خودکار بازافزوده می‌شود (در صورت نیاز پنجره‌ی تأیید ویندوز نشان داده می‌شود).</p>
   </div>
 
   <button class="btn gray" id="btnQuit" style="width:100%">بستن مدیر سرور</button>
@@ -102,9 +104,9 @@ function setMsg(cls, text) {
 }
 function clearMsg() { $('#msgBox').className = 'msg'; $('#msgBox').style.display = 'none' }
 
-async function refresh() {
+async function refresh(withFw) {
   try {
-    const r = await fetch('/api/status')
+    const r = await fetch('/api/status' + (withFw ? '?fw=1' : ''))
     const s = await r.json()
     $('#dotPanel').className = 'dot ' + (s.panel.running ? 'on' : 'off')
     $('#dotRt').className = 'dot ' + (s.realtime.running ? 'on' : 'off')
@@ -117,11 +119,26 @@ async function refresh() {
     $('#infoPort').textContent = s.panel.port
     $('#infoRt').textContent = s.realtime.port
     $('#infoPublic').textContent = s.tunnel && s.tunnel.publicUrl ? s.tunnel.publicUrl : '— (لوکال)'
+    if (s.firewall) renderFw(s.firewall)
     return s
   } catch (e) { return null }
 }
-refresh()
-setInterval(() => { if (!busy) refresh() }, 3000)
+function renderFw(fw) {
+  const el = $('#infoFw')
+  if (!el) return
+  if (fw.skipped) { el.textContent = '— (غیر ویندوزی)'; return }
+  const missing = (fw.rules || []).filter((r) => !r.present)
+  if (missing.length === 0) {
+    el.textContent = 'فعال ✓ (استثناها ثبت است)'
+    el.style.color = '#15803d'
+  } else {
+    el.textContent = 'ناقص — ' + missing.length + ' استثنا کم دارد'
+    el.style.color = '#b91c1c'
+    $('#fwHint').innerHTML = '⚠ بعضی استثناهای فایروال حذف شده‌اند — با <b>استارت/ری‌استارت سرور</b> دوباره به‌صورت خودکار افزوده می‌شوند (پنجره‌ی تأیید ویندوز را Allow بزنید).'
+  }
+}
+refresh(true)
+setInterval(() => { if (!busy) refresh(false) }, 3000)
 
 async function action(name, btn, label) {
   if (busy) return
@@ -141,7 +158,7 @@ async function action(name, btn, label) {
     btn.disabled = false
     btn.innerHTML = old
     busy = false
-    refresh()
+    refresh(true)
   }
 }
 

@@ -1,0 +1,315 @@
+diff -ru orig/src/app/globals.css b/src/app/globals.css
+--- orig/src/app/globals.css	2026-10-25 06:58:53.000000000 +0000
++++ b/src/app/globals.css	2026-10-26 16:04:16.000000000 +0000
+@@ -127,3 +127,20 @@
+ .mp-scroll::-webkit-scrollbar-thumb { background: #c4b5a4; border-radius: 8px; }
+ .mp-scroll::-webkit-scrollbar-track { background: transparent; }
+ audio { border-radius: 8px; }
++
++/* ── v1.9.13-dev.2 (user report #3): mobile usability ──
++   1) 16px form controls on phones — iOS Safari auto-zooms into any
++      focused input rendered below 16px, which makes the whole page
++      shift/jump when tapping filters (exactly what the owner reported).
++      These rules are intentionally UNLAYERED so they win over Tailwind
++      utilities (e.g. text-sm) in the cascade.
++   2) A hard overflow guard: nothing may push the document wider than
++      the viewport — horizontal scrolling on a phone was the other half
++      of the "elements move around" report. */
++@media (max-width: 640px) {
++  input, select, textarea { font-size: 16px !important; }
++}
++/* hard overflow guard — phones must never horizontal-scroll the dashboard
++   (clip on body only: overflow-x on html breaks position:sticky in some
++   browsers; overflow:clip keeps the viewport as the scroll container) */
++body { overflow-x: clip; }
+diff -ru orig/src/app/page.tsx b/src/app/page.tsx
+--- orig/src/app/page.tsx	2026-10-25 06:58:53.000000000 +0000
++++ b/src/app/page.tsx	2026-10-26 16:04:26.000000000 +0000
+@@ -32,6 +32,6 @@
+     )
+   }
+ 
+-  if (!authed) return <LoginScreen onLogin={() => setAuthed(true)} />
++  if (!authed) return <LoginScreen onLogin={() => setAuthed(true)} version={cfg?.panelVersion} />
+   return <Dashboard cfg={cfg} onLogout={() => setAuthed(false)} />
+ }
+diff -ru orig/src/components/panel/Dashboard.tsx b/src/components/panel/Dashboard.tsx
+--- orig/src/components/panel/Dashboard.tsx	2026-10-26 16:30:49.321914743 +0000
++++ b/src/components/panel/Dashboard.tsx	2026-10-26 16:02:46.000000000 +0000
+@@ -146,15 +146,18 @@
+ 
+   return (
+     <div className="min-h-screen flex flex-col bg-gradient-to-b from-teal-50/60 to-background">
+-      {/* Header */}
++      {/* Header — v1.9.13-dev.2 (user report #3): fully responsive on phones.
++          The old single non-wrapping flex row was ~426px wide on a 390px
++          screen — it pushed the whole page into horizontal scrolling, which
++          also threw every fixed-position dialog/popover off-center. */}
+       <header className="sticky top-0 z-40 border-b bg-background/85 backdrop-blur">
+-        <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3">
+-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-teal-600 font-bold text-white">
++        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2.5 sm:px-4 sm:py-3">
++          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-teal-600 font-bold text-white">
+             M
+           </div>
+-          <div className="flex-1">
+-            <h1 className="text-base font-bold leading-tight">MedPad — کنترل کارمندها</h1>
+-            <p className="text-xs text-muted-foreground">
++          <div className="min-w-0 flex-1">
++            <h1 className="truncate text-base font-bold leading-tight">MedPad — کنترل کارمندها</h1>
++            <p className="truncate text-xs text-muted-foreground">
+               نسخه پنل {cfg.panelVersion} • نسخه اپ {cfg.apkVersion}
+             </p>
+           </div>
+@@ -165,28 +168,31 @@
+             <span
+               className={`h-2 w-2 rounded-full ${connected ? 'bg-emerald-500 animate-pulse' : 'bg-gray-400'}`}
+             />
+-            {connected ? 'Real-time متصل' : 'در حال اتصال…'}
++            <span className="hidden sm:inline">{connected ? 'Real-time متصل' : 'در حال اتصال…'}</span>
++            <span className="sm:hidden">{connected ? 'متصل' : '…'}</span>
+           </Badge>
+-          <Button variant="ghost" size="icon" title="مرکز دانلود" onClick={() => window.open('/downloads.html', '_blank')}>
+-            <Download className="h-4 w-4" />
+-          </Button>
+-          <Button variant="ghost" size="icon" title="تنظیمات" onClick={() => setShowSettings(true)}>
+-            <Settings className="h-4 w-4" />
+-          </Button>
+-          <Button variant="ghost" size="icon" title="اعلان‌های مرورگر" onClick={requestNotifyPermission}>
+-            <Bell className="h-4 w-4" />
+-          </Button>
+-          <Button variant="ghost" size="sm" onClick={logout}>
+-            خروج
+-          </Button>
++          <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">
++            <Button variant="ghost" size="icon" title="مرکز دانلود" onClick={() => window.open('/downloads.html', '_blank')}>
++              <Download className="h-4 w-4" />
++            </Button>
++            <Button variant="ghost" size="icon" title="تنظیمات" onClick={() => setShowSettings(true)}>
++              <Settings className="h-4 w-4" />
++            </Button>
++            <Button variant="ghost" size="icon" title="اعلان‌های مرورگر" onClick={requestNotifyPermission}>
++              <Bell className="h-4 w-4" />
++            </Button>
++            <Button variant="ghost" size="sm" onClick={logout}>
++              خروج
++            </Button>
++          </div>
+         </div>
+         {/* Tabs */}
+-        <div className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-4 pb-2">
++        <div className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-3 pb-2 sm:px-4" style={{ WebkitOverflowScrolling: 'touch' }}>
+           {TABS.map((t) => (
+             <button
+               key={t.key}
+               onClick={() => setTab(t.key)}
+-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition-colors ${
++              className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition-colors ${
+                 tab === t.key ? 'bg-teal-600 text-white shadow-sm' : 'hover:bg-muted text-muted-foreground'
+               }`}
+             >
+@@ -201,7 +207,7 @@
+       {live.length > 0 && <div className="bg-amber-50 border-b px-4 py-1 text-xs">{faDateTime(live[0].createdAt)}</div>}
+ 
+       {/* Content */}
+-      <main className="mx-auto w-full max-w-7xl flex-1 p-4">
++      <main className="mx-auto w-full max-w-7xl flex-1 p-3 sm:p-4">
+         {tab === 'overview' && <OverviewTab refreshKey={refreshKey} />}
+         {tab === 'plans' && <PlansTab refreshKey={refreshKey} />}
+         {tab === 'checkins' && <CheckinsTab refreshKey={refreshKey} />}
+diff -ru orig/src/components/panel/LoginScreen.tsx b/src/components/panel/LoginScreen.tsx
+--- orig/src/components/panel/LoginScreen.tsx	2026-10-25 06:58:53.000000000 +0000
++++ b/src/components/panel/LoginScreen.tsx	2026-10-26 16:04:21.000000000 +0000
+@@ -7,7 +7,7 @@
+ import { Label } from '@/components/ui/label'
+ import { LogIn, ShieldCheck } from 'lucide-react'
+ 
+-export default function LoginScreen({ onLogin }: { onLogin: () => void }) {
++export default function LoginScreen({ onLogin, version }: { onLogin: () => void; version?: string }) {
+   const [username, setUsername] = useState('')
+   const [password, setPassword] = useState('')
+   const [busy, setBusy] = useState(false)
+@@ -41,7 +41,7 @@
+             <ShieldCheck className="h-8 w-8" />
+           </div>
+           <CardTitle className="text-xl">پنل مدیریت MedPad</CardTitle>
+-          <CardDescription>سیستم کنترل کارمندها — نسخه ۱.۹.۳</CardDescription>
++          <CardDescription>سیستم کنترل کارمندها{version ? ` — نسخه ${version}` : ''}</CardDescription>
+         </CardHeader>
+         <CardContent>
+           <form onSubmit={submit} className="space-y-4">
+diff -ru orig/src/components/panel/OverviewTab.tsx b/src/components/panel/OverviewTab.tsx
+--- orig/src/components/panel/OverviewTab.tsx	2026-10-25 06:58:53.000000000 +0000
++++ b/src/components/panel/OverviewTab.tsx	2026-10-26 16:03:51.000000000 +0000
+@@ -57,8 +57,8 @@
+   return (
+     <div className="space-y-4">
+       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+-        {cards.map((c) => (
+-          <Card key={c.label} className="border/60">
++        {cards.map((c, i) => (
++          <Card key={c.label} className={`border/60 ${i === cards.length - 1 ? 'col-span-2 md:col-span-1' : ''}`}>
+             <CardContent className="p-4">
+               <div className={`mx-auto mb-2 flex h-9 w-9 items-center justify-center rounded-xl ${c.color}`}>
+                 <c.icon className="h-5 w-5" />
+diff -ru orig/src/components/panel/PlansTab.tsx b/src/components/panel/PlansTab.tsx
+--- orig/src/components/panel/PlansTab.tsx	2026-10-26 16:30:49.321914743 +0000
++++ b/src/components/panel/PlansTab.tsx	2026-10-26 16:03:41.000000000 +0000
+@@ -304,46 +304,61 @@
+ 
+   return (
+     <div className="space-y-4">
+-      {/* ── day navigation + filters ── */}
+-      <div className="flex flex-wrap items-center gap-2">
+-        <div className="flex items-center gap-1">
+-          <Button
+-            variant="outline"
+-            size="icon"
+-            title="روز قبل"
+-            disabled={!dayKey}
+-            onClick={() => setDayKey(shiftDay(dayKey, -1))}
+-          >
+-            <ChevronRight className="h-4 w-4" />
+-          </Button>
+-          <Input
+-            dir="ltr"
+-            type="date"
+-            className="w-[150px] text-left"
+-            value={dayKey}
+-            onChange={(e) => e.target.value && setDayKey(e.target.value)}
+-          />
+-          <Button
+-            variant="outline"
+-            size="icon"
+-            title="روز بعد"
+-            disabled={!dayKey}
+-            onClick={() => setDayKey(shiftDay(dayKey, 1))}
+-          >
+-            <ChevronLeft className="h-4 w-4" />
+-          </Button>
+-          <Button variant="outline" size="sm" onClick={() => setDayKey(serverToday || dayKey)}>
+-            امروز
+-          </Button>
++      {/* ── day navigation + filters ── v1.9.13-dev.2 (user report #3):
++          restructured for phones — day nav on one row, filters as a 2-col
++          grid that becomes one flex row from sm: up. The old single
++          flex-wrap row with three fixed 150px selects + buttons did not fit
++          a 390px screen and pushed the page sideways. */}
++      <div className="flex flex-col gap-2">
++        <div className="flex flex-wrap items-center gap-2">
++          <div className="flex items-center gap-1">
++            <Button
++              variant="outline"
++              size="icon"
++              title="روز قبل"
++              disabled={!dayKey}
++              onClick={() => setDayKey(shiftDay(dayKey, -1))}
++            >
++              <ChevronRight className="h-4 w-4" />
++            </Button>
++            <Input
++              dir="ltr"
++              type="date"
++              className="w-[140px] text-left sm:w-[150px]"
++              value={dayKey}
++              onChange={(e) => e.target.value && setDayKey(e.target.value)}
++            />
++            <Button
++              variant="outline"
++              size="icon"
++              title="روز بعد"
++              disabled={!dayKey}
++              onClick={() => setDayKey(shiftDay(dayKey, 1))}
++            >
++              <ChevronLeft className="h-4 w-4" />
++            </Button>
++            <Button variant="outline" size="sm" onClick={() => setDayKey(serverToday || dayKey)}>
++              امروز
++            </Button>
++          </div>
++          <div className="text-sm font-medium text-muted-foreground">
++            {jalaliLabel}
++            {isToday && <span className="mr-1 text-teal-600">(امروز)</span>}
++          </div>
++          <div className="flex flex-wrap items-center gap-2 sm:mr-auto">
++            <Button variant="outline" size="sm" onClick={load} disabled={loading}>
++              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
++              به‌روزرسانی
++            </Button>
++            <Button size="sm" className="bg-teal-600 hover:bg-teal-700" onClick={openCreate}>
++              <CalendarPlus className="h-4 w-4" />
++              برنامهٔ جدید
++            </Button>
++          </div>
+         </div>
+-        <div className="text-sm font-medium text-muted-foreground">
+-          {jalaliLabel}
+-          {isToday && <span className="mr-1 text-teal-600">(امروز)</span>}
+-        </div>
+-
+-        <div className="flex flex-wrap items-center gap-2 mr-auto">
++        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+           <Select value={fEmployee} onValueChange={setFEmployee}>
+-            <SelectTrigger className="w-[150px]">
++            <SelectTrigger className="w-full sm:w-[150px]">
+               <SelectValue placeholder="کارمند" />
+             </SelectTrigger>
+             <SelectContent>
+@@ -356,7 +371,7 @@
+             </SelectContent>
+           </Select>
+           <Select value={fCustomer} onValueChange={setFCustomer}>
+-            <SelectTrigger className="w-[150px]">
++            <SelectTrigger className="w-full sm:w-[150px]">
+               <SelectValue placeholder="مشتری" />
+             </SelectTrigger>
+             <SelectContent>
+@@ -369,7 +384,7 @@
+             </SelectContent>
+           </Select>
+           <Select value={fStatus} onValueChange={(v) => setFStatus(v as 'all' | PlanStatus)}>
+-            <SelectTrigger className="w-[160px]">
++            <SelectTrigger className="col-span-2 w-full sm:col-span-1 sm:w-[160px]">
+               <SelectValue placeholder="وضعیت" />
+             </SelectTrigger>
+             <SelectContent>
+@@ -380,14 +395,6 @@
+               <SelectItem value="needs_reschedule">نیازمند برنامه‌ریزی مجدد</SelectItem>
+             </SelectContent>
+           </Select>
+-          <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+-            به‌روزرسانی
+-          </Button>
+-          <Button size="sm" className="bg-teal-600 hover:bg-teal-700" onClick={openCreate}>
+-            <CalendarPlus className="h-4 w-4" />
+-            برنامهٔ جدید
+-          </Button>
+         </div>
+       </div>
+ 
+@@ -586,7 +593,7 @@
+                 </p>
+               )}
+             </div>
+-            <div className="grid grid-cols-2 gap-3">
++            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+               <div className="grid gap-1.5">
+                 <Label>تاریخ و ساعت</Label>
+                 <Input
+diff -ru orig/src/components/ui/dialog.tsx b/src/components/ui/dialog.tsx
+--- orig/src/components/ui/dialog.tsx	2026-10-25 06:58:53.000000000 +0000
++++ b/src/components/ui/dialog.tsx	2026-10-26 16:02:54.000000000 +0000
+@@ -60,7 +60,11 @@
+       <DialogPrimitive.Content
+         data-slot="dialog-content"
+         className={cn(
+-          "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border p-6 shadow-lg duration-200 sm:max-w-lg",
++          // v1.9.13-dev.2 (user report #3): 100vw-based max-width — dialogs
++          // must fit the phone screen even if something else on the page
++          // temporarily overflows and widens the layout viewport (which
++          // broke percentage-based sizing and threw dialogs off-center).
++          "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border p-4 shadow-lg duration-200 sm:max-w-lg sm:p-6",
+           className
+         )}
+         {...props}

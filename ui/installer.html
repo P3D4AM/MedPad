@@ -246,6 +246,7 @@ details.tokenhelp ol{padding-right:18px;font-size:12px;color:#57534e;line-height
         <div class="row" style="margin-top:10px">
           <button class="btn gray" id="openManager">🧰 باز کردن مدیر سرور (استارت/استاپ گرافیکی)</button>
         </div>
+        <p class="hint" id="lanHint" style="display:none;text-align:center"></p>
         <p class="hint" style="margin-top:12px">
           از این به بعد برای استارت/استاپ: <b>start-server.bat</b> و <b>stop-server.bat</b> (خط فرمان) یا
           <b>server-manager.bat</b> (صفحه‌ی گرافیکی) — صفحه‌ی پنل بعد از هر استارت خودکار باز می‌شود.
@@ -261,6 +262,21 @@ details.tokenhelp ol{padding-right:18px;font-size:12px;color:#57534e;line-height
 const $ = (s) => document.querySelector(s)
 const $$ = (s) => document.querySelectorAll(s)
 let STATUS = null
+
+// v1.9.13-dev.2: safe event wiring — one broken binding can never kill the
+// rest of the page's buttons again (the $(...).forEach bug class). Every
+// listener is attached independently and failures are reported, not fatal.
+function on(sel, ev, fn) {
+  try {
+    const el = $(sel)
+    if (el) el.addEventListener(ev, fn)
+    else console.warn('missing element for wiring:', sel)
+  } catch (e) { console.error('wiring failed for ' + sel + ':', e) }
+}
+function onAll(sel, ev, fn) {
+  try { for (const el of $$(sel)) el.addEventListener(ev, fn) }
+  catch (e) { console.error('wiring failed for ' + sel + ':', e) }
+}
 
 function showPage(n) {
   for (let i = 1; i <= 4; i++) $('#page' + i).classList.toggle('hide', i !== n)
@@ -298,7 +314,7 @@ window.addEventListener('unhandledrejection', (e) => {
 // ── load status, adapt UI ──
 fetch('/api/status').then((r) => r.json()).then((s) => {
   STATUS = s
-  $('#verBadge').textContent = 'v' + (s.installerVer || s.wizardVer || '1.9.13-dev.1')
+  $('#verBadge').textContent = 'v' + (s.installerVer || s.wizardVer || '1.9.13-dev.2')
   if (s.existingInstall) $('#existBox').style.display = 'block'
   if (s.panelPortBusy) $('#portBusyBox').style.display = 'block'
   if (s.config) {
@@ -319,7 +335,7 @@ fetch('/api/status').then((r) => r.json()).then((s) => {
 }).catch(() => {
   // v1.9.12-test.2: a failed /api/status is now LOUD — the page previously
   // kept looking normal with dead buttons when the wizard backend hiccuped.
-  $('#verBadge').textContent = 'v1.9.13-dev.1'
+  $('#verBadge').textContent = 'v1.9.13-dev.2'
   $('#jsErrMsg').innerHTML = 'اطلاعات وضعیت (api/status) دریافت نشد — اگر دکمه‌ها کار نکردند، نصب‌کننده‌ی کنسولی (install.bat گزینه‌ی ۲) را استفاده کنید.'
   $('#jsErr').style.display = 'block'
 })
@@ -327,8 +343,12 @@ fetch('/api/status').then((r) => r.json()).then((s) => {
 function refresh() {
   const t = currentTarget()
   $('#vpsGuide').style.display = t === 'vps' && STATUS && STATUS.isWindows ? 'block' : 'none'
-  $('#cfCard').style.display = t === 'cloudflare' ? 'block' : 'none'
-  $('#vpsCard').style.display = t === 'vps' && STATUS && !STATUS.isWindows ? 'block' : 'none'
+  // v1.9.13-dev.2 fix (found by the wizard E2E test): these cards carry the
+  // .hide class (display:none !important) — an inline style.display can
+  // never override it, so the Cloudflare / VPS settings cards could never
+  // become visible. Toggle the class itself.
+  $('#cfCard').classList.toggle('hide', t !== 'cloudflare')
+  $('#vpsCard').classList.toggle('hide', !(t === 'vps' && STATUS && !STATUS.isWindows))
   const p = $('#panelPort').value.trim() || '3000'
   $('#portPreview').textContent = 'http://localhost:' + p
   const d = $('#cfDomain').value.trim() || 'example.com'
@@ -342,12 +362,12 @@ function refresh() {
     : 'خالی بگذارید تا یک رمز تصادفی امن ساخته و یک‌بار نشان داده شود (نصب محلی جدید).'
   $('#adminPass').required = pub
 }
-$('input[name=target]').forEach((t) => t.addEventListener('change', refresh))
-$$('input[name=cftype]').forEach((t) => t.addEventListener('change', refresh))
-$('#panelPort').addEventListener('input', refresh)
-$('#cfDomain').addEventListener('input', refresh)
-$('#cfSub').addEventListener('input', refresh)
-$('#showPass').addEventListener('change', () => { $('#adminPass').type = $('#showPass').checked ? 'text' : 'password' })
+onAll('input[name=target]', 'change', refresh)
+onAll('input[name=cftype]', 'change', refresh)
+on('#panelPort', 'input', refresh)
+on('#cfDomain', 'input', refresh)
+on('#cfSub', 'input', refresh)
+on('#showPass', 'change', () => { $('#adminPass').type = $('#showPass').checked ? 'text' : 'password' })
 
 // v1.9.12: password requirement depends on the target (public = REQUIRED)
 function passProblem(pw) {
@@ -362,15 +382,15 @@ function targetIsPublic() {
   return t === 'cloudflare' || (t === 'vps' && !(STATUS && STATUS.isWindows))
 }
 
-$('#next1').addEventListener('click', () => {
+on('#next1', 'click', () => {
   // vps on windows -> guide is the answer; going "next" means local-style install settings
   showPage(2)
   refresh()
 })
-$('#back1').addEventListener('click', () => showPage(1))
+on('#back1', 'click', () => showPage(1))
 
 // ── run the install ──
-$('#goInstall').addEventListener('click', async () => {
+on('#goInstall', 'click', async () => {
   const target = currentTarget()
   const adminUser = $('#adminUser').value.trim() || 'admin'
   const adminPass = $('#adminPass').value
@@ -438,6 +458,14 @@ $('#goInstall').addEventListener('click', async () => {
     if (success) {
       $('#finalUrl').textContent = 'http://localhost:' + panelPort
       $('#finalUser').textContent = adminUser
+      // v1.9.13-dev.2: LAN address hint — the exact URL to type into the
+      // Android app / phone browser (localhost never works from a phone)
+      const lan = (STATUS && STATUS.lanUrls && STATUS.lanUrls[0]) || ''
+      const lanRow = document.getElementById('lanHint')
+      if (lanRow) {
+        lanRow.innerHTML = '📱 برای اپ اندروید و مرورگر گوشی (در همان Wi-Fi): <b dir="ltr">' + lan + '</b> — حساب «کارمند» را مدیر در پنل (تب کارمندان) می‌سازد.'
+        lanRow.style.display = lan ? 'block' : 'none'
+      }
       // v1.9.12-test.2: capture the auto-generated random admin password
       // from the install stream ([RANDOM-ADMIN-PASS] line) so the user does
       // not have to scroll the raw log to find it.
@@ -467,10 +495,10 @@ function showFail(msg) {
   b.style.display = 'block'
   $('#retryBtn').classList.remove('hide')
 }
-$('#retryBtn').addEventListener('click', () => { showPage(2) })
+on('#retryBtn', 'click', () => { showPage(2) })
 
 // ── start the server + open the panel ──
-$('#startNow').addEventListener('click', async () => {
+on('#startNow', 'click', async () => {
   const btn = $('#startNow')
   btn.disabled = true
   btn.innerHTML = '<span class="spin"></span> در حال استارت…'
@@ -494,7 +522,7 @@ $('#startNow').addEventListener('click', async () => {
 })
 
 // ── open the server manager GUI ──
-$('#openManager').addEventListener('click', async () => {
+on('#openManager', 'click', async () => {
   const btn = $('#openManager')
   btn.disabled = true
   btn.innerHTML = '<span class="spin"></span> در حال باز کردن…'

@@ -12,6 +12,18 @@
     <string name="login_failed">ورود ناموفق — آدرس سرور و رمز را چک کنید</string>
     <string name="logging_in">در حال ورود…</string>
 
+    <!-- v1.9.13-dev.2: actionable login diagnostics (user report #2:
+         "app cannot connect" — the old single generic toast could not
+         distinguish network / credentials / wrong-URL problems) -->
+    <string name="server_url_help">مثال: http://192.168.1.10:3000 — IP کامپیوترِ سرور + پورت پنل (با http)</string>
+    <string name="login_account_help">ورود اپ با حساب «کارمند» است که مدیر در پنل (تب کارمندان) می‌سازد؛ حساب مدیر پنل فقط برای وب است.</string>
+    <string name="err_network_unreachable">سرور در دسترس نیست.\n\n۱) آدرس را دقیق وارد کنید: http://IP-کامپیوتر:3000 (نه localhost)\n۲) گوشی و کامپیوتر باید در یک شبکه Wi-Fi باشند\n۳) سرور روی کامپیوتر روشن باشد (start-server.bat)\n۴) اگر ویندوز پیام فایروال (Firewall) داد، Allow بزنید — یا یک بار start را Run as administrator کنید\n\nجزئیات فنی: %1$s</string>
+    <string name="err_wrong_credentials">نام کاربری یا رمز اشتباه است.\n\nدر اپ فقط حساب «کارمند» کار می‌کند (که مدیر در پنل → تب کارمندان می‌سازد). حساب مدیر پنل اینجا کار نمی‌کند.</string>
+    <string name="err_rate_limited">تلاش‌های ناموفق زیاد بوده — حدود ۱۵ دقیقه صبر کنید و دوباره امتحان کنید.</string>
+    <string name="err_bad_response">سرور پاسخ غیرمنتظره داد — احتمالاً آدرس ناقص است.\n\nآدرس کامل با شماره پورت را وارد کنید (مثال: http://192.168.1.10:3000).</string>
+    <string name="err_server_rejected">سرور درخواست را رد کرد (کد %1$d): %2$s</string>
+    <string name="err_login_generic">خطا در ورود: %1$s</string>
+
     <!-- Main -->
     <string name="hello">سلام، %s</string>
     <string name="checkin">چک‌این</string>

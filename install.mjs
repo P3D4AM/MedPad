@@ -108,10 +108,29 @@ import {
 import path from 'path'
 import url from 'url'
 import readline from 'readline'
+import os from 'os'
 import { stopMedPadServices, classifyPortOwners, portBusy, readConfig, openBrowser } from './services.mjs'
+import { ensureMedPadFirewall } from './lib/firewall.mjs'
+
+
+/** v1.9.13-dev.2: private IPv4 addresses of this machine (phone/app URL). */
+function lanAddresses() {
+  const out = []
+  try {
+    for (const ifaces of Object.values(os.networkInterfaces())) {
+      for (const ni of ifaces || []) {
+        if (ni.family === 'IPv4' && !ni.internal) {
+          const ip = ni.address
+          if (/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(ip)) out.push(ip)
+        }
+      }
+    }
+  } catch { /* best-effort */ }
+  return [...new Set(out)].slice(0, 3)
+}
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url))
-export const INSTALLER_VER = '1.9.13-dev.1'
+export const INSTALLER_VER = '1.9.13-dev.2'
 const PANEL_PORT_DEFAULT = 3000
 const RT_PORT_DEFAULT = 3003
 const LOG = path.join(__dirname, 'install.log')
@@ -1555,6 +1574,36 @@ WantedBy=multi-user.target
     }
   }
 
+  // ═══ v1.9.13-dev.2 (user report #4): Windows Firewall exception ═══
+  // Phones / the Android app connect to this PC over the LAN — Windows
+  // blocks inbound connections to node.exe by default. Add our ALLOW rules
+  // now (the installer normally runs elevated via install.bat UAC, so no
+  // extra prompt appears). Every service start re-checks and re-adds them
+  // automatically (server-manager.mjs) if they are removed again.
+  if (process.platform === 'win32') {
+    info('Adding Windows Firewall exception (panel + realtime + node)...')
+    try {
+      const fw = await ensureMedPadFirewall({
+        nodeExe: process.execPath, panelPort, rtPort,
+        log: (m) => info(`firewall: ${m}`),
+      })
+      if (fw.ok && fw.added.length) {
+        ok(`Windows Firewall rules added: ${fw.added.join(', ')}`)
+        log(`firewall rules added: ${fw.added.join(', ')}`)
+      } else if (fw.ok) {
+        ok('Windows Firewall rules already in place')
+      } else {
+        warn(`Windows Firewall rules could not be added: ${fw.failed.join(', ')} (${fw.note})`)
+        warn('  The panel may be unreachable from your phone / the Android app.')
+        warn('  Fix: run install.bat as Administrator, or allow the UAC prompt on the next start-server.')
+        log(`firewall rules failed: ${fw.failed.join(', ')} (${fw.note})`)
+      }
+    } catch (e) {
+      warn(`Firewall step skipped: ${e.message} (non-fatal)`)
+      log(`firewall exception: ${e.stack || e.message}`)
+    }
+  }
+
   // ═══ Step 7 — health check ═══════════════════════════════
   step(7, 'Health check')
   if (await portBusy(panelPort)) warn(`Port ${panelPort} is already in use - close the previous start-server first`)
@@ -1596,7 +1645,9 @@ ${target === 'vps' ? `  BOOT SERVICE:    systemd units medpad-panel + medpad-rea
   Socket:           :${rtPort} (admin-authenticated only)
   Admin login:      ${adminUser} / ${generatedPassword ? 'the RANDOM password printed above (save it!)' : adminPass ? '(the password you chose)' : '(your existing password)'}
 ${state.kind === 'domain' ? `  Public address:   ${state.publicUrl}
-` : ''}  Android app:      enter the server address in the app login screen
+` : ''}  Phone / app URL:  ${lanAddresses().map((ip) => `http://${ip}:${panelPort}`).join('   ') || 'http://<this-computer-IP>:' + panelPort}
+                     (use this in the Android app and the phone browser - same Wi-Fi;
+                      the app logs in with an EMPLOYEE account created in the panel)
   Security:         dashboard socket accepts only authenticated admin sessions
   Logs:             ${LOG}
 ${migrated ? '  NOTE:             your data was migrated from the old medpad-install folder\n' : ''}`)

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * MedPad Server Manager v1.9.13-dev.1 — start / stop / restart / status / GUI
+ * MedPad Server Manager v1.9.13-dev.2 — start / stop / restart / status / GUI
  *
  * The ONE place where MedPad services are started and stopped (v1.9.11):
  *
@@ -50,6 +50,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, openSync, fstatSync
 import path from 'path'
 import url from 'url'
 import { stopMedPadServices, readConfig, openBrowser } from './services.mjs'
+import { ensureMedPadFirewall, firewallStatus } from './lib/firewall.mjs'
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url))
 const argv = process.argv.slice(2)
@@ -58,7 +59,7 @@ const cfg = readConfig(__dirname)
 const PANEL_PORT = Number(cfg.panelPort) || 3000
 const RT_PORT = Number(cfg.rtPort) || 3003
 const PANEL_URL = `http://localhost:${PANEL_PORT}`
-const MANAGER_VER = '1.9.13-dev.1'
+const MANAGER_VER = '1.9.13-dev.2'
 
 const say = (m) => console.log(m)
 const ok = (m) => console.log(`[OK] ${m}`)
@@ -218,6 +219,16 @@ async function startServers({ open = true } = {}) {
 
   writeFileSync(path.join(__dirname, '.medpad.pids'), JSON.stringify({ v: 2, pids: pidEntries, at: new Date().toISOString() }))
 
+  // v1.9.13-dev.2 (user report #4): while the server boots, check IN THE
+  // BACKGROUND that Windows Firewall is not blocking inbound connections
+  // (phones / the Android app connect over the LAN). If our rules were
+  // removed again they are re-added automatically — via one UAC prompt when
+  // this process is not elevated. Never blocks the boot itself.
+  const fwPromise = process.platform === 'win32'
+    ? ensureMedPadFirewall({ nodeExe: process.execPath, panelPort: PANEL_PORT, rtPort: RT_PORT,
+        log: (m) => say(`[FIREWALL] ${m}`) })
+    : Promise.resolve({ skipped: true })
+
   // wait for the panel to become healthy (first boot can take a while)
   say(`[..] Waiting for the panel on port ${PANEL_PORT} (up to 90s)...`)
   let healthy = false
@@ -235,6 +246,24 @@ async function startServers({ open = true } = {}) {
     ok('The panel page was opened in your browser')
   }
   const rtRunning = await rtUp()
+  // report the firewall check result (it ran in parallel with the boot)
+  try {
+    const fw = await fwPromise
+    if (fw.skipped) {
+      // non-Windows / not applicable — stay silent
+    } else if (fw.ok && fw.note === 'already-ok') {
+      ok('Firewall: MedPad inbound rules already in place (panel + realtime reachable from other devices)')
+    } else if (fw.ok) {
+      ok(`Firewall: inbound rule(s) added: ${fw.added.join(', ')} - phones and the app can connect`)
+    } else {
+      warn('Firewall: could NOT (re-)add the MedPad inbound rule(s): ' + fw.failed.join(', '))
+      warn('  The panel may be unreachable from your phone / the Android app.')
+      warn('  Fix: allow the UAC prompt on start, or run start-server.bat as Administrator once,')
+      warn('        or add the rule manually: Windows Security > Firewall > Allowed apps > node.js')
+    }
+  } catch (e) {
+    warn(`Firewall check failed unexpectedly: ${e.message}`)
+  }
   say('==============================================')
   say(`  Panel:    ${PANEL_URL}${rtRunning ? '' : '  (realtime NOT answering - check logs/realtime.log)'}`)
   if (publicUrl) say(`  Public:   ${publicUrl}`)
@@ -255,7 +284,7 @@ async function stopServers() {
   return { ok: stopped.verified, killed: stopped.killed, stillBusy: stopped.stillBusy || [] }
 }
 
-async function statusObject() {
+async function statusObject(withFirewall = false) {
   const panel = await panelHealthy(1500)
   const rt = await rtUp()
   return {
@@ -265,6 +294,9 @@ async function statusObject() {
     tunnel: cfg.tunnel || { kind: 'local' },
     config: { version: cfg.version || 'unknown', target: cfg.target || 'local', adminUser: cfg.adminUser || 'admin' },
     installed: existsSync(path.join(__dirname, 'panel', '.next', 'standalone', 'server.js')),
+    // v1.9.13-dev.2: firewall rule status — only when ?fw=1 (netsh is not
+    // cheap; the 3-second status ticker must not hammer it)
+    ...(withFirewall ? { firewall: firewallStatus({ nodeExe: process.execPath, panelPort: PANEL_PORT, rtPort: RT_PORT }) } : {}),
   }
 }
 
@@ -341,7 +373,7 @@ async function guiMode() {
         } catch { /* fall through */ }
       }
     }
-    if (req.method === 'GET' && u.pathname === '/api/status') { return json(200, await statusObject()) }
+    if (req.method === 'GET' && u.pathname === '/api/status') { return json(200, await statusObject(u.searchParams.get('fw') === '1')) }
     if (req.method === 'POST' && (u.pathname === '/api/start' || u.pathname === '/api/restart')) {
       if (u.pathname === '/api/restart') await stopServers()
       const r = await startServers({ open: true })

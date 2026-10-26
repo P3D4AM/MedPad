@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * MedPad Browser Installer (wizard) v1.9.13-dev.1 — GUI backend, localhost only.
+ * MedPad Browser Installer (wizard) v1.9.13-dev.2 — GUI backend, localhost only.
  *
  * Brought back by user request: the installer can run either in the CLI or
  * as a SETUP PAGE IN THE BROWSER that opens automatically (install.mjs
@@ -35,6 +35,7 @@
  */
 import http from 'http'
 import net from 'net'
+import os from 'os'
 import { spawn } from 'child_process'
 import { existsSync, readFileSync } from 'fs'
 import path from 'path'
@@ -42,7 +43,23 @@ import url from 'url'
 import { readConfig, openBrowser, portBusy } from './services.mjs'
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url))
-const WIZARD_VER = '1.9.13-dev.1'
+const WIZARD_VER = '1.9.13-dev.2'
+
+/** v1.9.13-dev.2: private IPv4 addresses of this machine (phone/app URL). */
+function lanAddresses() {
+  const out = []
+  try {
+    for (const ifaces of Object.values(os.networkInterfaces())) {
+      for (const ni of ifaces || []) {
+        if (ni.family === 'IPv4' && !ni.internal) {
+          const ip = ni.address
+          if (/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(ip)) out.push(ip)
+        }
+      }
+    }
+  } catch { /* best-effort */ }
+  return [...new Set(out)].slice(0, 3)
+}
 const PORT = Number(process.env.MEDPAD_WIZARD_PORT || process.env.SETUP_PORT || 3199)
 
 function installerVer() {
@@ -188,6 +205,10 @@ async function startServer() {
         rtPortBusy: await portBusy(Number(cfg.rtPort) || 3003),
         tunnel: readTunnelState(),
         installed: existsSync(path.join(__dirname, 'panel', '.next', 'standalone', 'server.js')),
+        // v1.9.13-dev.2 (user report #2): LAN addresses of this machine —
+        // exactly what the owner must type into the Android app / phone
+        // browser (localhost never works from another device).
+        lanUrls: lanAddresses().map((ip) => `http://${ip}:${Number(cfg.panelPort) || 3000}`),
       })
     }
 
