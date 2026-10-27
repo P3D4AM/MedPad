@@ -55,8 +55,8 @@
 | بسته | عنوان | وضعیت | کامیت |
 |---|---|---|---|
 | ۰ | تثبیت وضعیت + همین فایل | ✅ | `3be0bb0` |
-| ۱ | همگام‌سازی Check-in/Check-out (رفع B3+B5) | ✅ | ← همین کامیت |
-| ۲ | رفع کرش Plans/Reports (B6) | ⬜ ریشه‌یابی‌شده | — |
+| ۱ | همگام‌سازی Check-in/Check-out (رفع B3+B5) | ✅ | `9023eb9` |
+| ۲ | رفع کرش Plans/Reports (B6) | ✅ | ← همین کامیت |
 | ۳ | گردش کامل Planned Visits | ⬜ | — |
 | ۴ | زیرساخت اعلان‌ها (مدل+API) | ⬜ | — |
 | ۵ | اعلان‌های پنل (آیکون/فهرست/خوانده‌شده) | ⬜ | — |
@@ -129,16 +129,40 @@ Push: موفق / ناموفق
 ## گزارش بستهٔ ۱ — همگام‌سازی Check-in/Check-out (رفع B3 + B5) (Oct 28, 2026)
 
 - **وضعیت:** تکمیل‌شده (در حد امکان محیط — بدون دستگاه واقعی)
-- **تغییرات (همه در `Android/app/src/main/java/com/medpad/tracker/`):
+- **ریشهٔ اصلی B3:** در `CheckinSync.flush()` نتیجهٔ RETRY باعث break کل حلقه می‌شد؛ هر خطای دائمی 4xx (مشتری حذف‌شده 404، چک‌اوت بدون ویزیت باز 409 — پیامد B5، متن کوتاه 400، شعاع strict 422) آیتم را برای همیشه سرِ صف نگه می‌داشت و کل صف را مسدود می‌کرد.
+- **تغییرات (همه در `Android/app/src/main/java/com/medpad/tracker/`):**
   - `db/Entities.kt`: ثابت‌های `QUEUE_STATUS_PENDING/SENDING/FAILED` + فیلد `status` روی `PendingCheckin` + کوئری‌های جدید DAO (`pendingCount`/`failedCount`/`failed`/`resetSending`/`requeueFailed`).
   - `db/AppDatabase.kt`: `MIGRATION_8_9` — فقط `ALTER TABLE pending_checkins ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'` (افزودنی؛ داده‌های صف موجود حفظ می‌شوند و همهٔ «گیرکرده‌ها» یک تلاش تازهٔ درست-دسته‌بندی‌شده می‌گیرند).
   - `sync/CheckinSync.kt`: بازنویسی flush — 4xx دائمی (400/404/409/422 پس از تلاش fallback قدیمی) → `failed` (داده + متن خطای فارسی سرور حفظ، صف ادامه می‌یابد) · گذرا (شبکه/5xx/429) → `pending` + توقف دور (حفظ ترتیب checkin→checkout) · 403 → حذف (سیاست G-1) · 401 → توقف کل (G-2) · بازیابی کرش: `resetSending()` در شروع هر flush · `retryFailed()` دستی (امن با idempotency سمت سرور).
-  - `ui/MainActivity.kt`: خط وضعیت صف اکنون «N در انتظار · M خطا» را متمایز می‌کند (با رنگ قرمز برای خطا) + لمس آن دیالوگ جزئیات (فهرست خطاها با متن سرور + دکمهٔ «تلاش مجدد موارد خطا») · گارد B5: چک‌اوت وقتی سرور می‌گوید ویزیت بازی نیست و چک‌این محلی هم در صف نیست، با پیام راهنما بلاک می‌شود (در حالت آفلاین/نامعلوم مجاز می‌ماند — صف مدیریت می‌کند).
+  - `ui/MainActivity.kt`: خط وضعیت صف «N در انتظار · M خطا» (قرمز برای خطا) + لمس → دیالوگ جزئیات با متن خطاها + «تلاش مجدد موارد خطا» · گارد B5: چک‌اوت وقتی سرور ویزیت بازی ندارد و چک‌این محلی هم در صف نیست با پیام راهنما بلاک می‌شود (آفلاین/نامعلوم مجاز — صف مدیریت می‌کند).
   - `ui/PlansActivity.kt`: ارجاع `queueCount()` → `pendingCount()`.
   - `res/values/strings.xml`: ۹ رشتهٔ فارسی جدید.
-- **تست‌ها (واقعی، در همین محیط):** محیط ساخت بازسازی شد (SDK 34 + build-tools 34.0.0 + JDK Temurin 21.0.13 — JRE سیستم jlink ندارد) → `./gradlew compileDebugKotlin` **BUILD SUCCESSFUL** ✓ → `./gradlew assembleDebug` **BUILD SUCCESSFUL** (7,912,189 بایت، امضای v2 با کلید Debug، versionCode=13) ✓ → خروجی Room KSP شامل کوئری‌های جدید status/failedCount/requeueFailed/resetSending و فیلد status در INSERT ✓ (Room اسکیما را در زمان کامپایل اعتبارسنجی می‌کند).
-- **تست‌های اجرانشده:** دستگاه/امولاتور اندروید واقعی در دسترس نیست — رفتار runtime صف (گذار وضعیت‌ها، دیالوگ خطا، گارد B5) روی گوشی تست نشده. سرور بی‌تغییر است (قرارداد موجود: خطاهای 4xx با متن فارسی).
+- **تست‌ها (واقعی، در همین محیط):** محیط ساخت بازسازی شد (SDK 34 + build-tools 34.0.0 + JDK Temurin 21.0.13 — JRE سیستم jlink ندارد) → `./gradlew compileDebugKotlin` **BUILD SUCCESSFUL** ✓ → `./gradlew assembleDebug` **BUILD SUCCESSFUL** (7,912,189 بایت، امضای v2 با کلید Debug) ✓ → خروجی Room KSP شامل کوئری‌های جدید و فیلد status در INSERT ✓ (Room اسکیما را در زمان کامپایل اعتبارسنجی می‌کند).
+- **تست‌های اجرانشده:** دستگاه/امولاتور واقعی در دسترس نیست — رفتار runtime صف روی گوشی تست نشده. سرور بی‌تغییر است.
 - **دیتابیس/API:** Room v8→v9 (فقط افزودن ستون). هیچ تغییری در API سرور.
 - **امنیت:** بدون تغییر سطح دسترسی؛ 401 همچنان نشست را می‌بندد؛ 403 همچنان سیاست انتساب را اعمال می‌کند؛ بازپخش/تلاش مجدد با localId بی‌تکرار است.
-- **باقی‌مانده:** تست روی دستگاه واقعی؛ انتشار APK جدید (با versionCode بالاتر) در بستهٔ ۱۲ یا انتشار dev بعدی.
-- **قدم بعدی:** بستهٔ ۲ — فعال‌کردن coreLibraryDesugaring برای رفع کرش Plans/Reports روی اندروید ۷.
+- **کامیت/Push:** `9023eb9` — push موفق و تأیید روی ریموت.
+- **باقی‌مانده:** تست روی دستگاه واقعی؛ انتشار APK جدید (با versionCode بالاتر) در انتشار dev بعدی.
+- **قدم بعدی:** بستهٔ ۲.
+
+---
+
+## گزارش بستهٔ ۲ — رفع کرش برنامهٔ بازدیدها / گزارش‌ها (B6) (Oct 28, 2026)
+
+- **وضعیت:** تکمیل‌شده — ریشهٔ واقعی با تست بازتولید و رفع شد
+- **ریشهٔ اصلی (کشف‌شده با تست):** پورت الگوریتم جلالی در `JalaliDate.kt` دو خطای فرمولی داشت در `jalCal`:
+  ۱) در حلقهٔ فواصل، به‌جای `jump` (طول کامل بازه) از `jy - jp` استفاده می‌شد؛
+  ۲) جملهٔ ‎+3‎ که فقط به سهم جزئی (n) تعلق دارد، در حلقه هم اضافه شده بود.
+  نتیجه: leapJ متورم → فروردین ۱ حدود ۷ روز دیرتر → ماه‌های هرز مثل ‎-51‎ → `MONTH_NAMES[-52]` → **ArrayIndexOutOfBounds در لحظهٔ باز شدن هر دو صفحه** (renderCalendar در Reports از v1.9.0 و renderDayLabel در Plans از فاز ۲). صفحهٔ گزارش‌ها از همان نسخهٔ اول هرگز درست باز نشده بود.
+- **اصلاح:** فرمول دقیقاً مطابق مرجع jalaali-js — حلقه: `div(jump,33)*8 + div(mod(jump,33),4)` · سهم n: `div(n,33)*8 + div(mod(n,33)+3,4)`. راستی‌آزمایی مستقل: پورت پایتون اصلاح‌شده در برابر jalaali-js واقعی (node) روی **همهٔ ۱۴۶۱ روز ۲۰۲۴–۲۰۲۷ → ۰ مغایرت** + لنگرهای رسمی (نوروز ۱۴۰۳/۱۴۰۴/۱۴۰۵ و…).
+- **تغییرات:**
+  - `ui/JalaliDate.kt`: اصلاح فرمول jalCal (تنها تغییر منطقی — بقیهٔ الگوریتم سالم بود).
+  - `app/build.gradle.kts`: `isCoreLibraryDesugaringEnabled = true` + `coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")` — رفع دستهٔ کرش دوم: `java.time.*` با minSdk 24 بدون desugaring روی اندروید ۷.x کرش می‌کرد (NoClassDefFoundError) + زیرساخت تست (Robolectric 4.12.2 + junit 4.13.2 + androidx.test:core + `isIncludeAndroidResources`).
+  - `ui/CheckinDialogFragment.kt` + `ui/CheckoutDialogFragment.kt`: مقدار پیش‌فرض برای `onDone` → سازندهٔ بدون‌آرگومان → دیالوگ‌ها دیگر با چرخش صفحه کرش نمی‌کنند («Fragment could not be instantiated»).
+  - **تست‌های جدید (`app/src/test/`):** `JalaliDateTest` (۴ تست: همهٔ روزهای ۲۰۲۴–۲۰۲۷ در محدودهٔ معتبر + رفت‌وبرگشت کامل + تاریخ‌های شناخته‌شده + نگاشت روز هفته) · `PlansAndReportsSmokeTest` (۲ تست Robolectric: اجرای واقعی PlansActivity با ۶ برنامهٔ seed شده در همهٔ وضعیت‌ها شامل مشتری ماسک‌شده → ۱۰ ردیف رندر ✓ ناوبری روز ✓ · ReportsActivity آفلاین → تقویم ۳۰ خانه + حالت خالی ✓ ناوبری ماه ✓).
+- **تست‌ها (دستور واقعی):** `./gradlew testDebugUnitTest` → **6 tests, 0 failed, 0 skipped** (BUILD SUCCESSFUL) ✓ · `./gradlew assembleDebug` → BUILD SUCCESSFUL (9,105,379 بایت، apksigner verify ✓).
+- **نکتهٔ حین کار:** Robolectric 4.12 `setup()` کنترلر را برمی‌گرداند نه Activity را — الگوی درست: `controller.setup().get()`.
+- **تست‌های اجرانشده:** دستگاه واقعی/امولاتور (بدون KVM در سندباکس) — رفتار روی گوشی مستقیم تست نشده؛ پوشش Robolectric مسیر کامل رندر هر دو صفحه را اجرا کرده است.
+- **دیتابیس/API:** بدون تغییر.
+- **باقی‌مانده:** تست دستگاه واقعی؛ انتشار APK با versionCode بالاتر.
+- **قدم بعدی:** بستهٔ ۳ — گردش کامل Planned Visits (بررسی انتقال تغییرات/لغو به اپ در سینک).

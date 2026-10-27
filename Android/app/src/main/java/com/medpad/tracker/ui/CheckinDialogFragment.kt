@@ -37,9 +37,15 @@ import java.util.Locale
  * from a planned visit, the customer is preselected in the spinner (the
  * flow itself is UNCHANGED: same GPS/voice/queue/idempotency path).
  */
+// Package 2 (crash hardening): ALL constructor params have defaults so Kotlin
+// generates the no-arg constructor the framework needs to re-instantiate the
+// fragment on configuration change (rotation). Without it, rotating the screen
+// with the dialog open crashed the app ("Fragment could not be instantiated").
+// After a rotation the dialog reappears without its callback — the cancel
+// button still works and nothing is lost (the queue owns the data).
 class CheckinDialogFragment(
     private val preselectCustomerId: String? = null,
-    private val onDone: () -> Unit,
+    private val onDone: () -> Unit = {},
 ) : DialogFragment() {
 
     private val scope = CoroutineScope(Dispatchers.Main)

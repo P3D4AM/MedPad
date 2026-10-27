@@ -31,7 +31,10 @@ import java.util.Locale
  * Checkout dialog — mandatory text (≥10 chars, paste disabled) + mandatory voice.
  * Closes ALL open visits server-side (v1.9.1).
  */
-class CheckoutDialogFragment(private val onDone: () -> Unit) : DialogFragment() {
+// Package 2 (crash hardening): default for onDone → no-arg constructor exists
+// → the fragment survives re-instantiation on configuration change instead of
+// crashing the app ("Fragment could not be instantiated" on rotation).
+class CheckoutDialogFragment(private val onDone: () -> Unit = {}) : DialogFragment() {
 
     private val scope = CoroutineScope(Dispatchers.Main)
     private val recorder = VoiceRecorder(TrackerContext.app)

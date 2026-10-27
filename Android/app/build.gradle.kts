@@ -95,12 +95,28 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // Package 2 (phase 2 / task 3, B6): the app uses java.time.* (Instant
+        // in ApiClient/CheckinSync/PlansSync/ReportsActivity) but minSdk is
+        // 24 — java.time only exists natively from API 26. Without library
+        // desugaring every Plans/Reports render crashed with NoClassDefFoundError
+        // on Android 7.x. Desugaring rewrites those calls to bundled shims.
+        isCoreLibraryDesugaringEnabled = true
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { viewBinding = true }
+
+    testOptions {
+        unitTests {
+            // Robolectric needs inflated resources for the activity smoke tests
+            isIncludeAndroidResources = true
+        }
+    }
 }
 
 dependencies {
+    // Package 2: java.time on minSdk 24 (see compileOptions above)
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.google.android.material:material:1.12.0")
@@ -124,4 +140,11 @@ dependencies {
 
     // Lifecycle
     implementation("androidx.lifecycle:lifecycle-service:2.8.4")
+
+    // Package 2: local unit tests — Robolectric runs the real Android
+    // framework on the JVM so the Plans/Reports screens can be smoke-tested
+    // without a device (no emulator/KVM in this sandbox).
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.12.2")
+    testImplementation("androidx.test:core:1.6.1")
 }

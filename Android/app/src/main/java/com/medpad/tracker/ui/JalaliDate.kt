@@ -34,8 +34,15 @@ object JalaliDate {
             val jm = breaks[i]
             jump = jm - jp
             if (jy < jm) break
-            val k = jy - jp
-            leapJ += div(k, 33) * 8 + div(mod(k, 33) + 3, 4)
+            // Package 2 (B6): full-interval contribution WITHOUT the +3
+            // term — the +3 belongs ONLY to the partial (n) contribution
+            // below (verified 0 mismatches against jalaali-js over every
+            // day of 2024-2027). The original port had two bugs here: it
+            // used `jy - jp` instead of `jump` AND added +3 — together they
+            // inflated leapJ so Farvardin 1 landed ~7 days late and produced
+            // garbage months like -51, crashing Reports AND Plans on open
+            // (ArrayIndexOutOfBounds in MONTH_NAMES).
+            leapJ += div(jump, 33) * 8 + div(mod(jump, 33), 4)
             jp = jm
         }
         var n = jy - jp
