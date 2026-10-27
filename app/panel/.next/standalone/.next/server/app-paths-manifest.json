@@ -34,6 +34,8 @@
   "/api/logout/route": "app/api/logout/route.js",
   "/api/media/[...path]/route": "app/api/media/[...path]/route.js",
   "/api/notifications/route": "app/api/notifications/route.js",
+  "/api/panel-notifications/read/route": "app/api/panel-notifications/read/route.js",
+  "/api/panel-notifications/route": "app/api/panel-notifications/route.js",
   "/api/planned-visits/[id]/cancel/route": "app/api/planned-visits/[id]/cancel/route.js",
   "/api/planned-visits/[id]/reschedule/route": "app/api/planned-visits/[id]/reschedule/route.js",
   "/api/planned-visits/[id]/route": "app/api/planned-visits/[id]/route.js",

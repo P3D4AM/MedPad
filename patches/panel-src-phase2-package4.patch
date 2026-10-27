@@ -1,0 +1,481 @@
+diff -ruN orig/prisma/schema.prisma b/prisma/schema.prisma
+--- orig/prisma/schema.prisma	2026-10-27 21:38:10.375556760 +0000
++++ b/prisma/schema.prisma	2026-10-27 21:38:10.381556776 +0000
+@@ -172,11 +172,30 @@
+ 
+ model AppNotification {
+   id         String    @id @default(cuid())
++  eventKey   String?   @unique // package 4: stable event id — retries/replays can never duplicate
+   employeeId String
+   employee   Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+   title      String
+   body       String
+-  kind       String    @default("assignment") // assignment | proximity | info
++  kind       String    @default("assignment") // assignment | proximity | plan | info
++  customerId String?
++  readAt     DateTime?
++  createdAt  DateTime  @default(now())
++}
++
++// package 4 (phase 2 / task 3): ADMIN-facing notifications — real app events
++// (check-in / check-out / assignment / plan changes) that the panel bell
++// reads. Persisted in the DB (survives refresh/restart), deduped by a stable
++// eventKey, with an explicit read state. employeeId/customerId are PLAIN
++// strings (display context only, no FK) so history survives lifecycle
++// changes of the referenced rows.
++model PanelNotification {
++  id         String    @id @default(cuid())
++  eventKey   String    @unique
++  kind       String    @default("info") // checkin | checkout | assignment | plan | info
++  title      String
++  body       String
++  employeeId String?
+   customerId String?
+   readAt     DateTime?
+   createdAt  DateTime  @default(now())
+diff -ruN orig/src/app/api/app/checkin/route.ts b/src/app/api/app/checkin/route.ts
+--- orig/src/app/api/app/checkin/route.ts	2026-10-27 21:38:10.371556749 +0000
++++ b/src/app/api/app/checkin/route.ts	2026-10-27 21:38:10.377556765 +0000
+@@ -8,6 +8,7 @@
+ import { resolveGpsLocation } from '@/lib/gps'
+ import { getAdminSettings } from '@/lib/settings'
+ import { emitEvent } from '@/lib/emit'
++import { notifyAdmin } from '@/lib/notify'
+ import { resolveEventTime } from '@/lib/client-time'
+ import { localDayRange } from '@/lib/planned-visit'
+ 
+@@ -204,6 +205,18 @@
+     planLinked = linked.count === 1
+   }
+ 
++  // package 4: persisted PANEL notification (bell) — stable eventKey on the
++  // check-in row id means a localId replay (which returns the SAME row) can
++  // never produce a second notification.
++  await notifyAdmin({
++    kind: 'checkin',
++    title: 'چک‌این جدید',
++    body: `${emp.name} در «${customer.name}» چک‌این کرد.`,
++    employeeId: emp.id,
++    customerId,
++    eventKey: `checkin:${ci.id}`,
++  })
++
+   await emitEvent('checkin', {
+     id: ci.id,
+     employeeName: emp.name,
+diff -ruN orig/src/app/api/app/checkout/route.ts b/src/app/api/app/checkout/route.ts
+--- orig/src/app/api/app/checkout/route.ts	2026-10-27 21:38:10.371556749 +0000
++++ b/src/app/api/app/checkout/route.ts	2026-10-27 21:38:10.377556765 +0000
+@@ -6,6 +6,7 @@
+ import { VOICE_DIR, ensureDirs } from '@/lib/media'
+ import { resolveGpsLocation } from '@/lib/gps'
+ import { emitEvent } from '@/lib/emit'
++import { notifyAdmin } from '@/lib/notify'
+ import { resolveEventTime } from '@/lib/client-time'
+ 
+ const MIN_NOTE = 10 // chars — "متن چک‌اوت ستاره‌دار"
+@@ -101,6 +102,17 @@
+     })
+   }
+ 
++  // package 4: persisted PANEL notification (bell) — stable eventKey on the
++  // checkout row id (replays return the same row → no second notification).
++  await notifyAdmin({
++    kind: 'checkout',
++    title: 'چک‌اوت جدید',
++    body: `${emp.name} بازدید را پایان داد (${openVisits.length} ویزیت بسته شد).`,
++    employeeId: emp.id,
++    customerId: openVisits[0].customerId,
++    eventKey: `checkout:${co.id}`,
++  })
++
+   await emitEvent('checkout', {
+     id: co.id,
+     employeeName: emp.name,
+diff -ruN orig/src/app/api/app/notifications/route.ts b/src/app/api/app/notifications/route.ts
+--- orig/src/app/api/app/notifications/route.ts	2026-10-27 21:38:10.371556749 +0000
++++ b/src/app/api/app/notifications/route.ts	2026-10-27 21:38:10.377556765 +0000
+@@ -15,14 +15,15 @@
+   return NextResponse.json({ ok: true, notifications: rows, unread })
+ }
+ 
+-/** POST — create notification (admin broadcast or system) */
+-export async function POST(req: Request) {
+-  const emp = await appEmployee(req)
+-  if (!emp) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
+-  const { title, body } = await req.json().catch(() => ({ title: '', body: '' }))
+-  if (!title) return NextResponse.json({ ok: false, error: 'عنوان لازم است' }, { status: 400 })
+-  const row = await db.appNotification.create({
+-    data: { employeeId: emp.id, title, body: body || '', kind: 'info' },
+-  })
+-  return NextResponse.json({ ok: true, notification: row })
++/**
++ * POST — REMOVED (package 4): employees could fabricate their own
++ * notifications through this route, and nothing in the app ever called it.
++ * Creating an in-app notification for an employee is an admin action — use
++ * POST /api/notifications (admin session required).
++ */
++export async function POST() {
++  return NextResponse.json(
++    { ok: false, error: 'ایجاد اعلان فقط از سمت مدیر مجاز است' },
++    { status: 405 },
++  )
+ }
+diff -ruN orig/src/app/api/assignments/route.ts b/src/app/api/assignments/route.ts
+--- orig/src/app/api/assignments/route.ts	2026-10-27 21:38:10.371556749 +0000
++++ b/src/app/api/assignments/route.ts	2026-10-27 21:38:10.377556765 +0000
+@@ -2,6 +2,7 @@
+ import { db } from '@/lib/db'
+ import { isAdmin } from '@/lib/auth'
+ import { emitEvent } from '@/lib/emit'
++import { notifyAdmin, notifyEmployee } from '@/lib/notify'
+ 
+ export async function GET() {
+   if (!(await isAdmin())) {
+@@ -41,22 +42,31 @@
+   }
+   const row = await db.assignment.create({ data: { employeeId, customerId } })
+ 
+-  // in-app notification + realtime panel toast
+-  const notif = await db.appNotification.create({
+-    data: {
+-      employeeId,
+-      title: 'مشتری جدید اختصاص یافت',
+-      body: `«${cus.name}» توسط مدیر به شما اختصاص داده شد.`,
+-      kind: 'assignment',
+-      customerId,
+-    },
++  // in-app notification + panel notification + realtime toast
++  // package 4: routed through notifyEmployee/notifyAdmin with a stable
++  // eventKey so a retried POST can never duplicate either side.
++  const eventKey = `assignment:${row.id}`
++  await notifyEmployee({
++    employeeId,
++    kind: 'assignment',
++    title: 'مشتری جدید اختصاص یافت',
++    body: `«${cus.name}» توسط مدیر به شما اختصاص داده شد.`,
++    customerId,
++    eventKey,
++  })
++  await notifyAdmin({
++    kind: 'assignment',
++    title: 'انتساب جدید',
++    body: `«${cus.name}» به ${emp.name} اختصاص یافت.`,
++    employeeId,
++    customerId,
++    eventKey,
+   })
+   await emitEvent('notification', {
+-    id: notif.id,
+     employeeId,
+     employeeName: emp.name,
+-    title: notif.title,
+-    body: notif.body,
++    title: 'مشتری جدید اختصاص یافت',
++    body: `«${cus.name}» توسط مدیر به شما اختصاص داده شد.`,
+   })
+   return NextResponse.json({ ok: true, assignment: row })
+ }
+diff -ruN orig/src/app/api/notifications/route.ts b/src/app/api/notifications/route.ts
+--- orig/src/app/api/notifications/route.ts	2026-10-27 21:38:10.372556751 +0000
++++ b/src/app/api/notifications/route.ts	2026-10-27 21:38:10.378556768 +0000
+@@ -12,5 +12,35 @@
+     orderBy: { createdAt: 'desc' },
+     take: 100,
+   })
+-  return NextResponse.json({ ok: true, notifications: rows })
++  const unread = rows.filter((r) => !r.readAt).length
++  return NextResponse.json({ ok: true, notifications: rows, unread })
++}
++
++/**
++ * package 4 — ADMIN broadcast to ONE employee's in-app notification list.
++ * The old app-side self-create (POST /api/app/notifications) let any
++ * employee fabricate notifications for themselves; creation now lives on
++ * the admin-gated side where it belongs.
++ */
++export async function POST(req: Request) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const body = await req.json().catch(() => null) as {
++    employeeId?: string
++    title?: string
++    body?: string
++  } | null
++  const employeeId = String(body?.employeeId ?? '')
++  const title = String(body?.title ?? '').trim().slice(0, 200)
++  const text = String(body?.body ?? '').trim().slice(0, 2000)
++  if (!employeeId || !title) {
++    return NextResponse.json({ ok: false, error: 'کارمند و عنوان لازم است' }, { status: 400 })
++  }
++  const emp = await db.employee.findUnique({ where: { id: employeeId } })
++  if (!emp) return NextResponse.json({ ok: false, error: 'کارمند پیدا نشد' }, { status: 404 })
++  await db.appNotification.create({
++    data: { employeeId, title, body: text, kind: 'info' },
++  })
++  return NextResponse.json({ ok: true })
+ }
+diff -ruN orig/src/app/api/panel-notifications/read/route.ts b/src/app/api/panel-notifications/read/route.ts
+--- orig/src/app/api/panel-notifications/read/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/panel-notifications/read/route.ts	2026-10-27 21:38:10.379556771 +0000
+@@ -0,0 +1,25 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { isAdmin } from '@/lib/auth'
++
++/**
++ * package 4 (phase 2 / task 3) — mark PANEL notifications as read.
++ *
++ * POST /api/panel-notifications/read   body: { ids?: string[] }
++ *   ids[]  → mark those rows read
++ *   (absent/empty) → mark ALL read
++ * ADMIN-ONLY. Idempotent by nature (re-marking a read row is a no-op).
++ */
++export async function POST(req: Request) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const body = await req.json().catch(() => null) as { ids?: string[] | null } | null
++  const data = { readAt: new Date() }
++  if (Array.isArray(body?.ids) && body!.ids!.length > 0) {
++    await db.panelNotification.updateMany({ where: { id: { in: body!.ids! } }, data })
++  } else {
++    await db.panelNotification.updateMany({ where: { readAt: null }, data })
++  }
++  return NextResponse.json({ ok: true })
++}
+diff -ruN orig/src/app/api/panel-notifications/route.ts b/src/app/api/panel-notifications/route.ts
+--- orig/src/app/api/panel-notifications/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/panel-notifications/route.ts	2026-10-27 21:38:10.379556771 +0000
+@@ -0,0 +1,24 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { isAdmin } from '@/lib/auth'
++
++/**
++ * package 4 (phase 2 / task 3) — the PANEL's own notifications (the bell).
++ *
++ * GET /api/panel-notifications
++ *   Last 100 admin-facing notifications (check-ins, check-outs,
++ *   assignments, plan changes, info) with the unread count. Persisted in
++ *   the DB — a browser refresh or server restart never loses them.
++ *   ADMIN-ONLY (server-side session check).
++ */
++export async function GET() {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const rows = await db.panelNotification.findMany({
++    orderBy: { createdAt: 'desc' },
++    take: 100,
++  })
++  const unread = rows.filter((r) => !r.readAt).length
++  return NextResponse.json({ ok: true, notifications: rows, unread })
++}
+diff -ruN orig/src/app/api/planned-visits/[id]/cancel/route.ts b/src/app/api/planned-visits/[id]/cancel/route.ts
+--- orig/src/app/api/planned-visits/[id]/cancel/route.ts	2026-10-27 21:38:10.373556754 +0000
++++ b/src/app/api/planned-visits/[id]/cancel/route.ts	2026-10-27 21:38:10.379556771 +0000
+@@ -2,6 +2,7 @@
+ import { db } from '@/lib/db'
+ import { isAdmin } from '@/lib/auth'
+ import { writeAudit } from '@/lib/audit'
++import { notifyEmployee } from '@/lib/notify'
+ import { PLAN_OPEN_STATUSES, PLAN_SELECT, withScheduledAtLocal } from '@/lib/planned-visit'
+ 
+ /**
+@@ -70,5 +71,17 @@
+     detail: `لغو برنامهٔ ${plan?.employee.name ?? ''} → ${plan?.customer.name ?? ''}${reason ? ` — دلیل: ${reason}` : ''}`,
+   })
+ 
++
++  // package 4: tell the REP the plan was cancelled (terminal event — the
++  // eventKey on the plan id means a retried cancel can never re-notify).
++  await notifyEmployee({
++    employeeId: existing.employeeId,
++    kind: 'plan',
++    title: 'لغو برنامهٔ بازدید',
++    body: `بازدید «${plan?.customer.name ?? 'مشتری'}» لغو شد.${reason ? ` دلیل: ${reason}` : ''}`,
++    customerId: existing.customerId,
++    eventKey: `plan-cancel:${id}`,
++  })
++
+   return NextResponse.json({ ok: true, plan })
+ }
+diff -ruN orig/src/app/api/planned-visits/[id]/reschedule/route.ts b/src/app/api/planned-visits/[id]/reschedule/route.ts
+--- orig/src/app/api/planned-visits/[id]/reschedule/route.ts	2026-10-27 21:38:10.373556754 +0000
++++ b/src/app/api/planned-visits/[id]/reschedule/route.ts	2026-10-27 21:38:10.379556771 +0000
+@@ -2,6 +2,7 @@
+ import { db } from '@/lib/db'
+ import { isAdmin } from '@/lib/auth'
+ import { writeAudit } from '@/lib/audit'
++import { notifyEmployee } from '@/lib/notify'
+ import {
+   PLAN_OPEN_STATUSES,
+   PLAN_SELECT,
+@@ -100,5 +101,17 @@
+     detail: `برنامه‌ریزی مجدد ${plan?.employee.name ?? ''} → ${plan?.customer.name ?? ''}: ${existing.scheduledAt.toISOString()} ← ${newTime.toISOString()}`,
+   })
+ 
++  // package 4: tell the REP their plan moved (eventKey includes the new time
++  // so rescheduling twice to the same timestamp notifies once; a different
++  // timestamp is genuinely a new event and notifies again).
++  await notifyEmployee({
++    employeeId: existing.employeeId,
++    kind: 'plan',
++    title: 'برنامه‌ریزی مجدد بازدید',
++    body: `بازدید «${plan?.customer.name ?? 'مشتری'}» به ${plan?.scheduledAtLocal ?? ''} منتقل شد.`,
++    customerId: existing.customerId,
++    eventKey: `plan-reschedule:${id}:${newTime.getTime()}`,
++  })
++
+   return NextResponse.json({ ok: true, plan })
+ }
+diff -ruN orig/src/app/api/planned-visits/route.ts b/src/app/api/planned-visits/route.ts
+--- orig/src/app/api/planned-visits/route.ts	2026-10-27 21:38:10.373556754 +0000
++++ b/src/app/api/planned-visits/route.ts	2026-10-27 21:38:10.379556771 +0000
+@@ -2,6 +2,7 @@
+ import { db } from '@/lib/db'
+ import { isAdmin, getConfig } from '@/lib/auth'
+ import { writeAudit } from '@/lib/audit'
++import { notifyEmployee } from '@/lib/notify'
+ import {
+   PLAN_LIST_LIMIT,
+   PLAN_STATUSES,
+@@ -171,5 +172,17 @@
+     detail: `ایجاد برنامهٔ بازدید: ${plan.employee.name} → ${plan.customer.name} — ${plan.scheduledAt.toISOString()}`,
+   })
+ 
++  // package 4: tell the REP a new visit was planned for them (stable event
++  // key on the plan id — a retried POST that somehow passed the 409 guard
++  // still cannot double-notify).
++  await notifyEmployee({
++    employeeId: fields.employeeId,
++    kind: 'plan',
++    title: 'برنامهٔ بازدید جدید',
++    body: `بازدید «${plan.customer.name}» برای ${plan.employee.name} در ${plan.scheduledAtLocal} ثبت شد.`,
++    customerId: fields.customerId,
++    eventKey: `plan-create:${plan.id}`,
++  })
++
+   return NextResponse.json({ ok: true, plan }, { status: 201 })
+ }
+diff -ruN orig/src/instrumentation.ts b/src/instrumentation.ts
+--- orig/src/instrumentation.ts	2026-10-27 21:38:10.375556760 +0000
++++ b/src/instrumentation.ts	2026-10-27 21:38:10.381556776 +0000
+@@ -77,12 +77,33 @@
+ const PLANNED_VISIT_INDEX_DDL =
+   'CREATE UNIQUE INDEX IF NOT EXISTS "PlannedVisit_visitId_key" ON "PlannedVisit"("visitId")'
+ 
++// package 4 (phase 2 / task 3) — notification infrastructure.
++// AppNotification.eventKey: additive column + unique index (nullable →
++// multiple NULLs are fine in SQLite, existing rows untouched).
++const NOTIF_EVENTKEY_DDL = 'ALTER TABLE "AppNotification" ADD COLUMN "eventKey" TEXT'
++const NOTIF_EVENTKEY_INDEX_DDL =
++  'CREATE UNIQUE INDEX IF NOT EXISTS "AppNotification_eventKey_key" ON "AppNotification"("eventKey")'
++// PanelNotification: NEW admin-facing table (layout = prisma db push output).
++const PANEL_NOTIFICATION_DDL = `CREATE TABLE IF NOT EXISTS "PanelNotification" (
++  "id" TEXT NOT NULL PRIMARY KEY,
++  "eventKey" TEXT NOT NULL,
++  "kind" TEXT NOT NULL DEFAULT 'info',
++  "title" TEXT NOT NULL,
++  "body" TEXT NOT NULL,
++  "employeeId" TEXT,
++  "customerId" TEXT,
++  "readAt" DATETIME,
++  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
++)`
++const PANEL_NOTIFICATION_INDEX_DDL =
++  'CREATE UNIQUE INDEX IF NOT EXISTS "PanelNotification_eventKey_key" ON "PanelNotification"("eventKey")'
++
+ export async function register() {
+   if (process.env.NEXT_RUNTIME !== 'nodejs') return
+   const { PrismaClient } = await import('@prisma/client')
+   const db = new PrismaClient()
+   let applied = 0
+-  for (const sql of [...MIGRATIONS, AUDIT_TABLE_DDL, PLANNED_VISIT_DDL, PLANNED_VISIT_INDEX_DDL]) {
++  for (const sql of [...MIGRATIONS, AUDIT_TABLE_DDL, PLANNED_VISIT_DDL, PLANNED_VISIT_INDEX_DDL, NOTIF_EVENTKEY_DDL, NOTIF_EVENTKEY_INDEX_DDL, PANEL_NOTIFICATION_DDL, PANEL_NOTIFICATION_INDEX_DDL]) {
+     try {
+       await db.$executeRawUnsafe(sql)
+       applied++
+diff -ruN orig/src/lib/notify.ts b/src/lib/notify.ts
+--- orig/src/lib/notify.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/lib/notify.ts	2026-10-27 21:38:10.381556776 +0000
+@@ -0,0 +1,77 @@
++import { db } from '@/lib/db'
++
++/**
++ * package 4 (phase 2 / task 3) — notification helpers.
++ *
++ * TWO audiences:
++ *  - notifyEmployee(): the REPS' in-app notifications (AppNotification —
++ *    read by the Android app via /api/app/notifications, already persisted
++ *    and employee-scoped).
++ *  - notifyAdmin(): the PANEL's notifications (PanelNotification — real app
++ *    events like check-ins/check-outs surface to the manager; persisted in
++ *    the DB so they survive refresh/restart, with an explicit read state).
++ *
++ * STABLE EVENT IDS (dedup): both accept an `eventKey`. When present, the
++ * unique index makes a retry/replay of the SAME logical event a no-op —
++ * a unique-constraint violation is swallowed (P2002), anything else
++ * propagates. Emission is best-effort by design: a notification failure
++ * must never fail the business event that triggered it, so callers wrap
++ * where appropriate (or accept the await — the DB write is local & fast).
++ */
++
++type EmpKind = 'assignment' | 'proximity' | 'plan' | 'info'
++
++export async function notifyEmployee(opts: {
++  employeeId: string
++  kind: EmpKind
++  title: string
++  body?: string
++  customerId?: string | null
++  /** stable event id — e.g. `plan-cancel:<planId>`; null = no dedup */
++  eventKey?: string | null
++}): Promise<void> {
++  try {
++    await db.appNotification.create({
++      data: {
++        employeeId: opts.employeeId,
++        kind: opts.kind,
++        title: opts.title,
++        body: opts.body ?? '',
++        customerId: opts.customerId ?? null,
++        eventKey: opts.eventKey ?? null,
++      },
++    })
++  } catch (e: unknown) {
++    if ((e as { code?: string })?.code === 'P2002') return // same event already recorded
++    console.error('[notify] employee notification failed:', e instanceof Error ? e.message : e)
++  }
++}
++
++type AdminKind = 'checkin' | 'checkout' | 'assignment' | 'plan' | 'info'
++
++export async function notifyAdmin(opts: {
++  kind: AdminKind
++  title: string
++  body?: string
++  employeeId?: string | null
++  customerId?: string | null
++  /** stable event id — REQUIRED for admin events so replays/retries of the
++   *  business event (e.g. a localId check-in replay) can never double-notify */
++  eventKey: string
++}): Promise<void> {
++  try {
++    await db.panelNotification.create({
++      data: {
++        eventKey: opts.eventKey,
++        kind: opts.kind,
++        title: opts.title,
++        body: opts.body ?? '',
++        employeeId: opts.employeeId ?? null,
++        customerId: opts.customerId ?? null,
++      },
++    })
++  } catch (e: unknown) {
++    if ((e as { code?: string })?.code === 'P2002') return // same event already recorded
++    console.error('[notify] panel notification failed:', e instanceof Error ? e.message : e)
++  }
++}

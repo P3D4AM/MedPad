@@ -296,6 +296,18 @@
       "namedRegex": "^/api/notifications(?:/)?$"
     },
     {
+      "page": "/api/panel-notifications",
+      "regex": "^/api/panel\\-notifications(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/panel\\-notifications(?:/)?$"
+    },
+    {
+      "page": "/api/panel-notifications/read",
+      "regex": "^/api/panel\\-notifications/read(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/panel\\-notifications/read(?:/)?$"
+    },
+    {
       "page": "/api/planned-visits",
       "regex": "^/api/planned\\-visits(?:/)?$",
       "routeKeys": {},

@@ -58,7 +58,7 @@
 | ۱ | همگام‌سازی Check-in/Check-out (رفع B3+B5) | ✅ | `9023eb9` |
 | ۲ | رفع کرش Plans/Reports (B6) | ✅ | ← همین کامیت |
 | ۳ | گردش کامل Planned Visits (تست E2E ۵۰ چک) | ✅ | ← همین کامیت |
-| ۴ | زیرساخت اعلان‌ها (مدل+API) | ⬜ | — |
+| ۴ | زیرساخت اعلان‌ها (مدل+API+رویدادها) | ✅ | ← همین کامیت |
 | ۵ | اعلان‌های پنل (آیکون/فهرست/خوانده‌شده) | ⬜ | — |
 | ۶ | درخواست انتساب مشتری + تأیید/رد | ⬜ | — |
 | ۷ | انتساب گروهی و لغو انتساب | ⬜ | — |
@@ -190,3 +190,33 @@ Push: موفق / ناموفق
 - **کامیت/Push:** در همین کامیت (تست + WORKLOG + همین فایل)
 - **باقی‌مانده:** هیچ برای این بسته. تکرار تست: `bash audit-tests/test-planned-visit-flow.sh`
 - **قدم بعدی:** بستهٔ ۴ — زیرساخت اعلان‌ها (مدل Notification + API)
+
+---
+
+## گزارش بستهٔ ۴ — زیرساخت اعلان‌ها (Oct 28, 2026)
+
+- **وضعیت:** تکمیل‌شده — مدل، API، رویدادهای واقعی، مهاجرت و مسیر ارتقا همه با تست E2E اثبات شد
+- **طراحی:** دو مخاطب متمایز — `AppNotification` (اعلان‌های درون‌برنامه‌ای مدرپ‌ها، موجود از قبل) + `PanelNotification` جدید (اعلان‌های مدیر/زنگ پنل). هر دو در DB ماندگارند و `eventKey` یکتا دارند (بازپخش/Retry هرگز اعلان تکراری نمی‌سازد — P2002 بلعیده می‌شود).
+- **تغییرات سورس پنل (وصلهٔ جدید `patches/panel-src-phase2-package4.patch` — زنجیرهٔ ۶ وصله‌ای روی bd9c80b بایت‌به‌بایت راستی‌آزمایی شد):**
+  - `prisma/schema.prisma`: `AppNotification.eventKey` یکتا + مدل `PanelNotification` (id, eventKey یکتا, kind, title, body, employeeId/customerId بدون FK برای بقای سوابق, readAt, createdAt)
+  - `src/lib/notify.ts` (جدید): `notifyEmployee` + `notifyAdmin` با dedup امن در برابر race
+  - `src/instrumentation.ts`: مهاجرت افزوده و idempotent (ALTER + ایندکس یکتا + CREATE TABLE)
+  - رویدادهای متصل: انتساب (کارمند+مدیر) · چک‌این/چک‌اوت (مدیر، کلید روی id ردیف → بازپخش localId بی‌اثر) · ایجاد/برنامه‌ریزی مجدد/لغو برنامه (مدرپ؛ reschedule هم‌زمان دوبار = یک اعلان)
+  - `POST /api/notifications` (ادمین): پیام گروهی به کارمند · `POST /api/app/notifications` → 405 (کارمند نمی‌توانست برای خودش اعلان جعلی بسازد — رفع نقص)
+  - `GET/POST /api/panel-notifications` + `/read`: فهرست ۱۰۰تایی + unread + علامت‌گذاری (تکی/همه) — همه admin-only
+- **باندل:** بازسازی کامل از سورس (npm install + prisma generate + next build standalone + کپی دستی انجین‌ها و public و static دو مسیره + BUILD_ID همگام + template.db تازه با جدول جدید) — اسکریپت ماندگار `scripts/build-panel.sh` (سندباکس) با ۱۳ چک hardening همه سبز (شامل chunk کلاینت با الگوی `:3003` که نصب‌کننده پچ می‌کند — درس آموخته‌شده: static باید هم بیرونی هم داخل standalone باشد).
+- **تست (واقعی):** `audit-tests/test-notifications-infra.sh` → **43/43 PASS**:
+  - NI1 انتساب → اعلان کارمند+مدیر؛ تکرار → هیچ‌کدام دوبار نمی‌آید
+  - NI2 چک‌این → اعلان مدیر؛ بازپخش localId → بدون اعلان دوم
+  - NI4 برنامه‌ها → اعلان مدرپ در هر سه رویداد؛ reschedule هم‌زمان دوبار → دقیقاً یک اعلان
+  - NI5 broadcast ادمین می‌رسد؛ self-create اپ → 405
+  - NI6 فهرست/unread/خوانده‌شده تکی و همه/گیت‌های 401
+  - NI7 ماندگاری پس از restart سرور
+  - NI8 ایزولاسیون کارمندان
+  - NI9 **مسیر ارتقا**: بوت روی دیتابیس قدیمی (بدون eventKey/جدول) → مهاجرت اعمال شد و رویداد جدید کار کرد (با حفظ اعتبارنامه‌ها؛ درس: حذف WAL/SHM جامانده هنگام تعویض DB الزامی است)
+  - NI3 چک‌اوت → اعلان مدیر (با صوت آزمایشی)
+- **Regression:** `test-planned-visit-flow.sh` روی باندل جدید (نتیجه در WORKLOG ثبت شد) + تست‌های اندروید بستهٔ ۲ بدون تغییر سبز.
+- **دیتابیس/API:** Prisma: +eventKey + PanelNotification (افزوده) · API جدید: panel-notifications (GET/read)، POST notifications ادمین · API حذف‌شده: self-create اپ (405).
+- **تست‌های اجرانشده:** مرورگر واقعی/اعلان Notification API مرورگر (بستهٔ ۵) و اپ اندروید روی گوشی.
+- **باقی‌مانده:** بستهٔ ۵ — آیکون زنگ پنل + فهرست + browser notification با مجوز.
+- **قدم بعدی:** بستهٔ ۵ (UI پنل اعلان‌ها).

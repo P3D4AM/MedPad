@@ -172,11 +172,30 @@ model PlannedVisit {
 
 model AppNotification {
   id         String    @id @default(cuid())
+  eventKey   String?   @unique // package 4: stable event id — retries/replays can never duplicate
   employeeId String
   employee   Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   title      String
   body       String
-  kind       String    @default("assignment") // assignment | proximity | info
+  kind       String    @default("assignment") // assignment | proximity | plan | info
+  customerId String?
+  readAt     DateTime?
+  createdAt  DateTime  @default(now())
+}
+
+// package 4 (phase 2 / task 3): ADMIN-facing notifications — real app events
+// (check-in / check-out / assignment / plan changes) that the panel bell
+// reads. Persisted in the DB (survives refresh/restart), deduped by a stable
+// eventKey, with an explicit read state. employeeId/customerId are PLAIN
+// strings (display context only, no FK) so history survives lifecycle
+// changes of the referenced rows.
+model PanelNotification {
+  id         String    @id @default(cuid())
+  eventKey   String    @unique
+  kind       String    @default("info") // checkin | checkout | assignment | plan | info
+  title      String
+  body       String
+  employeeId String?
   customerId String?
   readAt     DateTime?
   createdAt  DateTime  @default(now())
