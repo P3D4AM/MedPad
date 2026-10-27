@@ -62,7 +62,18 @@ interface DoctorDao {
  * fix (null when the device reported none). lat/lng null = no location —
  * the server then records the event as explicitly location-missing (the
  * customer's coordinates are NEVER used as a substitute).
+ * Package 1 (phase 2 / task 3): explicit lifecycle status so the app can
+ * distinguish LOCAL (pending), IN-FLIGHT (sending) and PERMANENTLY FAILED
+ * (failed). A 4xx answer from the server (customer deleted, checkout without
+ * an open visit, strict-radius rejection…) marks the item 'failed' — the
+ * event data is kept for the user to read/retry, but it no longer blocks the
+ * rest of the queue (the old code retried such items forever and 'break'-ed
+ * the whole flush — root cause of the "stuck queue" report).
  */
+const val QUEUE_STATUS_PENDING = "pending"
+const val QUEUE_STATUS_SENDING = "sending"
+const val QUEUE_STATUS_FAILED = "failed"
+
 @Entity(tableName = "pending_checkins")
 data class PendingCheckin(
     @PrimaryKey(autoGenerate = true) val uid: Long = 0,
@@ -77,6 +88,7 @@ data class PendingCheckin(
     val createdAt: Long = System.currentTimeMillis(),
     val attempts: Int = 0,
     val lastError: String? = null,
+    val status: String = QUEUE_STATUS_PENDING, // pending | sending | failed
 )
 
 @Dao
@@ -86,6 +98,27 @@ interface PendingCheckinDao {
 
     @Query("SELECT COUNT(*) FROM pending_checkins")
     suspend fun count(): Int
+
+    /** Package 1: transport backlog = waiting + in-flight (excludes failed). */
+    @Query("SELECT COUNT(*) FROM pending_checkins WHERE status != 'failed'")
+    suspend fun pendingCount(): Int
+
+    /** Package 1: permanently failed items (kept with their error text). */
+    @Query("SELECT COUNT(*) FROM pending_checkins WHERE status = 'failed'")
+    suspend fun failedCount(): Int
+
+    @Query("SELECT * FROM pending_checkins WHERE status = 'failed' ORDER BY createdAt")
+    suspend fun failed(): List<PendingCheckin>
+
+    /** Package 1: crash recovery — anything marked 'sending' by a process
+     *  that died mid-upload goes back to 'pending' before a new flush. */
+    @Query("UPDATE pending_checkins SET status = 'pending' WHERE status = 'sending'")
+    suspend fun resetSending(): Int
+
+    /** Package 1: manual retry of failed items (safe — server localId
+     *  idempotency makes a replay of an already-recorded event a no-op). */
+    @Query("UPDATE pending_checkins SET status = 'pending' WHERE status = 'failed'")
+    suspend fun requeueFailed(): Int
 
     @Insert
     suspend fun insert(item: PendingCheckin): Long

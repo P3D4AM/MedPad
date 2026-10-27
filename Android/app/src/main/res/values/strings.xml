@@ -33,6 +33,15 @@
     <string name="queue_status">صف ارسال: %s</string>
     <string name="queue_empty">خالی</string>
     <string name="queue_items">%s مورد</string>
+    <!-- Package 1 (phase 2 / task 3): queue lifecycle — waiting vs failed -->
+    <string name="queue_items_with_failed">%s مورد در انتظار · %s خطا</string>
+    <string name="queue_details_title">جزئیات صف ارسال</string>
+    <string name="queue_details_waiting">در انتظار ارسال: %s مورد (با برقراری اتصال، خودکار ارسال می‌شوند)</string>
+    <string name="queue_details_no_failures">هیچ مورد خطایی وجود ندارد.</string>
+    <string name="queue_details_failed_header">موارد ردشدهٔ سرور: %s (برای تلاش مجدد، دکمهٔ زیر را بزنید)</string>
+    <string name="retry_failed">تلاش مجدد موارد خطا</string>
+    <string name="close">بستن</string>
+    <string name="no_active_checkin">برای چک‌اوت، ابتدا باید چک‌این فعال داشته باشید.\n\nابتدا روی کارت «چک‌این» بزنید و بازدید را شروع کنید؛ پس از پایان بازدید، چک‌اوت انجام دهید.</string>
     <string name="panel_old_warning">پنل قدیمی است — برای گزارش صوتی، پنل را به‌روز کنید</string>
     <string name="tracking_active">ردیابی فعال</string>
     <string name="no_customers_yet">هنوز مشتری‌ای به شما اختصاص نیافته</string>

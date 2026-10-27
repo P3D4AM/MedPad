@@ -395,7 +395,7 @@ class PlansActivity : AppCompatActivity() {
                 // the check-in was queued/sent — the plan status itself comes
                 // from the server; refresh to pick up the linkage
                 scope.launch {
-                    val queued = withContext(Dispatchers.IO) { CheckinSync.queueCount() }
+                    val queued = withContext(Dispatchers.IO) { CheckinSync.pendingCount() }
                     if (queued > 0) {
                         Toast.makeText(this@PlansActivity, R.string.plan_checkin_queued_note, Toast.LENGTH_LONG).show()
                     }

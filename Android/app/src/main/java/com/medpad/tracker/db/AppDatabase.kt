@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [Doctor::class, PendingCheckin::class, PendingLocation::class, PlannedVisitEntity::class],
-    version = 8,
+    version = 9,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -28,7 +28,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "medpad.db",
                 )
-                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                     .build()
                     .also { inst = it }
             }
@@ -86,6 +86,17 @@ abstract class AppDatabase : RoomDatabase() {
                         "PRIMARY KEY(`id`))"
                 )
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_planned_visits_dayKey` ON `planned_visits` (`dayKey`)")
+            }
+        }
+
+        // Package 1 (phase 2 / task 3): queue lifecycle status so the app can
+        // tell LOCAL (pending) / IN-FLIGHT (sending) / FAILED apart. Purely
+        // ADDITIVE column with a safe default — every existing queued item
+        // (including ones currently stuck under the old retry-forever logic)
+        // becomes 'pending' and gets one fresh, correctly-categorized attempt.
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE pending_checkins ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'")
             }
         }
     }

@@ -40,6 +40,12 @@ class MainActivity : AppCompatActivity() {
 
     private val scope = CoroutineScope(Dispatchers.Main)
 
+    /** Package 1 (B5): last known open-visit count from the server
+     *  (best-effort, refreshed by updateQueueStatus). null = unknown
+     *  (offline / not fetched yet) — in that state we do NOT block checkout,
+     *  because a pending check-in may exist locally in the offline queue. */
+    @Volatile private var lastKnownOpenVisits: Int? = null
+
     // mic permission
     private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         pendingMicAction?.invoke(granted)
@@ -192,19 +198,48 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showCheckout() {
-        val dialog = CheckoutDialogFragment {
-            scope.launch(Dispatchers.IO) { CheckinSync.flush() }
-            updateQueueStatus()
-            Toast.makeText(this, R.string.checkout_sent, Toast.LENGTH_SHORT).show()
+        // Package 1 (B5): do not let the user enqueue a checkout when we
+        // KNOW there is no open visit server-side AND no pending check-in
+        // locally — such a checkout is permanently rejected (409) by the
+        // server and used to freeze the whole queue. When the state is
+        // unknown (offline) or a local check-in is waiting, we allow it and
+        // let the queue + its new failed-state handling deal with it.
+        scope.launch {
+            val pendingCheckins = withContext(Dispatchers.IO) { CheckinSync.pendingCount() }
+            val open = lastKnownOpenVisits
+            if (open == 0 && pendingCheckins == 0) {
+                AlertDialog.Builder(this@MainActivity)
+                    .setMessage(R.string.no_active_checkin)
+                    .setPositiveButton(R.string.checkin, null)
+                    .show()
+                return@launch
+            }
+            val dialog = CheckoutDialogFragment {
+                scope.launch(Dispatchers.IO) { CheckinSync.flush() }
+                updateQueueStatus()
+                Toast.makeText(this@MainActivity, R.string.checkout_sent, Toast.LENGTH_SHORT).show()
+            }
+            dialog.show(supportFragmentManager, "checkout")
         }
-        dialog.show(supportFragmentManager, "checkout")
     }
 
     private fun updateQueueStatus() {
         scope.launch {
-            val n = withContext(Dispatchers.IO) { CheckinSync.queueCount() }
-            val label = if (n == 0) getString(R.string.queue_empty) else getString(R.string.queue_items, n.toString())
-            findViewById<TextView>(R.id.tvQueue).text = getString(R.string.queue_status, label)
+            // Package 1: distinguish waiting (LOCAL / in-flight) from FAILED
+            val waiting = withContext(Dispatchers.IO) { CheckinSync.pendingCount() }
+            val failed = withContext(Dispatchers.IO) { CheckinSync.failedCount() }
+            val tvQueue = findViewById<TextView>(R.id.tvQueue)
+            val label = when {
+                waiting == 0 && failed == 0 -> getString(R.string.queue_empty)
+                failed > 0 -> getString(R.string.queue_items_with_failed, waiting.toString(), failed.toString())
+                else -> getString(R.string.queue_items, waiting.toString())
+            }
+            tvQueue.text = getString(R.string.queue_status, label)
+            // failed items are readable + retryable from the queue details
+            tvQueue.setOnClickListener { if (failed > 0 || waiting > 0) showQueueDetails() }
+            tvQueue.setTextColor(
+                if (failed > 0) 0xFFB91C1C.toInt() else 0xFF57534E.toInt(),
+            )
             // old panel warning (voice uploads need panel ≥ 1.8.0)
             val pv = Session.panelVersion
             val old = pv.isNotEmpty() && pv.split('.').firstOrNull()?.toIntOrNull()?.let { it < 1 } == true ||
@@ -231,10 +266,51 @@ class MainActivity : AppCompatActivity() {
             try {
                 val resp = com.medpad.tracker.api.ApiClient.openVisits()
                 val open = resp.optJSONArray("openVisits")?.length() ?: 0
+                lastKnownOpenVisits = open // Package 1 (B5): remember for the checkout guard
                 withContext(Dispatchers.Main) {
                     findViewById<View>(R.id.cardCheckout).alpha = if (open > 0) 1f else 0.55f
                 }
             } catch (_: Exception) { /* offline — keep as is */ }
+        }
+    }
+
+    /** Package 1: queue details — waiting + failed items with their server
+     *  error text, and an explicit retry for the failed ones. */
+    private fun showQueueDetails() {
+        scope.launch {
+            val failed = withContext(Dispatchers.IO) { CheckinSync.failedItems() }
+            val waiting = withContext(Dispatchers.IO) { CheckinSync.pendingCount() }
+            val sb = StringBuilder()
+            sb.append(getString(R.string.queue_details_waiting, waiting.toString())).append("\n\n")
+            if (failed.isEmpty()) {
+                sb.append(getString(R.string.queue_details_no_failures))
+            } else {
+                sb.append(getString(R.string.queue_details_failed_header, failed.size.toString())).append("\n")
+                val cal = java.util.Calendar.getInstance()
+                failed.take(10).forEach { f ->
+                    cal.timeInMillis = f.createdAt
+                    val time = "%02d:%02d".format(cal.get(java.util.Calendar.HOUR_OF_DAY), cal.get(java.util.Calendar.MINUTE))
+                    val kind = if (f.kind == "checkin") getString(R.string.checkin) else getString(R.string.checkout)
+                    sb.append("• ").append(kind).append(" — ").append(time).append("\n")
+                    f.lastError?.let { sb.append("    ").append(it).append("\n") }
+                }
+                if (failed.size > 10) sb.append("…\n")
+            }
+            AlertDialog.Builder(this@MainActivity)
+                .setTitle(R.string.queue_details_title)
+                .setMessage(sb.toString())
+                .setPositiveButton(
+                    if (failed.isEmpty()) android.R.string.ok else R.string.retry_failed,
+                ) { _, _ ->
+                    if (failed.isNotEmpty()) {
+                        scope.launch(Dispatchers.IO) {
+                            CheckinSync.retryFailed()
+                            withContext(Dispatchers.Main) { updateQueueStatus() }
+                        }
+                    }
+                }
+                .setNegativeButton(R.string.close, null)
+                .show()
         }
     }
 }
