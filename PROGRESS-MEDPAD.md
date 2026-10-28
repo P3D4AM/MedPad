@@ -19,7 +19,7 @@
 
 ## ۲. وضعیت فعلی مخزن (آخرین راستی‌آزمایی: Oct 29 — عامل فاز ۵-A)
 
-- **آخرین SHA تأییدشدهٔ `develop`:** `052e777` — «docs(progress): phase 5-D — package 5 final verification & closure …» (راستی‌آزمایی با fetch تازه + API گیت‌هاب؛ Oct 29 — عامل پروتکل دائمی). `main` دست‌نخورده: `8db3319`. **بستهٔ ۵ کامل شد (۵-A تا ۵-D همه DONE_VERIFIED).**
+- **آخرین SHA تأییدشدهٔ `develop`:** `8ac594865c45732f19748600f0ea5369a775f0f9` — «fix(android-sync): P06 — 403 no longer silently deletes the rejected offline check-in …» (راستی‌آزمایی با fetch تازه + API گیت‌هاب؛ Oct 29 — عامل پروتکل دائمی). `main` دست‌نخورده: `8db3319`. **P06 → DONE_VERIFIED.**
 - بسته‌های ۰ تا ۴ و ۶ تا ۱۱ روی `develop` پوش و تأیید شده‌اند: `3be0bb0` (۰) · `9023eb9` (۱) · `68348df` (۲) · `0a610fc` (۳) · `eab7279` (۴) · `73e720f` (۶) · `22afd62` (۷) · `c1f199e` (۸) · `7b0996a` (۹) · `e42cc52` (۱۰) · `eaf48d1` (۱۱).
 - آخرین انتشار: **v1.9.13-dev.2** (2026-10-26؛ Pre-release با ZIP پنل + APK + هش‌ها). **هیچ dev.3 وجود ندارد** (تأیید مجدد با API ریلیزها؛ Oct 29).
 - نسخه‌های فعلی: INSTALLER_VER / APP-VERSION = `1.9.13-dev.2` · Android versionCode=13, versionName=`1.9.13-dev.2` · Room DB v10 · Prisma با `PlannedVisit` + `AppNotification.eventKey` + `PanelNotification` + `AuditLog` + `Customer.city/province` + تنظیم `defaultCity` (بستهٔ ۹).
@@ -64,7 +64,7 @@
 | P05-B | منطق مرکز اعلان‌ها (API/دسترسی/شمارنده) | ✅ DONE_VERIFIED | `4386f19` (SHA ریموت با fetch + API تأیید شد) — وصلهٔ `panel-src-phase2-package5.patch` + `test-panel-notifications-api.sh` → ۶۲/۶۲ full · NI ۴۳/۴۳ رگرسیون · baseline ۳۲+۰+۴skip |
 | P05-C | رابط کاربری مرکز اعلان‌ها | ✅ DONE_VERIFIED | `73806a6` (SHA ریموت با fetch + API تأیید شد) — کامپوننت + ادغام هدر + باندل بازساخته؛ UI ۳۱/۳۱ · NI ۴۳/۴۳ · P5API ۶۲/۶۲ روی باندل نهایی · سخت‌سازی ۱۵/۱۵ |
 | P05-D | رگرسیون و بسته‌بندی اعلان‌ها | ✅ DONE_VERIFIED | `052e777` (SHA ریموت در `7d14755` تأیید شد) — ۹ سوئیت / ۴۲۵ چک سبز روی باندل نهایی + بیلد تکرارپذیر از زنجیره (۱۵/۱۵ + ۶۲/۶۲) |
-| P06 | حفظ دادهٔ آفلاین در خطای 403 | 🔶 تکمیل‌شده در کامیت این فاز (Push و تأیید SHA بلافاصله پس از آن — ثبت در کامیت مستندات بعدی → DONE_VERIFIED) | اصلاح شاخهٔ 403 در `CheckinSync.kt`: `delete(item)` → انتقال به `failed` با `lastError` فارسی (بازگشت تصمیم G-1 طبق P06) · تست جدید `sync/CheckinSync403Test.kt` با سرور HTTP واقعی محلی: **بازتولید باگ روی کد قدیمی** (شکست با NoSuchElement — رکورد حذف‌شده) و سبز با اصلاح (حفظ رکورد + داده‌ها + جریان صف + تفکیک از 401 + مسیر بازیابی retryFailed) · کل سوئیت ۳۰/۳۰ · `assembleDebug` موفق | `9023eb9` (بستهٔ ۱، پیش‌زمینه) · کامیت این فاز |
+| P06 | حفظ دادهٔ آفلاین در خطای 403 | ✅ DONE_VERIFIED | `8ac5948` (SHA ریموت با fetch تازه + API گیت‌هاب تأیید شد) — اصلاح شاخهٔ 403: `delete` → انتقال به `failed` با `lastError` فارسی (بازگشت تصمیم G-1) · تست `CheckinSync403Test` با سرور HTTP واقعی: بازتولید باگ روی کد قدیمی + سبز با اصلاح · سوئیت ۳۰/۳۰ · `assembleDebug` موفق |
 | P07 | تحویل قابل‌اعتماد اعلان Android | ⬜ NOT_STARTED — نیازمند راستی‌آزمایی تفکیک received/shown/read روی کار بستهٔ ۱۱ | `eaf48d1` (بستهٔ ۱۱، پیش‌زمینه) |
 | P08 | اصلاح درخواست جایگزین Check-in | ⬜ NOT_STARTED | `9023eb9` (پیش‌زمینه) |
 | P09 | امنیت ارتباطات (HTTP/HTTPS) | ⬜ NOT_STARTED | `SECURITY-AUDIT-v1.9.12.md` (پیش‌زمینه جزئی) |
