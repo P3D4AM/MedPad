@@ -1216,3 +1216,32 @@ Work Log:
 
 Stage Summary:
 - P06 نقصش از سورس قطعی شد (حذف خاموش رکورد 403)؛ زیرساخت اصلاح (حالت FAILED) موجود است؛ اصلاح ۲-خطی + تست، نیازمند بازسازی محیط بیلد اندروید در اجرای بعدی است.
+
+---
+Task ID: 42
+Agent: main (Z.ai — permanent-protocol session)
+Task: فاز P06 — حفظ دادهٔ آفلاین در خطای 403 (بازسازی محیط بیلد اندروید + اصلاح + تست؛ طبق طرح Task 41 و بخش ۹ پروتکل)
+Date: Oct 29, 2026
+
+Work Log:
+- بازیابی (§3): ریموت بدون تغییر (develop=65107d5، main=8db3319 دست‌نخورده)؛ working tree تمیز؛ فازهای P00 و ۵-A..D با شواهد DONE_VERIFIED — تکرار نشدند. اجرای قبلی این فاز فقط محیطی کار کرده بود (JDK/SDK نصب شده بودند؛ مرگ Gradle Daemon و قطع ابزار shell).
+- **بازسازی محیط بیلد اندروید (رفع مانع Task 41):**
+  * JDK 21.0.13 پرتابل (Adoptium، با javac) در `/home/z/android-setup/jdk-21.0.13+9` + Android SDK در `/home/z/android-sdk` (cmdline-tools 11076708 + platform-tools + platforms;android-34 + build-tools;34.0.0 + لایسنس‌ها) — هر دو بدون sudo، خارج از مخزن.
+  * درس Daemon-kill سندباکس: درخت‌های detached (setsid) کشته می‌شوند ولی پروسهٔ foreground متصل به tool call زنده می‌ماند → اجرای پله‌ای foreground با `timeout` داخلی؛ کش gradle بین اجراها ماندگار است و پیش می‌رود.
+  * درس حافظه: cgroup = ۴GB سخت؛ daemon با `-Xmx1024m -XX:MaxMetaspaceSize=384m` + `--max-workers=2` + `-Dkotlin.compiler.execution.strategy=in-process` → پایدار.
+  * محدودیت نرخ Maven Central (HTTP 429 برای IP مشترک سندباکس؛ plugins.gradle.org هم به آن ریدایرکت می‌شود) → آینهٔ Huawei (`repo.huaweicloud.com/repository/maven` — تست 200) با اسکریپت init در `~/.gradle/init.d/mirror.gradle` (قبل از pluginManagement/dependencyResolution در beforeSettings؛ **خارج از مخزن** — فایل ماشین-محور، کامیت نمی‌شود).
+  * دانلودر خودِ Robolectric در زمان اجرا مستقیم به repo1 می‌رود و با ۴۲۹ می‌شکند (۲۵ شکست از ۲۹ در اولین اجرای baseline!) → پیش‌بارگذاری `org.robolectric:android-all-instrumented:14-robolectric-10818077-i6` (۱۵۰٬۶۴۶٬۲۶۲ بایت، jar معتبر) در `~/.m2/repository` از آینهٔ Huawei → حل کامل.
+- **Baseline (سورس دست‌نخورده، قبل از هر تغییر):** ۲۹/۲۹ سبز — محیط اثبات شد؛ نقطهٔ before ثبت شد. (نکتهٔ صادقانه: در اولین تلاش، ۲۵/۲۹ به دلیل ۴۲۹ روبولکتریک شکست خورد — علت محیطی بود، نه کدی؛ بعد از پیش‌بارگذاری کش، تمام ۲۹ سبز شد.)
+- **اصلاح P06 (طبق طرح Task 41، کوچک و افزایشی — `CheckinSync.kt`):**
+  * شاخهٔ 403: `delete(item)` + `FlushOutcome.DROPPED` → همان الگوی دائمی 400/404/409/422 یعنی `update(status=FAILED, attempts+1, lastError="رد شده توسط سرور (403): ${e.message}")` + `FlushOutcome.FAILED`. صف همچنان جریان می‌یابد؛ بدون retry خودکار (معیار P06: حلقهٔ retry بی‌نهایت از قبل وجود ندارد — تأیید Task 41).
+  * مقدار `DROPPED` از enum و شاخهٔ مردهٔ آن در `flush()` حذف شد (کد مرده باقی نماند)؛ سه کامنت مستند (KDoc کلاس، KDoc فلش، بالای شاخهٔ 403) بازنویسی شدند با ارجاع صریح به P06 و بازگشت تصمیم G-1.
+  * تفکیک خطاها (معیار P06): 401 = سطح نشست (sessionExpired، توقف کل فلش — بدون تغییر)؛ 403 = سطح رکورد (failed + متن خطای سرور، ادامهٔ صف)؛ گذرا (شبکه/5xx/429) = pending + توقف راند — همه از قبل موجود و حفظ شد.
+- **تست جدید `app/src/test/java/com/medpad/tracker/sync/CheckinSync403Test.kt`:** سرور HTTP واقعی محلی خام (ServerSocket؛ `com.sun.net.httpserver` در android.jar کلاس‌پث تست نیست — درس کامپایل اول) که اولین `/api/app/checkin` را با 403 + متن فارسی سرور جواب می‌دهد و بقیه را ok — قطعی مستقل از ترتیب فلش؛ یک checkout هم در صف است تا اثبات شود 403 صف را متوقف نمی‌کند. سناریوی کامل: enqueue → flush → رکورد 403‌شده با status=failed و attempts=1 و lastError شامل «403» + متن سرور باقی می‌ماند؛ customerId/note/lat/lng/accuracy دست‌نخورده؛ قابل‌مشاهده با failedItems()/failedCount()؛ sessionExpired==false (تفکیک از 401)؛ سپس پذیرش سرور → retryFailed → رکورد تحویل و حذف از صف (مسیر بازیابی).
+- **اثبات بازتولید باگ (§۶):** با `git stash` کردن اصلاح و اجرای تست جدید روی کد قدیمی → **شکست با `NoSuchElementException`** (رکورد 403‌شده واقعاً حذف شده بود و در صف پیدا نمی‌شود) → stash pop → سبز. نتیجهٔ قبل/بعد مستند شد.
+- **راستی‌آزمایی نهایی:** کل سوئیت واحد ۳۰/۳۰ سبز (۲۹ موجود بدون رگرسیون + ۱ جدید) · `assembleDebug` موفق (APK debug با versionCode=13 / versionName=1.9.13-dev.2 — مسیر ارتقا حفظ شد؛ اندازهٔ ۸٬۸۰۱٬۱۹۰ بایت در این محیط بیلد متفاوت از ۸٬۹۸۵٬۵۲۲ بایتِ ثبت‌شدهٔ بستهٔ ۱۱ در محیط قبلی — خروجی build نیست و کامیت نمی‌شود؛ صرفاً ثبت صادقانه).
+- پاک‌سازی تست: singleton «medpad.db» با PlansAndReportsSmokeTest مشترک است → تست در @Before/@After صف را خالی می‌کند و ادعاها فقط روی localId های خودش — مقاوم به ترتیب اجرای کلاس‌ها.
+- تغییرات این فاز: `CheckinSync.kt` (+۲۵/−۱۵) + تست جدید (۱ فایل) + همین دو سند. `main` دست‌نخورده (8db3319). بدون ریلیز.
+
+Stage Summary:
+- P06 تکمیل شد: رکورد آفلاینِ ردشده با 403 دیگر بی‌صدا حذف نمی‌شود — به حالت پایدار «failed» با خطای خوانا می‌رود، در UI صف دیده می‌شود و با retryFailed قابل بازیابی است؛ اثبات با بازتولید واقعی باگ و ۳۰/۳۰ سبز. محیط بیلد اندروید سندباکس بازسازی و مستند شد (برای P07/P08/P12 قابل استفاده).
+- پس از Push و تأیید SHA: ادامهٔ مستقیم به P07 طبق بخش ۹ پروتکل.

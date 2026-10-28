@@ -35,8 +35,12 @@ import java.util.UUID
  *  - TRANSIENT failures (network, 5xx, 429) keep the item 'pending' and
  *    stop the round (order matters: a checkout must never overtake its
  *    check-in), retried on the next resume/network-regain/submit.
- *  - 403 (customer not assigned — server policy) still DROPS the item (G-1)
- *    and 401 (token expired/revoked) still stops the whole flush (G-2).
+ *  - P06 (permanent protocol, Oct 2026) REVERSES the old G-1 decision for
+ *    403 (customer not assigned — server policy): the rejected event is
+ *    kept as 'failed' with the server's error text instead of being
+ *    silently deleted — recorded offline data must survive a permission
+ *    rejection, stay visible in the queue UI and stay retryable.
+ *    401 (token expired/revoked) still stops the whole flush (G-2).
  *  - Crash recovery: items left in 'sending' by a process that died
  *    mid-upload are reset to 'pending' at the start of every flush. A
  *    replay after such a crash cannot duplicate an event server-side
@@ -99,13 +103,10 @@ object CheckinSync {
                 if (item.status == QUEUE_STATUS_FAILED) continue // user-visible; manual retry only
                 when (flushOne(db, item)) {
                     FlushOutcome.SENT -> sent++
-                    // G-1 (phase 1 / task 2): server permanently rejected the
-                    // item (e.g. customer no longer assigned) — drop it and
-                    // keep flushing; a 403 must not block the whole queue.
-                    FlushOutcome.DROPPED -> { /* continue with the next item */ }
-                    // Package 1: permanent 4xx — keep the event data as
-                    // 'failed' (readable error + manual retry) but keep
-                    // flushing the rest of the queue.
+                    // Package 1 / P06: permanent rejection (400/404/409/422
+                    // and, since P06, 403) — keep the event data as 'failed'
+                    // (readable error + manual retry) but keep flushing the
+                    // rest of the queue.
                     FlushOutcome.FAILED -> { /* continue with the next item */ }
                     FlushOutcome.RETRY -> break // transient failure — keep order
                 }
@@ -116,7 +117,7 @@ object CheckinSync {
         }
     }
 
-    private enum class FlushOutcome { SENT, DROPPED, FAILED, RETRY }
+    private enum class FlushOutcome { SENT, FAILED, RETRY }
 
     /** Package 1: counts of items still waiting (local + in-flight). */
     suspend fun pendingCount(): Int = withContext(Dispatchers.IO) {
@@ -146,7 +147,8 @@ object CheckinSync {
     /**
      * Send one item. multipart with voice → on HTTP 400/404 from an old panel,
      * fall back to JSON text-only (voice dropped, note preserved — never lost).
-     * G-1: 403 = permanently rejected (e.g. unassigned customer) → DROP.
+     * P06: 403 = permanently rejected (e.g. unassigned customer) → keep as
+     * 'failed' (record survives; NOT dropped).
      * Package 1: 400/404/409/422 = permanent rejection by THIS panel → mark
      * 'failed' (keep data + error for the user) and keep the queue flowing.
      * Transient (network/5xx/429) → keep 'pending' + stop the round.
@@ -198,10 +200,18 @@ object CheckinSync {
                     db.pendingCheckinDao().update(current.copy(status = QUEUE_STATUS_PENDING, attempts = item.attempts + 1, lastError = lastError))
                     return FlushOutcome.RETRY
                 }
-                403 -> { // G-1: not assigned (server policy) — permanent, drop it
-                    lastError = e.message
-                    db.pendingCheckinDao().delete(item)
-                    return FlushOutcome.DROPPED
+                403 -> {
+                    // P06 (permanent protocol, Oct 2026): 403 = permanent
+                    // rejection by server policy (e.g. customer no longer
+                    // assigned to this rep) — but the offline record itself
+                    // must NOT be silently destroyed. This REVERSES the old
+                    // G-1 "drop" decision: keep the event as 'failed' with
+                    // the server's error text, visible in the queue UI and
+                    // manually retryable (if the assignment is restored,
+                    // retry succeeds — localId idempotency makes it safe).
+                    lastError = "رد شده توسط سرور (403): ${e.message}"
+                    db.pendingCheckinDao().update(current.copy(status = QUEUE_STATUS_FAILED, attempts = item.attempts + 1, lastError = lastError))
+                    return FlushOutcome.FAILED
                 }
                 400, 404 -> {
                     // old panel rejected multipart → fallback JSON without voice
