@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [Doctor::class, PendingCheckin::class, PendingLocation::class, PlannedVisitEntity::class],
-    version = 9,
+    version = 10,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -28,7 +28,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "medpad.db",
                 )
-                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
                     .build()
                     .also { inst = it }
             }
@@ -99,5 +99,21 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE pending_checkins ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'")
             }
         }
+
+        // Package 8 (phase 2 / task 5): customer city/province from the
+        // offline Iran-cities dataset. Purely ADDITIVE nullable columns —
+        // existing rows (and rows synced from an OLD server without the
+        // fields) simply keep NULL; no data is touched.
+        private val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE doctors ADD COLUMN province TEXT")
+                db.execSQL("ALTER TABLE doctors ADD COLUMN city TEXT")
+            }
+        }
+
+        /** Test-only accessor (unit tests build a throwaway instance on a
+         *  version-9 file and must install the SAME real migrations). */
+        fun migrationsForTest(): Array<Migration> =
+            arrayOf(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
     }
 }

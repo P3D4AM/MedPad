@@ -12,6 +12,9 @@ import androidx.room.Update
 
 /**
  * Customer/doctor entity cached locally (synced with LWW from panel).
+ * Package 8: province/city come from the server's offline Iran-cities
+ * dataset — nullable and absent on old servers, so they parse tolerantly
+ * (optString default null) and default to null for legacy rows.
  */
 @Entity(tableName = "doctors")
 data class Doctor(
@@ -20,6 +23,8 @@ data class Doctor(
     val type: String = "doctor",
     val address: String? = null,
     val phone: String? = null,
+    val province: String? = null,
+    val city: String? = null,
     val lat: Double,
     val lng: Double,
     val radius: Double = 150.0,

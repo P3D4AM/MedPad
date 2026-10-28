@@ -90,6 +90,14 @@
     <string name="customer_saved">ذخیره شد ✓</string>
     <string name="delete_not_allowed">حذف از سمت اپ مجاز نیست</string>
 
+    <!-- Package 8 — offline Iran cities -->
+    <string name="customer_city">شهر (اختیاری)</string>
+    <string name="city_picker_title">انتخاب شهر</string>
+    <string name="city_search_hint">جست‌وجوی شهر یا استان…</string>
+    <string name="city_clear">بدون شهر (حذف)</string>
+    <string name="city_none_found">شهری با این نام پیدا نشد</string>
+    <string name="city_dataset_unavailable">فهرست شهرها در دسترس نیست — بعداً تلاش کنید</string>
+
     <!-- Notifications -->
     <string name="notif_channel_tracking">ردیابی موقعیت</string>
     <string name="notif_channel_alerts">اعلان‌های مدیریتی</string>

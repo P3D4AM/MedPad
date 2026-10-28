@@ -77,7 +77,7 @@ object ApiClient {
         exec(req(if (since != null) "/api/app/customers?since=$since" else "/api/app/customers"))
 
     @Throws(Exception::class)
-    fun createCustomer(name: String, lat: Double, lng: Double, address: String, phone: String, type: String): JSONObject {
+    fun createCustomer(name: String, lat: Double, lng: Double, address: String, phone: String, type: String, city: String? = null, province: String? = null): JSONObject {
         val body = JSONObject()
             .put("name", name)
             .put("lat", lat)
@@ -85,12 +85,17 @@ object ApiClient {
             .put("address", address)
             .put("phone", phone)
             .put("type", type)
+        // package 8 — (city, province) pair from the bundled offline dataset;
+        // omitted entirely when no city was picked (old behavior).
+        if (!city.isNullOrEmpty() && !province.isNullOrEmpty()) {
+            body.put("city", city).put("province", province)
+        }
         return exec(req("/api/app/customers/create", "POST",
             body.toString().toRequestBody("application/json".toMediaType())))
     }
 
     @Throws(Exception::class)
-    fun editCustomer(id: String, name: String, lat: Double, lng: Double, address: String, phone: String, clientUpdatedAt: String): JSONObject {
+    fun editCustomer(id: String, name: String, lat: Double, lng: Double, address: String, phone: String, clientUpdatedAt: String, city: String? = null, province: String? = null): JSONObject {
         val body = JSONObject()
             .put("name", name)
             .put("lat", lat)
@@ -98,6 +103,11 @@ object ApiClient {
             .put("address", address)
             .put("phone", phone)
             .put("updatedAt", clientUpdatedAt)
+        // package 8 — '' clears the pair server-side; non-empty pair is
+        // validated against the server's dataset; null = leave untouched.
+        if (city != null && province != null) {
+            body.put("city", city).put("province", province)
+        }
         return exec(req("/api/app/customers/$id", "PUT",
             body.toString().toRequestBody("application/json".toMediaType())))
     }

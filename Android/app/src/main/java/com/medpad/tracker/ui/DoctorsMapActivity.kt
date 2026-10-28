@@ -3,11 +3,15 @@ package com.medpad.tracker.ui
 import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.os.Bundle
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.LayoutInflater
 import android.view.MotionEvent
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageButton
+import android.widget.ListView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.medpad.tracker.R
@@ -15,7 +19,9 @@ import com.medpad.tracker.api.ApiClient
 import com.medpad.tracker.db.AppDatabase
 import com.medpad.tracker.db.Doctor
 import com.medpad.tracker.sync.CheckinSync
+import com.medpad.tracker.sync.DoctorsSync
 import com.medpad.tracker.sync.TrackerContext
+import com.medpad.tracker.util.IranCities
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -126,7 +132,8 @@ class DoctorsMapActivity : AppCompatActivity() {
                 position = GeoPoint(d.lat, d.lng)
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                 title = d.name
-                snippet = d.address ?: ""
+                // package 8 — city (when set) shown with the address
+                snippet = listOfNotNull(d.city, d.address).joinToString(" — ")
                 setOnMarkerClickListener { _, _ ->
                     editDialog(d, d.lat, d.lng)
                     true
@@ -148,12 +155,65 @@ class DoctorsMapActivity : AppCompatActivity() {
         val edName = view.findViewById<EditText>(R.id.edName)
         val edAddress = view.findViewById<EditText>(R.id.edAddress)
         val edPhone = view.findViewById<EditText>(R.id.edPhone)
+        val edCity = view.findViewById<EditText>(R.id.edCity)
+
+        // package 8 — per-dialog city state. null = untouched (edit: pair is
+        // NOT sent; create: pair omitted). Pair("", "") = explicit clear.
+        var pickedCity: Pair<String, String>? = null
 
         existing?.let {
             edName.setText(it.name)
             edAddress.setText(it.address ?: "")
             edPhone.setText(it.phone ?: "")
+            if (!it.city.isNullOrEmpty()) {
+                edCity.setText(if (!it.province.isNullOrEmpty()) "${it.city} — ${it.province}" else it.city)
+            }
         }
+
+        fun showCityPicker() {
+            val entries = IranCities.load(this)
+            if (entries.isEmpty()) {
+                // honest degradation — no fake list, no crash
+                Toast.makeText(this, R.string.city_dataset_unavailable, Toast.LENGTH_SHORT).show()
+                return
+            }
+            val pickerView = LayoutInflater.from(this).inflate(R.layout.dialog_city_picker, null)
+            val search = pickerView.findViewById<EditText>(R.id.edCitySearch)
+            val list = pickerView.findViewById<ListView>(R.id.lvCities)
+            var currentResults: List<IranCities.Entry> = emptyList()
+            fun render(q: String) {
+                currentResults = IranCities.search(this, q)
+                val labels = ArrayList<String>(currentResults.size + 1)
+                labels.add(getString(R.string.city_clear))
+                currentResults.forEach { labels.add("${it.city} — ${it.province}") }
+                list.adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, labels)
+            }
+            render("")
+            search.addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun afterTextChanged(s: Editable?) = render(s?.toString() ?: "")
+            })
+            val picker = AlertDialog.Builder(this)
+                .setTitle(R.string.city_picker_title)
+                .setView(pickerView)
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+            list.setOnItemClickListener { _, _, position, _ ->
+                if (position == 0) {
+                    pickedCity = Pair("", "")
+                    edCity.setText("")
+                } else {
+                    currentResults.getOrNull(position - 1)?.let { e ->
+                        pickedCity = Pair(e.city, e.province)
+                        edCity.setText("${e.city} — ${e.province}")
+                    }
+                }
+                picker.dismiss()
+            }
+        }
+
+        edCity.setOnClickListener { showCityPicker() }
 
         AlertDialog.Builder(this)
             .setTitle(getString(if (existing == null) R.string.add_customer else R.string.edit_customer))
@@ -164,19 +224,25 @@ class DoctorsMapActivity : AppCompatActivity() {
                     Toast.makeText(this@DoctorsMapActivity, R.string.need_customer, Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
+                val city = pickedCity
                 scope.launch {
                     val ok = withContext(Dispatchers.IO) {
                         try {
-                            val resp: JSONObject = if (existing == null) {
-                                ApiClient.createCustomer(name, lat, lng, edAddress.text.toString().trim(), edPhone.text.toString().trim(), "doctor")
+                            if (existing == null) {
+                                // create: blank/absent pair → omit entirely
+                                val pair = city?.takeIf { it.first.isNotBlank() && it.second.isNotBlank() }
+                                ApiClient.createCustomer(
+                                    name, lat, lng,
+                                    edAddress.text.toString().trim(), edPhone.text.toString().trim(), "doctor",
+                                    pair?.first, pair?.second,
+                                ).optBoolean("ok")
                             } else {
-                                ApiClient.editCustomer(
-                                    existing.id, name, existing.lat, existing.lng,
+                                DoctorsSync.edit(
+                                    existing, name,
                                     edAddress.text.toString().trim(), edPhone.text.toString().trim(),
-                                    java.time.Instant.ofEpochMilli(existing.updatedAt).toString(),
+                                    city?.first, city?.second,
                                 )
                             }
-                            resp.optBoolean("ok")
                         } catch (e: Exception) {
                             false
                         }

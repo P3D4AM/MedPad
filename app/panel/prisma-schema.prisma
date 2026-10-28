@@ -55,6 +55,12 @@ model Customer {
   type      String   @default("doctor") // doctor | pharmacy | clinic | other
   address   String?
   phone     String?
+  // package 8 — city/province from the OFFLINE Iran cities dataset
+  // (src/lib/iran-cities.ts). Nullable & additive: existing rows keep NULL
+  // until edited. The (province, city) pair is validated server-side against
+  // the dataset on every write (panel AND app paths).
+  province  String?
+  city      String?
   lat       Float
   lng       Float
   radius    Float    @default(150) // geofence radius (meters)

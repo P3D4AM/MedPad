@@ -246,9 +246,17 @@ import sqlite3, pickle
 data = pickle.load(open('$W/keep-rows.pkl', 'rb'))
 dst = sqlite3.connect('$W/inst/panel/db/custom.db')
 for t in ('Config', 'Employee', 'Customer', 'Assignment', 'AppToken'):
-    cols = data[t + '_cols']
-    ph = ','.join('?' * len(cols))
-    dst.executemany(f'INSERT OR REPLACE INTO {t} ({\",\".join(cols)}) VALUES ({ph})', data[t])
+    # package-8 fixture fix: the pickled rows carry the CURRENT schema's
+    # columns; the swapped-in OLD database legitimately lacks newer ones
+    # (Customer.province/city). Restore only the columns that exist in the
+    # TARGET — extra (newer) columns simply keep their old-DB defaults.
+    target_cols = [d[1] for d in dst.execute(f'PRAGMA table_info({t})')]
+    src_cols = data[t + '_cols']
+    use = [c for c in src_cols if c in target_cols]
+    col_idx = [src_cols.index(c) for c in use]
+    ph = ','.join('?' * len(use))
+    rows = [tuple(r[i] for i in col_idx) for r in data[t]]
+    dst.executemany(f'INSERT OR REPLACE INTO {t} ({\",\".join(use)}) VALUES ({ph})', rows)
 dst.commit()
 "
   (cd $W/inst && node server-manager.mjs start --no-open > $W/boot2.log 2>&1)

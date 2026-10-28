@@ -280,6 +280,9 @@ object CheckinSync {
                         type = o.optString("type", "doctor"),
                         address = o.optString("address", null),
                         phone = o.optString("phone", null),
+                        // package 8 — city/province (absent on old servers → null)
+                        province = o.optString("province", null),
+                        city = o.optString("city", null),
                         lat = o.optDouble("lat", 0.0),
                         lng = o.optDouble("lng", 0.0),
                         radius = o.optDouble("radius", 150.0),
