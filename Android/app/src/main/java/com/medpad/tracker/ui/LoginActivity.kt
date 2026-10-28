@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.ProgressBar
 import android.widget.TextView
@@ -51,8 +52,13 @@ class LoginActivity : AppCompatActivity() {
         val btn = findViewById<Button>(R.id.btnLogin)
         val progress = findViewById<ProgressBar>(R.id.progress)
         val errBox = findViewById<TextView>(R.id.tvLoginError)
+        val chkRemember = findViewById<CheckBox>(R.id.chkRemember)
 
         url.setText(Session.serverUrl)
+        // package 10 — remembered username (explicit user opt-in; the
+        // password is NEVER stored — auto-login is token-based)
+        chkRemember.isChecked = Session.rememberUsername
+        if (Session.rememberUsername) user.setText(Session.rememberedUsername)
 
         btn.setOnClickListener {
             val sUrl = url.text.toString().trim()
@@ -77,6 +83,9 @@ class LoginActivity : AppCompatActivity() {
                     if (resp.optBoolean("ok")) {
                         Session.serverUrl = sUrl
                         Session.token = resp.getString("token")
+                        // package 10 — persist the username choice
+                        Session.rememberUsername = chkRemember.isChecked
+                        Session.rememberedUsername = if (chkRemember.isChecked) sUser else ""
                         val emp = resp.getJSONObject("employee")
                         Session.employeeId = emp.optString("id")
                         Session.employeeName = emp.optString("name")

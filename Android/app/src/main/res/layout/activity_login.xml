@@ -57,7 +57,7 @@
         <com.google.android.material.textfield.TextInputLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="24dp"
+            android:layout_marginBottom="10dp"
             android:hint="@string/password">
 
             <com.google.android.material.textfield.TextInputEditText
@@ -68,6 +68,16 @@
                 android:imeOptions="actionDone"
                 android:textDirection="ltr" />
         </com.google.android.material.textfield.TextInputLayout>
+
+        <!-- package 10 — remember USERNAME only (never the password; the
+             session itself resumes via the encrypted token) -->
+        <CheckBox
+            android:id="@+id/chkRemember"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="14dp"
+            android:text="@string/remember_username"
+            android:textSize="13sp" />
 
         <!-- v1.9.13-dev.2: employees are created in the PANEL (Employees tab),
              not with the admin account — the #1 source of "cannot connect"
@@ -109,7 +119,19 @@
             android:id="@+id/progress"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="18dp"
+            android:layout_marginTop="14dp"
             android:visibility="gone" />
+
+        <!-- package 10 — honest security note: auto-login works via the
+             ENCRYPTED token; the password is never stored -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="@string/login_secure_note"
+            android:textSize="11sp"
+            android:textColor="#5f6368"
+            android:gravity="center"
+            android:textDirection="firstStrong" />
     </LinearLayout>
 </ScrollView>

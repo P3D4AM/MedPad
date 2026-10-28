@@ -106,6 +106,10 @@
     <string name="gps_disabled">سرویس موقعیت مکانی گوشی خاموش است. از تنظیمات سریع (پر کشیدن صفحهٔ وضعیت) «Location» را روشن کنید و دوباره تلاش کنید.</string>
     <string name="open_settings">باز کردن تنظیمات</string>
 
+    <!-- Package 10 — login & secure settings -->
+    <string name="remember_username">نام کاربری را به یاد بسپار</string>
+    <string name="login_secure_note">ورود خودکار با توکنِ رمزنگاری‌شده انجام می‌شود؛ رمز عبور هرگز ذخیره نمی‌شود.</string>
+
     <!-- Notifications -->
     <string name="notif_channel_tracking">ردیابی موقعیت</string>
     <string name="notif_channel_alerts">اعلان‌های مدیریتی</string>
