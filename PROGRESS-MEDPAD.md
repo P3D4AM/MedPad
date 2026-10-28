@@ -19,7 +19,7 @@
 
 ## ۲. وضعیت فعلی مخزن (آخرین راستی‌آزمایی: Oct 28 — عامل بسته‌های ۶+)
 
-- **آخرین SHA تأییدشدهٔ `develop`:** `c1f199e` — «feat(customers-cities): package 8 …» (راستی‌آزمایی با fetch پس از Push؛ Oct 28)
+- **آخرین SHA تأییدشدهٔ `develop`:** `7b0996a9dfdad8966cbdc690bfbe85db4007d249` — «feat(map-completion): package 9 …» (راستی‌آزمایی با fetch پس از Push؛ Oct 28)
 - بسته‌های ۰ تا ۴ روی `develop` پوش و تأیید شده‌اند: `3be0bb0` (۰) · `9023eb9` (۱) · `68348df` (۲) · `0a610fc` (۳) · `eab7279` (۴).
 - آخرین انتشار: **v1.9.13-dev.2** (2026-10-26؛ Pre-release با ZIP پنل + APK + هش‌ها). **هیچ dev.3 وجود ندارد.**
 - نسخه‌های فعلی: INSTALLER_VER / APP-VERSION = `1.9.13-dev.2` · Android versionCode=13, versionName=`1.9.13-dev.2` · Room DB v10 · Prisma با `PlannedVisit` + `AppNotification.eventKey` + `PanelNotification` + `AuditLog` + `Customer.city/province` + تنظیم `defaultCity` (بستهٔ ۹).
@@ -71,7 +71,7 @@
 | ۶ | درخواست انتساب مشتری + تأیید/رد | ✅ | `73e720f` |
 | ۷ | انتساب گروهی و لغو انتساب | ✅ | `22afd62` |
 | ۸ | فرم مشتری + شهرهای ایران (آفلاین) | ✅ | `c1f199e` |
-| ۹ | نقشهٔ مشتریان (شهر پیش‌فرض/زوم/GPS) | ✅ | همین کامیت (گزارش پایین) |
+| ۹ | نقشهٔ مشتریان (شهر پیش‌فرض/زوم/GPS) | ✅ | `7b0996a9dfdad8966cbdc690bfbe85db4007d249` |
 | ۱۰ | ورود و تنظیمات اپ (B1/B2/مدرپ) | ⬜ | — |
 | ۱۱ | اعلان‌ها و تنظیمات اپ (B10/B11) | ⬜ | — |
 | ۱۲ | یکپارچه‌سازی، امنیت، انتشار نهایی | ⬜ | — |
