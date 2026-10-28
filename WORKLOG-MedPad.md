@@ -1346,3 +1346,30 @@ Stage Summary:
 - پوشش ریلیز: ۴۱ کامیت بعد از dev.2 — بسته‌های ۶ تا ۱۱ (انتساب، انتساب گروهی، شهرها، نقشه، ورود امن، اعلان اپ) + مرکز اعلان‌های پنل (۵-A..D) + P06 (حفظ 403) + P07 (تحویل اعلان) + P08 (fallback چک‌این) + P09 (هشدار HTTP عمومی).
 - آزمون: اندروید ۴۴/۴۴ + assembleDebug + apksigner/zipalign روی کامیت ریلیز؛ پنل با استناد diff خالی به رگرسیون ۴۲۵ چک ۵-D. اجرانشده: گوشی/ویندوز واقعی.
 - قدم بعدی: **P10** (سیاست Backup اندروید) طبق بخش ۹ پروتکل.
+
+---
+Task ID: 47
+Agent: main (Z.ai — permanent-protocol session)
+Task: فاز P10 — بررسی سیاست پشتیبان‌گیری Android (طبق پروتکل دائمی؛ ادامهٔ مستقیم پس از انتشار dev.3 / تسک ۴۶)
+Date: Oct 29, 2026
+
+Work Log:
+- **بازیابی §۳:** develop=`80a40f9` همگام ریموت (fetch + ls-remote) · working tree تمیز · جدول فازها با API گیت‌هاب تطبیق شد: P00، P05-A..D، P06..P09 همه DONE_VERIFIED؛ ریلیز v1.9.13-dev.3 (id 427282655، ۴ asset، prerelease) موجود و تأیید شد — دستور مالک برای انتشار **قبلاً اجرایی شده بود و تکرار نشد** · main=`8db3319` دست‌نخورده · اولین فاز ناقص = **P10**.
+- **نقشهٔ داده (از سورس، نه حدس):** `medpad_session.xml` = server_url + blob توکن `enc:v1:` (کلید در AndroidKeyStore) + هویت مدرپ · Room DB (`database/`) = مشتریان (PHI پزشکی)، بازدید + GPS، صف آفلاین PendingCheckin، برنامه‌ها، رکوردهای اعلان · `files/voice/` = صداهای m4a چک‌این تا قبل از ارسال · `cache/voice/` = کش پخش (به‌طور پیش‌فرض خارج از بکاپ) · prefs غیرحساس: `medpad_login` (username به‌خاطر‌سپاری‌شده)، `medpad_plans` (فقط timestamp و server_today)، `medpad_notif`، `map_defaults`، `osmdroid_prefs`.
+- **نقص اثبات‌شده:** `allowBackup="true"` بدون هیچ `fullBackupContent`/`dataExtractionRules` → رفتار پیش‌فرض Auto Backup: تقریباً کل `/data/data/` شامل **PHI مشتریان + صداهای بازدید + blob توکن + آدرس سرور** به بکاپ ابری گوگل می‌رود؛ در API ≤30 همین محتوا با `adb backup` هم قابل استخراج است. برای یک ترکر پزشکی، خروج دادهٔ سلامت از محدودهٔ سازمان ریسک حریم خصوصی واقعی است.
+- **تحلیل Keystore/توکن:** کلید AndroidKeyStore هرگز در بکاپ یا device-transfer منتقل نمی‌شود → blob بازیابی‌شده روی دستگاه جدید/بعد از factory-reset قابل رمزگشایی نیست → منطق موجود `Session.token` آن را **حذف صادقانه** می‌کند و ورود مجدد می‌طلبد (نیازی به تغییر کد نبود؛ فقط اثبات تستی).
+- **سیاست P10 (تدوین و پیاده شد):**
+  1. **بکاپ ابری (هر دو نسل API، یکسان):** exclude کل `database` + `file/voice` + `sharedpref/medpad_session.xml` — هیچ PHI/صوت/blob توکن هرگز به cloud نمی‌رسد؛ `disableIfNoEncryptionCapabilities="true"` در API 31+ (بدون رمزنگاری transport، اصلاً بکاپ نشود).
+  2. **انتقال دستگاه‌به‌دستگاه (API 31+، مستقیم/رمزنگاری‌شده/بدون cloud):** فقط `medpad_session.xml` exclude → **صف آفلاین و کش مشتریان هنگام تعویض گوشی حفظ می‌شود**؛ توکن به‌هرحال غیرقابل‌انتقال است → ورود مجدد صادقانه.
+  3. `allowBackup` عمداً **true** ماند: خاموش‌کردنش انتقال دادهٔ میدانی در تعویض گوشی را کاملاً می‌کشت و با قاعدهٔ «نصب‌های موجود نشکنند» ناسازگار بود.
+  4. رویکرد exclude-by-list: هر فایل prefs حساسِ آینده باید به **هر دو** فایل قواعد اضافه شود — `BackupPolicyTest` نگهبان این قرارداد است.
+- **پیاده‌سازی (کوچک‌ترین تغییر):** ۲ فایل جدید `res/xml/backup_rules.xml` (fullBackupContent، API 24–30) و `res/xml/data_extraction_rules.xml` (API 31+) + `AndroidManifest.xml` (+۲ attribute سیم‌کشی + `xmlns:tools` + `tools:targetApi="31"` + کامنت سیاست). صفر تغییر رفتاری runtime برای نصب‌های موجود؛ فقط بکاپ‌های cloud آیندهٔ سیستم محدود می‌شوند.
+- **تست‌های جدید (۵):** `BackupPolicyTest` (۳ تست JVM — فایل‌های **واقعی کامیت‌شده** را parse می‌کند: قواعد cloud برابر قرارداد، device-transfer فقط session، بدون include، disableIfNoEncryptionCapabilities، سیم‌کشی manifest + وجود فایل‌ها) · `SessionPostRestoreTest` (۲ تست Robolectric — سناریوی پس از restore: blob `enc:v1` غیرقابل‌رمزگشایی → token=="" و حذف blob و isLoggedIn==false و حفظ serverUrl/هویت؛ دستگاه تازه بدون session → ورود لازم).
+- **راستی‌آزمایی (از خروجی واقعی):** `testDebugUnitTest` + `assembleDebug` → BUILD SUCCESSFUL در 37s؛ نتایج از XML واقعی Gradle: **۴۹ تست / ۰ شکست / ۰ خطا / ۰ اسکیپ** (۱۳ کلاس؛ ۴۴ موجود بدون رگرسیون + ۵ جدید) · APK 8,943,647 بایت؛ `aapt`: versionCode=14 / versionName=1.9.13-dev.3 (حفظ شد — ریلیز جدیدی مجاز نشده) · `zipalign -c` OK · `apksigner verify`: کلید Debug استاندارد (SHA-256 `bb9080d4…9f8` — همان زنجیرهٔ dev.1/dev.2/dev.3).
+- **درس‌های این فاز:** (۱) فلگ heap باید از `JAVA_TOOL_OPTIONS=-Xmx1536m` برود نه CLI گرادل (`Unknown command-line option '-X'`)؛ (۲) یک خطای تایپی (`assertEquals(...)[0]`) → شکست کامپایل تست → اصلاح و سبز (۴۹/۴۹)؛ (۳) client گرادل پس از اتمام build ممکن است معلق بماند (الگوی شناخته‌شدهٔ این سندباکس) — نتیجه از لاگ کامل + XML واقعی خوانده شد، نه از کد خروج شل.
+- **تست‌های اجرانشده (صادقانه):** خود BackupManager/cloud backup/restore واقعی (`bmgr`، حساب گوگل) و انتقال D2D واقعی نیازمند دستگاه فیزیکی است → NOT_RUN؛ ریسک باقی: اگر سازوکار انتقال OEM قدیمی (pre-31) session را از مسیر خودش جابه‌جا کند، رفتار ایمنِ تست‌شدهٔ Session (حذف blob + ورود مجدد) همچنان برقرار است.
+- تغییرات این فاز: `backup_rules.xml` و `data_extraction_rules.xml` (جدید) + `AndroidManifest.xml` + ۲ تست جدید + همین دو سند. `main` دست‌نخورده (`8db3319`). بدون ریلیز؛ versionCode حفظ شد.
+
+Stage Summary:
+- P10 تکمیل محلی شد: سیاست Backup صریح و عملی — دادهٔ پزشکی، صداهای بازدید و blob توکن هرگز به بکاپ ابری نمی‌روند؛ تعویض گوشی صف آفلاین را حفظ می‌کند و ورود مجدد صادقانه می‌طلبد. اثبات: ۵ تست جدید + ۴۹/۴۹ کل + APK موفق.
+- قدم بعدی: کامیت/پوش این فاز، تأیید SHA از GitHub، سپس **P11** (سورس پنل و ساخت تکرارپذیر) طبق بخش ۹ پروتکل.

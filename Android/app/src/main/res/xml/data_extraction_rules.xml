@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  P10 backup policy — data extraction rules (API 31+).
+
+  Two independent channels are configured:
+
+  1. cloud-backup (Google servers):
+     Same exclusions as the legacy backup_rules.xml — Room DB (medical PHI),
+     visit voice memos and the session prefs (token blob + server URL +
+     employee identity) never leave the device towards the cloud.
+     disableIfNoEncryptionCapabilities: on a device that cannot encrypt its
+     backup transport at all, skip the backup entirely rather than ship
+     non-sensitive data in the clear.
+
+  2. device-transfer (direct, encrypted, device-to-device, no cloud):
+     Field data MUST survive a phone upgrade — the offline check-in queue
+     and the customer cache are the app's whole point offline-first.
+     Therefore only medpad_session.xml is excluded here: the token blob's
+     AndroidKeyStore key never transfers, so it could never decrypt on the
+     new device anyway (Session detects this, drops the blob and asks for
+     a fresh, honest login — see SessionPostRestoreTest).
+
+  Everything NOT excluded is extracted — if a future prefs file holds
+  sensitive data, add it here AND to backup_rules.xml (guarded by
+  BackupPolicyTest).
+-->
+<data-extraction-rules>
+    <cloud-backup disableIfNoEncryptionCapabilities="true">
+        <exclude domain="database" path="." />
+        <exclude domain="file" path="voice" />
+        <exclude domain="sharedpref" path="medpad_session.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="medpad_session.xml" />
+    </device-transfer>
+</data-extraction-rules>
