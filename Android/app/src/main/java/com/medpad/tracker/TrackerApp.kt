@@ -21,6 +21,7 @@ class TrackerApp : Application() {
         instance = this
         Session.init(this)
         com.medpad.tracker.sync.TrackerContext.init(this)
+        com.medpad.tracker.util.NotificationPrefs.init(this) // package 11
         createChannels()
     }
 

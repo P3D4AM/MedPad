@@ -28,6 +28,7 @@ import com.medpad.tracker.db.PendingLocation
 import com.medpad.tracker.location.DeviceGps
 import com.medpad.tracker.sync.AppNotifier
 import com.medpad.tracker.sync.CheckinSync
+import com.medpad.tracker.util.NotificationPrefs
 import com.medpad.tracker.ui.MainActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -138,11 +139,14 @@ class TrackingService : LifecycleService() {
                     } catch (_: Exception) {
                         /* offline — skip, will re-trigger */
                     }
-                    AppNotifier.notify(
-                        this@TrackingService, doc.id.hashCode(),
-                        getString(R.string.notif_nearby, doc.name),
-                        "فاصله حدود ${dist.roundToInt()} متر",
-                    )
+                    // package 11 — local proximity alert honours the user's toggle
+                    if (NotificationPrefs.proximityEnabled) {
+                        AppNotifier.notify(
+                            this@TrackingService, doc.id.hashCode(),
+                            getString(R.string.notif_nearby, doc.name),
+                            "فاصله حدود ${dist.roundToInt()} متر",
+                        )
+                    }
                 }
             }
         }
@@ -157,23 +161,24 @@ class TrackingService : LifecycleService() {
                 if (Session.isLoggedIn) CheckinSync.flush()
             } catch (_: Exception) { /* keep queue */ }
         }
-        // notification poll
-        if (now - lastNotifPollAt > 40_000) {
+        // notification poll (package 11: honours the user's toggle and dedups
+        // across polls/restarts via the persisted shown-id set — a poll that
+        // succeeds while the mark-read call fails can no longer re-fire the
+        // same notification on the next poll)
+        if (now - lastNotifPollAt > 40_000 && NotificationPrefs.serverEnabled) {
             lastNotifPollAt = now
             try {
                 if (Session.isLoggedIn) {
                     val resp = ApiClient.notifications()
-                    val unread = resp.optInt("unread", 0)
                     val arr = resp.optJSONArray("notifications")
                     if (arr != null) {
-                        val shown = HashSet<Int>()
                         for (i in 0 until arr.length()) {
                             val n = arr.getJSONObject(i)
                             if (n.has("readAt") && !n.isNull("readAt")) continue
-                            val id = n.getString("id").hashCode()
-                            if (shown.contains(id)) continue
-                            shown.add(id)
-                            AppNotifier.notify(this@TrackingService, id, n.optString("title"), n.optString("body"))
+                            val id = n.getString("id")
+                            if (NotificationPrefs.wasShown(applicationContext, id)) continue
+                            NotificationPrefs.markShown(applicationContext, id)
+                            AppNotifier.notify(this@TrackingService, id.hashCode(), n.optString("title"), n.optString("body"))
                         }
                     }
                     ApiClient.markNotificationsRead(null)

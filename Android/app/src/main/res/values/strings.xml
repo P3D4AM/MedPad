@@ -110,6 +110,12 @@
     <string name="remember_username">نام کاربری را به یاد بسپار</string>
     <string name="login_secure_note">ورود خودکار با توکنِ رمزنگاری‌شده انجام می‌شود؛ رمز عبور هرگز ذخیره نمی‌شود.</string>
 
+    <!-- Package 11 — app notification settings -->
+    <string name="notif_settings_title">تنظیمات اعلان‌ها</string>
+    <string name="notif_server_toggle">اعلان‌های سرور (انتساب، برنامه‌ها، پیام مدیر)</string>
+    <string name="notif_proximity_toggle">هشدار نزدیک‌شدن به مشتری</string>
+    <string name="notif_semantics_note">اعلان‌ها هنگام باز بودن برنامه یا فعال‌بودن ردیابی دریافت می‌شوند (هر ~۴۰ ثانیه از سرور بررسی می‌شود). اعلان لحظه‌ای در پس‌زمینه (Push) در این نسخه وجود ندارد و ادعا نمی‌شود.</string>
+
     <!-- Notifications -->
     <string name="notif_channel_tracking">ردیابی موقعیت</string>
     <string name="notif_channel_alerts">اعلان‌های مدیریتی</string>

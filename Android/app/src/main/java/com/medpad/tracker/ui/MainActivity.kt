@@ -14,11 +14,14 @@ import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.widget.Button
+import android.widget.ImageButton
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.ContextCompat
 import com.medpad.tracker.R
 import com.medpad.tracker.Session
@@ -26,6 +29,7 @@ import com.medpad.tracker.location.TrackingService
 import com.medpad.tracker.sync.CheckinSync
 import com.medpad.tracker.sync.PlansSync
 import com.medpad.tracker.sync.TrackerContext
+import com.medpad.tracker.util.NotificationPrefs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -88,6 +92,9 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<TextView>(R.id.tvHello).text =
             getString(R.string.hello, Session.employeeName.ifEmpty { "" })
+
+        // package 11 — in-app notification settings (local + server toggles)
+        findViewById<ImageButton>(R.id.btnNotifSettings).setOnClickListener { showNotifSettings() }
 
         findViewById<Button>(R.id.btnLogout).setOnClickListener {
             AlertDialog.Builder(this)
@@ -185,6 +192,42 @@ class MainActivity : AppCompatActivity() {
         }
         pendingMicAction = action
         micPermission.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    /** package 11 — notification settings: LOCAL proximity alerts and
+     *  SERVER notifications toggles, with an HONEST note about delivery
+     *  semantics (no background push is claimed — no FCM infrastructure). */
+    private fun showNotifSettings() {
+        val pad = (16 * resources.displayMetrics.density).toInt()
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad / 2, pad, 0)
+        }
+        val swServer = SwitchCompat(this).apply {
+            text = getString(R.string.notif_server_toggle)
+            isChecked = NotificationPrefs.serverEnabled
+        }
+        val swProximity = SwitchCompat(this).apply {
+            text = getString(R.string.notif_proximity_toggle)
+            isChecked = NotificationPrefs.proximityEnabled
+        }
+        val note = TextView(this).apply {
+            text = getString(R.string.notif_semantics_note)
+            textSize = 12f
+            setPadding(0, pad, 0, 0)
+        }
+        box.addView(swServer)
+        box.addView(swProximity)
+        box.addView(note)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.notif_settings_title)
+            .setView(box)
+            .setPositiveButton(R.string.save) { _, _ ->
+                NotificationPrefs.serverEnabled = swServer.isChecked
+                NotificationPrefs.proximityEnabled = swProximity.isChecked
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
     }
 
     private fun showCheckin() {
