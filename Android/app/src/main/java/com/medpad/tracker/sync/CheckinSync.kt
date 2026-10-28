@@ -214,13 +214,32 @@ object CheckinSync {
                     return FlushOutcome.FAILED
                 }
                 400, 404 -> {
-                    // old panel rejected multipart → fallback JSON without voice
+                    // old panel rejected multipart → fallback JSON without
+                    // voice. P08 (permanent protocol): the voice drop is the
+                    // ONLY deliberate loss here (old panels ≤1.7 cannot
+                    // receive a file; the app shows the old-panel warning and
+                    // this comment documents the drop). Everything else the
+                    // event recorded is now SENT TOO: old panels ignore the
+                    // unknown JSON keys harmlessly, and any server that
+                    // understands them (current panels parse multipart only,
+                    // so the fallback can only succeed against old/JSON
+                    // servers) receives the full event — no silent discard of
+                    // time/location any more.
                     if (item.kind == "checkin" && voice != null) {
                         try {
                             val body = JSONObject()
                                 .put("customerId", item.customerId ?: "")
                                 .put("note", item.note)
                                 .put("localId", item.localId)
+                                // P08: mirror ApiClient.checkin's multipart
+                                // fields exactly (v1.9.12 real event time +
+                                // G-6 GPS fix and accuracy)
+                                .put("clientAt", ApiClient.isoTime(item.createdAt))
+                            if (item.lat != null && item.lng != null) {
+                                body.put("lat", item.lat)
+                                body.put("lng", item.lng)
+                                item.accuracy?.let { if (it > 0) body.put("accuracy", it) }
+                            }
                             val resp = ApiClientFallback.postJson("/api/app/checkin", body)
                             if (resp.optBoolean("ok")) {
                                 db.pendingCheckinDao().delete(item)

@@ -220,8 +220,10 @@ object ApiClient {
     fun mediaUrl(voicePath: String): String =
         "${Session.serverUrl}/api/media/$voicePath?token=${Session.token}"
 
-    /** Epoch ms → ISO 8601 instant (UTC) for the server's clientAt field. */
-    private fun isoTime(epochMs: Long): String =
+    /** Epoch ms → ISO 8601 instant (UTC) for the server's clientAt field.
+     *  internal (P08) so the offline-queue fallback builds the identical
+     *  format — one source of truth for the wire contract. */
+    internal fun isoTime(epochMs: Long): String =
         java.time.Instant.ofEpochMilli(epochMs).toString()
 
     /** Raw authenticated GET returning bytes (voice download for playback) */
