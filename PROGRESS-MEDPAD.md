@@ -19,7 +19,7 @@
 
 ## ۲. وضعیت فعلی مخزن (آخرین راستی‌آزمایی: Oct 29 — عامل فاز ۵-A)
 
-- **آخرین SHA تأییدشدهٔ `develop`:** `89cfb958e54ddd36d77c50b5f335eefd4eb6ec28` — «test(p5a): phase 5-A — rebuild panel-bell test infra …» (راستی‌آزمایی با fetch تازه + API گیت‌هاب؛ Oct 29 — عامل فاز ۵-A). `main` دست‌نخورده: `8db3319`.
+- **آخرین SHA تأییدشدهٔ `develop`:** `4386f192241b9c1d3a8d818946fada49bc71bf69` — «feat(panel-notifications): phase 5-B — API logic completion …» (راستی‌آزمایی با fetch تازه + API گیت‌هاب؛ Oct 29 — عامل پروتکل دائمی). `main` دست‌نخورده: `8db3319`.
 - بسته‌های ۰ تا ۴ و ۶ تا ۱۱ روی `develop` پوش و تأیید شده‌اند: `3be0bb0` (۰) · `9023eb9` (۱) · `68348df` (۲) · `0a610fc` (۳) · `eab7279` (۴) · `73e720f` (۶) · `22afd62` (۷) · `c1f199e` (۸) · `7b0996a` (۹) · `e42cc52` (۱۰) · `eaf48d1` (۱۱).
 - آخرین انتشار: **v1.9.13-dev.2** (2026-10-26؛ Pre-release با ZIP پنل + APK + هش‌ها). **هیچ dev.3 وجود ندارد** (تأیید مجدد با API ریلیزها؛ Oct 29).
 - نسخه‌های فعلی: INSTALLER_VER / APP-VERSION = `1.9.13-dev.2` · Android versionCode=13, versionName=`1.9.13-dev.2` · Room DB v10 · Prisma با `PlannedVisit` + `AppNotification.eventKey` + `PanelNotification` + `AuditLog` + `Customer.city/province` + تنظیم `defaultCity` (بستهٔ ۹).
@@ -61,7 +61,7 @@
 |---|---|---|---|
 | P00 | بازیابی وضعیت و تثبیت نقطهٔ شروع | ✅ DONE_VERIFIED | فاز صفر `5e5d911` + تطبیق تازهٔ Oct 29 (API گیت‌هاب) + همین بخش |
 | P05-A | بازتولید و بررسی زیرساخت اعلان‌ها | ✅ DONE_VERIFIED | `89cfb95` (SHA ریموت در `558d056` تأیید شد) — repro ۵۲/۵۲ · NI ۴۳/۴۳ · قرارداد API مستند (بخش ۲.۱) |
-| P05-B | منطق مرکز اعلان‌ها (API/دسترسی/شمارنده) | 🔶 تکمیل‌شده در کامیت این فاز (Push و تأیید SHA ریموت بلافاصله پس از آن — ثبت در کامیت مستندات بعدی → DONE_VERIFIED) | وصلهٔ `panel-src-phase2-package5.patch` + `test-panel-notifications-api.sh` → ۶۲/۶۲ full · NI ۴۳/۴۳ رگرسیون · baseline ۳۲+۰+۴skip |
+| P05-B | منطق مرکز اعلان‌ها (API/دسترسی/شمارنده) | ✅ DONE_VERIFIED | `4386f19` (SHA ریموت با fetch + API تأیید شد) — وصلهٔ `panel-src-phase2-package5.patch` + `test-panel-notifications-api.sh` → ۶۲/۶۲ full · NI ۴۳/۴۳ رگرسیون · baseline ۳۲+۰+۴skip |
 | P05-C | رابط کاربری مرکز اعلان‌ها | ⬜ NOT_STARTED | — |
 | P05-D | رگرسیون و بسته‌بندی اعلان‌ها | ⬜ NOT_STARTED | — |
 | P06 | حفظ دادهٔ آفلاین در خطای 403 | ⬜ NOT_STARTED — **کار جدید**: بستهٔ ۱ صف را پایدار کرد اما 403 فعلاً DROP خاموش است؛ پروتکل انتقال به وضعیت «نیازمند بررسی» را می‌طلبد | `9023eb9` (بستهٔ ۱، پیش‌زمینه) |

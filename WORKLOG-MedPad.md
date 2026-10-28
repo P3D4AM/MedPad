@@ -1151,3 +1151,4 @@ Work Log:
 
 Stage Summary:
 - فاز ۵-B کامل: قرارداد API اعلان‌های پنل مستند/آزمون‌شد (62 چک full + 43 رگرسیون + 32 baseline)، دو نقص اثبات‌شده در سورس اصلاح و در وصلهٔ panel-src-phase2-package5 ماندگار شد. UI فاز ۵-C باید totalUnread ?? unread مصرف کند، فهرست را «آخرین اعلان‌ها» بنامد، و پس از mark-all همیشه refetch کند.
+- تأیید Push فاز ۵-B: SHA ریموت `4386f192241b9c1d3a8d818946fada49bc71bf69` با fetch تازه + API گیت‌هاب تأیید شد (develop). `main` دست‌نخورده: `8db3319` (تأیید API). وضعیت P05-B → DONE_VERIFIED.
