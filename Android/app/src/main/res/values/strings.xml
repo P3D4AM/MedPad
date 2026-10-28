@@ -10,6 +10,10 @@
     <string name="password">رمز عبور</string>
     <string name="login">ورود</string>
     <string name="login_failed">ورود ناموفق — آدرس سرور و رمز را چک کنید</string>
+    <!-- P09: informed consent for public cleartext (HTTP) server addresses -->
+    <string name="cleartext_warning_title">اتصال ناامن</string>
+    <string name="cleartext_warning_body">این آدرس روی شبکهٔ عمومی است و با HTTP (بدون رمزنگاری) وصل می‌شود؛ رمز ورود، توکن نشست، اطلاعات مشتریان و فایل‌های صوتی روی مسیر قابل شنود و دست‌کاری‌اند. اگر سرور شما در شبکهٔ محلی است، آدرس داخلی (مانند 192.168.x.x) را وارد کنید؛ در غیر این صورت ترجیحاً از HTTPS استفاده کنید.</string>
+    <string name="continue_anyway">با این حال ادامه بده</string>
     <string name="logging_in">در حال ورود…</string>
 
     <!-- v1.9.13-dev.2: actionable login diagnostics (user report #2:

@@ -9,10 +9,12 @@ import android.widget.EditText
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.medpad.tracker.R
 import com.medpad.tracker.Session
 import com.medpad.tracker.api.ApiClient
+import com.medpad.tracker.util.NetSecurity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -37,6 +39,10 @@ import org.json.JSONException
 class LoginActivity : AppCompatActivity() {
 
     private val scope = CoroutineScope(Dispatchers.Main)
+
+    /** P09: set when the user explicitly acknowledged the public-cleartext
+     *  warning for the address currently being attempted. */
+    private var cleartextAck = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -73,6 +79,24 @@ class LoginActivity : AppCompatActivity() {
                 Toast.makeText(this, R.string.login_failed, Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
+            // P09 (permanent protocol): honest one-time warning for a PUBLIC
+            // cleartext address — username/password/token/voice would travel
+            // unencrypted and be sniffable/tamperable on a hostile network.
+            // Private/LAN addresses and HTTPS never warn, so existing LAN
+            // installs are completely unaffected.
+            if (NetSecurity.needsCleartextWarning(sUrl) && !cleartextAck) {
+                AlertDialog.Builder(this)
+                    .setTitle(R.string.cleartext_warning_title)
+                    .setMessage(R.string.cleartext_warning_body)
+                    .setPositiveButton(R.string.continue_anyway) { _, _ ->
+                        cleartextAck = true
+                        btn.performClick() // re-run with the acknowledgment
+                    }
+                    .setNegativeButton(R.string.cancel, null)
+                    .show()
+                return@setOnClickListener
+            }
+            cleartextAck = false
             btn.isEnabled = false
             progress.visibility = View.VISIBLE
             scope.launch {
