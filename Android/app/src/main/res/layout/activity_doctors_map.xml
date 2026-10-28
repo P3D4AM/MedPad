@@ -59,4 +59,18 @@
         android:textSize="11sp"
         android:gravity="center"
         android:textColor="@color/gray_500" />
+
+    <!-- package 9 — go to my location (real GPS fix only; never customer
+         coordinates) -->
+    <ImageButton
+        android:id="@+id/btnLocate"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_gravity="bottom|start"
+        android:layout_margin="14dp"
+        android:layout_marginBottom="44dp"
+        android:background="@drawable/voice_btn_bg"
+        android:src="@drawable/ic_locate"
+        app:tint="@color/white"
+        android:contentDescription="@string/my_location" />
 </FrameLayout>

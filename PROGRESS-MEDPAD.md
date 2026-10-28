@@ -22,8 +22,8 @@
 - **آخرین SHA تأییدشدهٔ `develop`:** `c1f199e` — «feat(customers-cities): package 8 …» (راستی‌آزمایی با fetch پس از Push؛ Oct 28)
 - بسته‌های ۰ تا ۴ روی `develop` پوش و تأیید شده‌اند: `3be0bb0` (۰) · `9023eb9` (۱) · `68348df` (۲) · `0a610fc` (۳) · `eab7279` (۴).
 - آخرین انتشار: **v1.9.13-dev.2** (2026-10-26؛ Pre-release با ZIP پنل + APK + هش‌ها). **هیچ dev.3 وجود ندارد.**
-- نسخه‌های فعلی: INSTALLER_VER / APP-VERSION = `1.9.13-dev.2` · Android versionCode=13, versionName=`1.9.13-dev.2` · Room DB v10 (بستهٔ ۸: ستون‌های city/province داکتر) · Prisma با `PlannedVisit` + `AppNotification.eventKey` + `PanelNotification` + `AuditLog` + `Customer.city/province`.
-- زنجیرهٔ بازسازی سورس پنل (تست‌شده، تمیز): `bd9c80b:medpad-full-1.9/inst-stage/panel-src` + ۱۰ وصله به‌ترتیب: `phase1-task1` → `phase2-remediation` → `phase2-task1` → `phase2-task2` → `phase2-dev2-fixes` → `phase2-package4` → `phase2-madrep` → `phase2-package6` → `phase2-package7` → `phase2-package8` (همه در `patches/`؛ بدون زنگ بستهٔ ۵).
+- نسخه‌های فعلی: INSTALLER_VER / APP-VERSION = `1.9.13-dev.2` · Android versionCode=13, versionName=`1.9.13-dev.2` · Room DB v10 · Prisma با `PlannedVisit` + `AppNotification.eventKey` + `PanelNotification` + `AuditLog` + `Customer.city/province` + تنظیم `defaultCity` (بستهٔ ۹).
+- زنجیرهٔ بازسازی سورس پنل (تست‌شده، تمیز): `bd9c80b:medpad-full-1.9/inst-stage/panel-src` + ۱۱ وصله به‌ترتیب: `phase1-task1` → `phase2-remediation` → `phase2-task1` → `phase2-task2` → `phase2-dev2-fixes` → `phase2-package4` → `phase2-madrep` → `phase2-package6` → `phase2-package7` → `phase2-package8` → `phase2-package9` (همه در `patches/`؛ بدون زنگ بستهٔ ۵).
 - محیط ساخت پنل: `scripts/build-panel.sh` در سندباکس فعلی موجود است (بازسازی‌شده در نشست بستهٔ ۵؛ گام‌ها: prisma generate سه‌سکویی + next build standalone + کپی دستی انجین‌ها/static/public + template.db + چک‌های سخت‌سازی).
 - محیط ساخت APK (باید بازسازی شود): JDK کامل (JRE سیستم javac/jlink ندارد) + cmdline-tools + build-tools 34.0.0 + platform android-34؛ `./gradlew assembleDebug`؛ امضا با کلید Debug.
 
@@ -71,7 +71,7 @@
 | ۶ | درخواست انتساب مشتری + تأیید/رد | ✅ | `73e720f` |
 | ۷ | انتساب گروهی و لغو انتساب | ✅ | `22afd62` |
 | ۸ | فرم مشتری + شهرهای ایران (آفلاین) | ✅ | `c1f199e` |
-| ۹ | نقشهٔ مشتریان (شهر پیش‌فرض/زوم/GPS) | ⬜ | — |
+| ۹ | نقشهٔ مشتریان (شهر پیش‌فرض/زوم/GPS) | ✅ | همین کامیت (گزارش پایین) |
 | ۱۰ | ورود و تنظیمات اپ (B1/B2/مدرپ) | ⬜ | — |
 | ۱۱ | اعلان‌ها و تنظیمات اپ (B10/B11) | ⬜ | — |
 | ۱۲ | یکپارچه‌سازی، امنیت، انتشار نهایی | ⬜ | — |
@@ -307,3 +307,24 @@ Push: موفق / ناموفق
 - **امنیت:** اعتبارسنجی شهر فقط سمت سرور؛ 401 بدون نشست؛ G-1 (فهرست مشتریان اپ فقط منتسب‌ها) دوباره تست شد؛ هیچ مختصات جعلی تولید نمی‌شود.
 - **باقی‌مانده:** تست مرورگر واقعی پنل و دستگاه واقعی؛ شهر در جزئیات برنامهٔ بازدید (PlannedVisit کش‌شده) نشان داده نشد — آدرس هست، شهر بعداً در صورت نیاز.
 - **قدم بعدی:** بستهٔ ۹ — تکمیل نقشه (شهر پیش‌فرض از تنظیمات، محدودهٔ زوم، دکمهٔ موقعیت فعلی، مجوز GPS).
+
+---
+
+## گزارش بستهٔ ۹ — تکمیل نقشه (Oct 28, 2026 — عامل بسته‌های ۶+)
+
+- **وضعیت:** تکمیل‌شده در حد امکان محیط (سرور با تست E2E واقعی ۳۷ چک؛ اندروید با ۱۹ تست واحد + بیلد؛ رفتار GPS واقعی روی دستگاه قابل تست نیست در این محیط)
+- **شهر پیش‌فرض (طبق تنظیمات موجود):** زیرساخت تنظیمات موجود (Config KV + `/api/admin/settings` + AuditLog) گسترش یافت — تنظیم رشته‌ای جدید `defaultCity` (زوج {city, province} با اعتبارسنجی همان دیتاست آفلاین بستهٔ ۸؛ مقدار خراب ذخیره‌شده هرگز اپ را نمی‌شکند → fallback به null، تست شد). ادمین از همان کامبوباکس CityPicker در دیالوگ «تنظیمات امنیتی» انتخاب می‌کند. `/api/app/config` زوج RESOLVED با مختصات مرکز شهر را برمی‌گرداند؛ اپ آن را در SharedPreferences کش می‌کند تا باز شدن آفلاین نقشه هم درست باشد (fallback قبلی: تهران). وقتی مدرپ مشتری ندارد، نقشه روی شهر پیش‌فرض باز می‌شود.
+- **رفع B7 (زوم بی‌نهایت):** `MapDefaults.MIN_ZOOM=5` · `MAX_ZOOM=19` (سقف عملی MAPNIK) · `INITIAL_ZOOM=13` · `FOLLOW_ZOOM=16` — همه در یک شیء قابل‌تست.
+- **دکمهٔ «موقعیت من»:** دکمهٔ شناور + `MyLocationNewOverlay` اوس‌ام‌دروید — فقط fix واقعی دستگاه؛ **هرگز مختصات مشتری جایگزین موقعیت کاربر نمی‌شود** (نیازمندی صریح بسته). در اولین fix انیمیت + زوم ۱۶.
+- **مدیریت مجوز و خطاها:** بدون مجوز → درخواست runtime و در رد پیام فارسی راهنمای تنظیمات اندروید؛ GPS خاموش → دیالوگ فارسی با دکمهٔ باز کردن تنظیمات موقعیت؛ در انتظار fix → toast صادقانه. توقف آپدیت‌های GPS در onPause (صرفه‌جویی باتری).
+- **آفلاین:** نشانگرها و مرکزشدن از دادهٔ محلی کار می‌کنند (Room + کش تنظیمات)؛ کاشی‌های نقشه مثل قبل به شبکه/کش وابسته‌اند — معماری فعلی همین‌قدر پشتیبانی می‌کند (صادقانه ثبت شد).
+- **تست‌ها (واقعی):**
+  - جدید `audit-tests/test-map-settings.sh` → **۳۷/۳۷ PASS** (`ALL-MAPSETTINGS-CHECKS-PASS`): مقدار اولیه null، ثبت/خواندن زوج کانونی، resolve مختصات در app config، رد شهر ناشناخته/استان غلط/مقدار غیرشیء با ۴۰۰ فارسی، پاک‌کردن با null، PUT مخلوط عددی+شهر، تفکیک شهرهای هم‌نام (نیر/یزد ≠ اردبیل)، گیت‌های 401 (سه‌گانه)، AuditLog بدون رمز، ماندگاری پس از restart، و fallback امن مقدار خراب.
+  - Regression روی باندل جدید: customers-cities **۴۰/۴۰** · planned-visit-flow **۵۰/۵۰** · notifications-infra **۴۳/۴۳** · assignment-requests **۶۲/۶۲** · bulk-assignments **۴۸/۴۸**.
+  - اندروید: `testDebugUnitTest` → **۱۹/۱۹** (۱۴ قبلی + ۵ `MapDefaultsTest`: ترتیب/محدودهٔ زوم، parse کامل/ناقص/خراب/مختصات خارج از دامنه، رفت‌وبرگشت کش، fallback تهران). `assembleDebug` BUILD SUCCESSFUL (8,979,388 بایت، امضای Debug).
+  - بیلد پنل: ۱۸/۱۸ چک سخت‌سازی.
+- **تست‌های اجرانشده:** رفتار GPS/مجوز روی دستگاه واقعی؛ مرورگر واقعی پنل. پوشش: HTTP واقعی + Robolectric (SharedPreferences، parse).
+- **دیتابیس/API:** بدون تغییر اسکیما — فقط کلید KV جدید `defaultCity` در جدول Config موجود + گسترش دو مسیر موجود؛ وصلهٔ سورس `panel-src-phase2-package9.patch` (۴ فایل).
+- **امنیت:** admin-only برای تنظیم؛ app config فقط با توکن معتبر؛ مقدار خراب → fallback امن؛ AuditLog بدون دادهٔ حساس.
+- **باقی‌مانده:** تست دستگاه واقعی (GPS واقعی/دیالوگ مجوز)؛ کاشی‌های آفلاین نقشه (نیازمند تصمیم معماری جدا — کش واکشی کاشی).
+- **قدم بعدی:** بستهٔ ۱۰ — ورود و تنظیمات اپ (B1/B2/مدرپ).

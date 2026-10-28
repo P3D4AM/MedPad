@@ -1,8 +1,13 @@
 package com.medpad.tracker.ui
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.AlertDialog
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.location.LocationManager
 import android.os.Bundle
+import android.provider.Settings
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.LayoutInflater
@@ -14,6 +19,8 @@ import android.widget.ImageButton
 import android.widget.ListView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import com.medpad.tracker.R
 import com.medpad.tracker.api.ApiClient
 import com.medpad.tracker.db.AppDatabase
@@ -22,6 +29,7 @@ import com.medpad.tracker.sync.CheckinSync
 import com.medpad.tracker.sync.DoctorsSync
 import com.medpad.tracker.sync.TrackerContext
 import com.medpad.tracker.util.IranCities
+import com.medpad.tracker.util.MapDefaults
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -35,12 +43,19 @@ import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.MapEventsOverlay
 import org.osmdroid.views.overlay.Marker
+import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 
 /**
  * Customers map (osmdroid) — v1.9.0 gesture fixes:
  *  - one-finger pan WORKS (MapEventsOverlay listens passively; default touch pan is untouched)
  *  - adding a doctor requires a 1-second long-press (no accidental adds while panning)
  *  - edit allowed, DELETE removed (rep cannot delete customers)
+ * package 9 (phase 2 / task 6, B7):
+ *  - zoom BOUNDED (5..19 — MAPNIK's practical range; was infinite)
+ *  - initial center = admin's default-city setting (offline-cached), not a
+ *    hard-coded Tehran
+ *  - «موقعیت من» button: follows the REAL GPS fix only — the user's
+ *    location is NEVER approximated with customer coordinates
  */
 class DoctorsMapActivity : AppCompatActivity() {
 
@@ -49,6 +64,12 @@ class DoctorsMapActivity : AppCompatActivity() {
     private var doctors: List<Doctor> = emptyList()
     private var markers = HashMap<String, Marker>()
     private var longPressStart: Pair<GeoPoint, Long>? = null
+    // package 9 — real-GPS location overlay (null until first use)
+    private var myLocationOverlay: MyLocationNewOverlay? = null
+
+    companion object {
+        private const val REQ_LOCATION = 41
+    }
 
     private val eventsReceiver = object : MapEventsReceiver {
         override fun singleTapConfirmedHelper(p: GeoPoint?): Boolean {
@@ -72,8 +93,15 @@ class DoctorsMapActivity : AppCompatActivity() {
         map = findViewById(R.id.map)
         map.setTileSource(TileSourceFactory.MAPNIK)
         map.setMultiTouchControls(true) // pinch zoom + one-finger pan intact
-        map.controller.setZoom(13.0)
-        map.controller.setCenter(GeoPoint(35.72, 51.4))
+        // package 9 (B7) — logical zoom bounds instead of infinite zoom
+        map.minZoomLevel = MapDefaults.MIN_ZOOM
+        map.maxZoomLevel = MapDefaults.MAX_ZOOM
+        map.controller.setZoom(MapDefaults.INITIAL_ZOOM)
+        // package 9 — admin's default city (offline-cached), else Tehran
+        val start = MapDefaults.cached(this)
+        map.controller.setCenter(
+            GeoPoint(start?.lat ?: MapDefaults.FALLBACK_LAT, start?.lng ?: MapDefaults.FALLBACK_LNG),
+        )
         map.overlays.add(MapEventsOverlay(eventsReceiver))
 
         findViewById<ImageButton>(R.id.btnBack).setOnClickListener { finish() }
@@ -83,6 +111,8 @@ class DoctorsMapActivity : AppCompatActivity() {
             val center = map.mapCenter as GeoPoint
             editDialog(null, center.latitude, center.longitude)
         }
+        // package 9 — go to my REAL location (GPS only, never customer coords)
+        findViewById<ImageButton>(R.id.btnLocate).setOnClickListener { onMyLocationClicked() }
 
         // pan/zoom gestures stay native to osmdroid (one-finger pan works)
         map.setOnTouchListener { v, ev ->
@@ -111,6 +141,94 @@ class DoctorsMapActivity : AppCompatActivity() {
                 AppDatabase.get(TrackerContext.app).doctorDao().all()
             }
             render()
+            // package 9 — refresh the admin's default-city setting and
+            // cache it for OFFLINE reuse; center on it when the rep has
+            // no customers yet (map markers would show nothing otherwise).
+            val fetched = withContext(Dispatchers.IO) {
+                try { MapDefaults.parseConfig(ApiClient.config()) } catch (_: Exception) { null }
+            }
+            if (fetched != null) {
+                MapDefaults.cache(this@DoctorsMapActivity, fetched)
+                if (doctors.isEmpty()) {
+                    map.controller.animateTo(GeoPoint(fetched.lat, fetched.lng))
+                    map.controller.setZoom(MapDefaults.INITIAL_ZOOM)
+                }
+            }
+        }
+    }
+
+    // ── package 9: my location (REAL GPS fix only) ─────────────
+
+    private fun hasLocationPermission(): Boolean =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+
+    private fun isLocationEnabled(): Boolean {
+        val lm = getSystemService(LOCATION_SERVICE) as LocationManager
+        return try {
+            lm.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        } catch (_: Exception) {
+            true // unknown state — let the fix listener report honestly
+        }
+    }
+
+    private fun onMyLocationClicked() {
+        if (!hasLocationPermission()) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
+                REQ_LOCATION,
+            )
+            return
+        }
+        if (!isLocationEnabled()) {
+            AlertDialog.Builder(this)
+                .setMessage(R.string.gps_disabled)
+                .setPositiveButton(R.string.open_settings) { _, _ ->
+                    try { startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) } catch (_: Exception) {}
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+            return
+        }
+        // The overlay uses ONLY real device fixes — the user's position is
+        // never guessed from customer coordinates (B7 requirement).
+        val overlay = myLocationOverlay ?: MyLocationNewOverlay(map).also {
+            myLocationOverlay = it
+            map.overlays.add(it)
+        }
+        overlay.enableMyLocation()
+        overlay.enableFollowLocation()
+        val fix = overlay.myLocation
+        if (fix != null) {
+            map.controller.animateTo(GeoPoint(fix.latitude, fix.longitude))
+            map.controller.setZoom(MapDefaults.FOLLOW_ZOOM)
+        } else {
+            Toast.makeText(this, R.string.gps_waiting_fix, Toast.LENGTH_SHORT).show()
+            overlay.runOnFirstFix {
+                runOnUiThread {
+                    val first = myLocationOverlay?.myLocation ?: return@runOnUiThread
+                    map.controller.animateTo(GeoPoint(first.latitude, first.longitude))
+                    map.controller.setZoom(MapDefaults.FOLLOW_ZOOM)
+                }
+            }
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQ_LOCATION) return
+        if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
+            onMyLocationClicked() // permission granted — proceed
+        } else {
+            Toast.makeText(this, R.string.gps_no_permission, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -265,6 +383,9 @@ class DoctorsMapActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
+        // package 9 — stop GPS updates when not visible (battery honesty)
+        myLocationOverlay?.disableMyLocation()
+        myLocationOverlay?.disableFollowLocation()
         map.onPause()
         super.onPause()
     }

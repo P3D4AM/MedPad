@@ -98,6 +98,14 @@
     <string name="city_none_found">شهری با این نام پیدا نشد</string>
     <string name="city_dataset_unavailable">فهرست شهرها در دسترس نیست — بعداً تلاش کنید</string>
 
+    <!-- Package 9 — map defaults & my-location -->
+    <string name="my_location">رفتن به موقعیت من</string>
+    <string name="gps_waiting_fix">در حال دریافت موقعیت GPS… یک لحظه صبر کنید</string>
+    <string name="gps_no_fix_yet">هنوز موقعیت دقیقی دریافت نشده — آسمان باز و GPS روشن باشد</string>
+    <string name="gps_no_permission">برای نمایش موقعیت خودتان، مجوز موقعیت مکانی لازم است. از تنظیمات اندروید → مجوزهای برنامه → MedPad آن را فعال کنید.</string>
+    <string name="gps_disabled">سرویس موقعیت مکانی گوشی خاموش است. از تنظیمات سریع (پر کشیدن صفحهٔ وضعیت) «Location» را روشن کنید و دوباره تلاش کنید.</string>
+    <string name="open_settings">باز کردن تنظیمات</string>
+
     <!-- Notifications -->
     <string name="notif_channel_tracking">ردیابی موقعیت</string>
     <string name="notif_channel_alerts">اعلان‌های مدیریتی</string>
