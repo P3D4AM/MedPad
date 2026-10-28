@@ -270,6 +270,12 @@
       "namedRegex": "^/api/assignments(?:/)?$"
     },
     {
+      "page": "/api/assignments/bulk",
+      "regex": "^/api/assignments/bulk(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/assignments/bulk(?:/)?$"
+    },
+    {
       "page": "/api/audit-log",
       "regex": "^/api/audit\\-log(?:/)?$",
       "routeKeys": {},

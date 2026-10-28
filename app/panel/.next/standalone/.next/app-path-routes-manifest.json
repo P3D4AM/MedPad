@@ -20,6 +20,7 @@
   "/api/assignment-requests/[id]/approve/route": "/api/assignment-requests/[id]/approve",
   "/api/assignment-requests/[id]/reject/route": "/api/assignment-requests/[id]/reject",
   "/api/assignment-requests/route": "/api/assignment-requests",
+  "/api/assignments/bulk/route": "/api/assignments/bulk",
   "/api/assignments/route": "/api/assignments",
   "/api/audit-log/route": "/api/audit-log",
   "/api/checkins/[id]/route": "/api/checkins/[id]",

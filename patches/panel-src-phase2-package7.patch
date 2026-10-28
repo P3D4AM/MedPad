@@ -1,0 +1,595 @@
+diff -ruN orig/src/app/api/assignments/bulk/route.ts b/src/app/api/assignments/bulk/route.ts
+--- orig/src/app/api/assignments/bulk/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/assignments/bulk/route.ts	2026-10-28 13:00:05.000000000 +0000
+@@ -0,0 +1,232 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { isAdmin } from '@/lib/auth'
++import { notifyAdmin, notifyEmployee } from '@/lib/notify'
++import { writeAudit } from '@/lib/audit'
++import { emitEvent } from '@/lib/emit'
++import { createHash } from 'crypto'
++
++/**
++ * package 7 (phase 2 / task 5) — BULK assignment / unassignment.
++ *
++ * POST /api/assignments/bulk   (admin session only)
++ *   { action: 'assign' | 'unassign',
++ *     customerIds: string[],            // 1..200 distinct
++ *     employeeIds: string[],            // 1..100 distinct (assign: active only)
++ *     allEmployees?: boolean }          // unassign only: drop EVERY assignment
++ *                                       // of the selected customers
++ *
++ * Semantics follow the app's current model exactly: Assignment is a
++ * (employee, customer) pair with @@unique([employeeId, customerId]) — the
++ * bulk operation is the cross product of the two selections, evaluated
++ * pair by pair INSIDE ONE TRANSACTION so the outcome is consistent:
++ *
++ *   assign:    missing pair -> created (with the same per-pair rep
++ *              notification the single-assign route sends, eventKey
++ *              assignment:<rowId>); existing pair -> counted as "already"
++ *              (NOT an error, not duplicated); unknown/deactivated/inactive
++ *              -> per-pair failed entry with a Persian reason.
++ *   unassign:  existing pair -> removed; missing pair -> counted as
++ *              "missing" (not an error). History (visits/checkins/voice)
++ *              is never touched — only the Assignment rows go.
++ *
++ * PARTIAL FAILURES ARE NEVER REPORTED AS SUCCESS: the response carries
++ * exact counters and a failed[] list; ok:true only means the request was
++ * processed — the UI shows every counter. One admin bell notification
++ * summarizes the batch (eventKey = deterministic hash of the inputs, so
++ * retrying the same bulk never duplicates the bell entry; per-pair rep
++ * notifications are keyed on the created rows themselves).
++ */
++
++const MAX_CUSTOMERS = 200
++const MAX_EMPLOYEES = 100
++const MAX_PAIRS = 2000
++
++const fail = (msg: string, status: number) => NextResponse.json({ ok: false, error: msg }, { status })
++
++export async function POST(req: Request) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++
++  const body = await req.json().catch(() => null) as {
++    action?: string; customerIds?: unknown; employeeIds?: unknown; allEmployees?: boolean
++  } | null
++
++  const action = body?.action
++  if (action !== 'assign' && action !== 'unassign') {
++    return fail('نوع عملیات نامعتبر است (assign یا unassign)', 400)
++  }
++  if (!Array.isArray(body?.customerIds) || body.customerIds.length === 0) {
++    return fail('فهرست مشتریان خالی است', 400)
++  }
++  const customerIds = [...new Set(body.customerIds.filter((x): x is string => typeof x === 'string' && x.length > 0))]
++  if (customerIds.length === 0) return fail('شناسهٔ مشتری نامعتبر است', 400)
++  if (customerIds.length > MAX_CUSTOMERS) {
++    return fail(`حداکثر ${MAX_CUSTOMERS} مشتری در هر عملیات گروهی`, 400)
++  }
++
++  const allEmployees = action === 'unassign' && body?.allEmployees === true
++  let employeeIds: string[] = []
++  if (!allEmployees) {
++    if (!Array.isArray(body?.employeeIds) || body.employeeIds.length === 0) {
++      return fail('فهرست مدرپ‌ها خالی است', 400)
++    }
++    employeeIds = [...new Set(body.employeeIds.filter((x): x is string => typeof x === 'string' && x.length > 0))]
++    if (employeeIds.length === 0) return fail('شناسهٔ مدرپ نامعتبر است', 400)
++    if (employeeIds.length > MAX_EMPLOYEES) {
++      return fail(`حداکثر ${MAX_EMPLOYEES} مدرپ در هر عملیات گروهی`, 400)
++    }
++  }
++
++  const pairCount = allEmployees ? customerIds.length : customerIds.length * employeeIds.length
++  if (pairCount > MAX_PAIRS) {
++    return fail(`حجم عملیات بیش از حد مجاز است (${pairCount} > ${MAX_PAIRS})`, 400)
++  }
++
++  // resolve names up front (unknown ids become per-pair failures)
++  const [employees, customers] = await Promise.all([
++    allEmployees ? Promise.resolve([]) : db.employee.findMany({
++      where: { id: { in: employeeIds } },
++      select: { id: true, name: true, username: true, active: true },
++    }),
++    db.customer.findMany({ where: { id: { in: customerIds } }, select: { id: true, name: true } }),
++  ])
++  const empById = new Map(employees.map((e) => [e.id, e]))
++  const cusById = new Map(customers.map((c) => [c.id, c]))
++
++  const failed: { employeeId: string | null; customerId: string; employeeName?: string; customerName?: string; reason: string }[] = []
++  let created = 0
++  let already = 0
++  let removed = 0
++  let missing = 0
++  const createdRows: { employeeId: string; customerId: string; id: string }[] = []
++
++  if (action === 'assign') {
++    // one transaction, pair by pair — consistent snapshot, honest counters
++    await db.$transaction(async (tx) => {
++      for (const cusId of customerIds) {
++        const cus = cusById.get(cusId)
++        for (const empId of employeeIds) {
++          const emp = empById.get(empId)
++          if (!cus) {
++            failed.push({ employeeId: empId, customerId: cusId, reason: 'مشتری پیدا نشد (حذف‌شده)' })
++            continue
++          }
++          if (!emp) {
++            failed.push({ employeeId: empId, customerId: cusId, customerName: cus.name, reason: 'مدرپ پیدا نشد (حذف‌شده)' })
++            continue
++          }
++          if (!emp.active) {
++            failed.push({ employeeId: empId, customerId: cusId, employeeName: emp.name, customerName: cus.name, reason: 'مدرپ غیرفعال است' })
++            continue
++          }
++          const exists = await tx.assignment.findFirst({ where: { employeeId: empId, customerId: cusId } })
++          if (exists) {
++            already++
++            continue
++          }
++          const row = await tx.assignment.create({ data: { employeeId: empId, customerId: cusId } })
++          created++
++          createdRows.push({ id: row.id, employeeId: empId, customerId: cusId })
++        }
++      }
++    })
++
++    // per-pair rep notifications (same contract as the single-assign route;
++    // eventKey on the row id makes a retried bulk a no-op for notifications)
++    for (const r of createdRows) {
++      const emp = empById.get(r.employeeId)
++      const cus = cusById.get(r.customerId)
++      await notifyEmployee({
++        employeeId: r.employeeId,
++        kind: 'assignment',
++        title: 'مشتری جدید اختصاص یافت',
++        body: `«${cus?.name ?? ''}» توسط مدیر به شما اختصاص داده شد.`,
++        customerId: r.customerId,
++        eventKey: `assignment:${r.id}`,
++      })
++      if (emp) {
++        await emitEvent('notification', {
++          employeeId: r.employeeId,
++          employeeName: emp.name,
++          title: 'مشتری جدید اختصاص یافت',
++          body: `«${cus?.name ?? ''}» توسط مدیر به شما اختصاص داده شد.`,
++        })
++      }
++    }
++  } else {
++    // unassign — either from the selected employees or from everyone
++    if (allEmployees) {
++      // exact per-customer counts before deleting (honest "missing" number)
++      const groups = await db.assignment.groupBy({
++        by: ['customerId'],
++        where: { customerId: { in: customerIds } },
++        _count: { _all: true },
++      })
++      const withAssignments = new Set(groups.map((g) => g.customerId))
++      const res = await db.assignment.deleteMany({ where: { customerId: { in: customerIds } } })
++      removed = res.count
++      missing = customerIds.filter((c) => !withAssignments.has(c)).length
++      for (const cusId of customerIds) {
++        if (!cusById.get(cusId)) {
++          failed.push({ employeeId: null, customerId: cusId, reason: 'مشتری پیدا نشد (حذف‌شده)' })
++        }
++      }
++    } else {
++      for (const cusId of customerIds) {
++        const cus = cusById.get(cusId)
++        for (const empId of employeeIds) {
++          const emp = empById.get(empId)
++          if (!cus) {
++            failed.push({ employeeId: empId, customerId: cusId, reason: 'مشتری پیدا نشد (حذف‌شده)' })
++            continue
++          }
++          if (!emp) {
++            failed.push({ employeeId: empId, customerId: cusId, customerName: cus.name, reason: 'مدرپ پیدا نشد (حذف‌شده)' })
++            continue
++          }
++          const res = await db.assignment.deleteMany({ where: { employeeId: empId, customerId: cusId } })
++          if (res.count > 0) removed++
++          else missing++
++        }
++      }
++    }
++  }
++
++  // one admin bell entry per batch (deterministic eventKey: retrying the
++  // exact same bulk never rings twice)
++  const batchKey = createHash('sha256')
++    .update(`${action}|${allEmployees ? 'all' : [...employeeIds].sort().join(',')}|${[...customerIds].sort().join(',')}`)
++    .digest('hex')
++    .slice(0, 24)
++  if ((action === 'assign' && created > 0) || (action === 'unassign' && removed > 0)) {
++    await notifyAdmin({
++      kind: 'assignment',
++      title: action === 'assign' ? 'انتساب گروهی انجام شد' : 'لغو انتساب گروهی انجام شد',
++      body: action === 'assign'
++        ? `${created} انتساب جدید برای ${customerIds.length} مشتری ایجاد شد${already > 0 ? ` (${already} مورد از قبل موجود بود)` : ''}.`
++        : `${removed} انتساب حذف شد${missing > 0 ? ` (${missing} مورد وجود نداشت)` : ''}.`,
++      eventKey: `bulk-${action}:${batchKey}`,
++    })
++  }
++
++  await writeAudit({
++    action: action === 'assign' ? 'assignment.bulk' : 'assignment.bulk-unassign',
++    targetType: 'assignment',
++    targetId: null,
++    detail: `${action}: ${customerIds.length} customers × ${allEmployees ? 'ALL' : employeeIds.length} employees -> created=${created} already=${already} removed=${removed} missing=${missing} failed=${failed.length}`,
++  })
++
++  return NextResponse.json({
++    ok: true,
++    action,
++    allEmployees: allEmployees || undefined,
++    requestedPairs: pairCount,
++    created,
++    already,
++    removed,
++    missing,
++    failed,
++  })
++}
+diff -ruN orig/src/components/panel/CustomersTab.tsx b/src/components/panel/CustomersTab.tsx
+--- orig/src/components/panel/CustomersTab.tsx	2026-10-25 06:58:53.000000000 +0000
++++ b/src/components/panel/CustomersTab.tsx	2026-10-28 13:01:19.000000000 +0000
+@@ -14,9 +14,10 @@
+   DialogTitle,
+ } from '@/components/ui/dialog'
+ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+-import { MapPin, Pencil, Plus, RefreshCw, StickyNote } from 'lucide-react'
++import { Checkbox } from '@/components/ui/checkbox'
++import { Layers, MapPin, Pencil, Plus, RefreshCw, StickyNote, X } from 'lucide-react'
+ import MapViewClient, { type MapPoint } from './MapViewClient'
+-import type { Customer } from '@/lib/types'
++import type { Customer, Employee } from '@/lib/types'
+ import { faDateTime } from '@/lib/realtime'
+ 
+ const emptyForm = {
+@@ -29,6 +30,17 @@
+   radius: 150,
+ }
+ 
++// package 7 — result of a bulk assign/unassign (exact counters, no false
++// success: every outcome is shown to the admin)
++interface BulkResult {
++  action: 'assign' | 'unassign'
++  created?: number
++  already?: number
++  removed?: number
++  missing?: number
++  failed?: { employeeName?: string; customerName?: string; reason: string }[]
++}
++
+ export default function CustomersTab({ refreshKey }: { refreshKey: number }) {
+   const [rows, setRows] = useState<Customer[]>([])
+   const [loading, setLoading] = useState(true)
+@@ -38,13 +50,26 @@
+   const [form, setForm] = useState(emptyForm)
+   const [pickMode, setPickMode] = useState<{ customerId: string; name: string } | null>(null)
+   const [saving, setSaving] = useState(false)
++  // package 7 — bulk select + bulk dialog + result
++  const [selectMode, setSelectMode] = useState(false)
++  const [checked, setChecked] = useState<Set<string>>(new Set())
++  const [bulkOpen, setBulkOpen] = useState(false)
++  const [bulkAction, setBulkAction] = useState<'assign' | 'unassign'>('assign')
++  const [bulkAll, setBulkAll] = useState(false)
++  const [bulkEmps, setBulkEmps] = useState<Set<string>>(new Set())
++  const [employees, setEmployees] = useState<Employee[]>([])
++  const [bulkBusy, setBulkBusy] = useState(false)
++  const [bulkResult, setBulkResult] = useState<BulkResult | null>(null)
+ 
+   const load = useCallback(async () => {
+     setLoading(true)
+     try {
+-      const res = await fetch('/api/customers', { cache: 'no-store' })
+-      const data = await res.json()
+-      if (data.ok) setRows(data.customers)
++      const [c, e] = await Promise.all([
++        fetch('/api/customers', { cache: 'no-store' }).then((r) => r.json()),
++        fetch('/api/employees', { cache: 'no-store' }).then((r) => r.json()),
++      ])
++      if (c.ok) setRows(c.customers)
++      if (e.ok) setEmployees(e.employees)
+     } finally {
+       setLoading(false)
+     }
+@@ -107,6 +132,59 @@
+     }
+   }
+ 
++  // package 7 — bulk assign / unassign (exact per-pair outcome reporting)
++  function toggleChecked(id: string) {
++    setChecked((prev) => {
++      const next = new Set(prev)
++      if (next.has(id)) next.delete(id)
++      else next.add(id)
++      return next
++    })
++  }
++
++  function openBulk(action: 'assign' | 'unassign') {
++    if (checked.size === 0) return
++    setBulkAction(action)
++    setBulkAll(false)
++    setBulkEmps(new Set())
++    setBulkOpen(true)
++  }
++
++  async function runBulk() {
++    setBulkBusy(true)
++    try {
++      const res = await fetch('/api/assignments/bulk', {
++        method: 'POST',
++        headers: { 'content-type': 'application/json' },
++        body: JSON.stringify({
++          action: bulkAction,
++          customerIds: [...checked],
++          employeeIds: [...bulkEmps],
++          allEmployees: bulkAction === 'unassign' && bulkAll,
++        }),
++      })
++      const data = await res.json().catch(() => ({ ok: false, error: 'پاسخ نامعتبر سرور' }))
++      if (data.ok) {
++        setBulkOpen(false)
++        setBulkResult({
++          action: bulkAction,
++          created: data.created,
++          already: data.already,
++          removed: data.removed,
++          missing: data.missing,
++          failed: data.failed ?? [],
++        })
++        setSelectMode(false)
++        setChecked(new Set())
++        await load()
++      } else {
++        alert(data.error || 'خطا در عملیات گروهی')
++      }
++    } finally {
++      setBulkBusy(false)
++    }
++  }
++
+   return (
+     <div className="grid gap-4 lg:grid-cols-[1fr_420px]">
+       {/* Map + pick hint */}
+@@ -152,28 +230,87 @@
+ 
+       {/* List */}
+       <div className="space-y-2">
+-        <div className="flex items-center gap-2">
+-          <Button size="sm" className="bg-teal-600 hover:bg-teal-700" onClick={openCreate}>
+-            <Plus className="h-4 w-4" /> مشتری جدید
+-          </Button>
+-          <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+-          </Button>
+-          <span className="text-sm text-muted-foreground mr-auto">
+-            {rows.length.toLocaleString('fa-IR')} مشتری
+-          </span>
++        <div className="flex items-center gap-2 flex-wrap">
++          {!selectMode ? (
++            <>
++              <Button size="sm" className="bg-teal-600 hover:bg-teal-700" onClick={openCreate}>
++                <Plus className="h-4 w-4" /> مشتری جدید
++              </Button>
++              <Button variant="outline" size="sm" onClick={() => { setSelectMode(true); setChecked(new Set()) }} title="انتخاب چند مشتری برای عملیات گروهی">
++                <Layers className="h-4 w-4" /> عملیات گروهی
++              </Button>
++              <Button variant="outline" size="sm" onClick={load} disabled={loading}>
++                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
++              </Button>
++              <span className="text-sm text-muted-foreground mr-auto">
++                {rows.length.toLocaleString('fa-IR')} مشتری
++              </span>
++            </>
++          ) : (
++            <>
++              <Button
++                size="sm"
++                className="bg-teal-600 hover:bg-teal-700"
++                disabled={checked.size === 0}
++                onClick={() => openBulk('assign')}
++              >
++                انتساب گروهی…
++              </Button>
++              <Button
++                variant="outline"
++                size="sm"
++                className="text-destructive hover:text-destructive"
++                disabled={checked.size === 0}
++                onClick={() => openBulk('unassign')}
++              >
++                لغو انتساب گروهی…
++              </Button>
++              <Button
++                variant="ghost"
++                size="sm"
++                onClick={() => setChecked(new Set(rows.map((r) => r.id)))}
++                disabled={rows.length === 0}
++              >
++                انتخاب همه
++              </Button>
++              <Button
++                variant="ghost"
++                size="sm"
++                className="h-8 w-8 p-0"
++                onClick={() => { setSelectMode(false); setChecked(new Set()) }}
++                title="خروج از حالت انتخاب"
++              >
++                <X className="h-4 w-4" />
++              </Button>
++              <span className="text-sm text-muted-foreground mr-auto">
++                {checked.size.toLocaleString('fa-IR')} مشتری انتخاب‌شده
++              </span>
++            </>
++          )}
+         </div>
+         <ScrollArea className="h-[62vh] rounded-xl border">
+           <div className="divide-y mp-scroll">
+             {rows.map((c) => (
+               <div
+                 key={c.id}
+-                onClick={() => setSelected(c)}
++                onClick={() => (selectMode ? toggleChecked(c.id) : setSelected(c))}
+                 className={`p-3 cursor-pointer transition-colors hover:bg-muted/60 ${
+-                  selected?.id === c.id ? 'bg-teal-50' : ''
++                  selectMode && checked.has(c.id)
++                    ? 'bg-teal-50'
++                    : selected?.id === c.id
++                      ? 'bg-teal-50'
++                      : ''
+                 }`}
+               >
+                 <div className="flex items-center gap-2">
++                  {selectMode && (
++                    <Checkbox
++                      checked={checked.has(c.id)}
++                      onCheckedChange={() => toggleChecked(c.id)}
++                      onClick={(e) => e.stopPropagation()}
++                      aria-label={`انتخاب ${c.name}`}
++                    />
++                  )}
+                   <Badge variant="secondary" className="shrink-0">
+                     {c.type === 'doctor' ? 'پزشک' : c.type === 'pharmacy' ? 'داروخانه' : 'سایر'}
+                   </Badge>
+@@ -225,6 +362,134 @@
+         )}
+       </div>
+ 
++      {/* package 7 — bulk assign/unassign dialog */}
++      <Dialog open={bulkOpen} onOpenChange={(o) => !o && setBulkOpen(false)}>
++        <DialogContent dir="rtl" className="sm:max-w-md">
++          <DialogHeader>
++            <DialogTitle>
++              {bulkAction === 'assign' ? 'انتساب گروهی' : 'لغو انتساب گروهی'} — {checked.size.toLocaleString('fa-IR')} مشتری
++            </DialogTitle>
++          </DialogHeader>
++          <div className="grid gap-3">
++            <p className="text-sm text-muted-foreground">
++              {bulkAction === 'assign'
++                ? 'مشتری‌های انتخاب‌شده به همهٔ مدرپ‌های علامت‌خورده اختصاص می‌یابند. انتساب‌های موجود دوباره ایجاد نمی‌شوند.'
++                : 'انتساب مشتری‌های انتخاب‌شده از مدرپ‌های علامت‌خورده حذف می‌شود. سوابق بازدید و چک‌این حفظ می‌شوند.'}
++            </p>
++            {bulkAction === 'unassign' && (
++              <label className="flex items-center gap-2 text-sm">
++                <Checkbox
++                  checked={bulkAll}
++                  onCheckedChange={(v) => setBulkAll(v === true)}
++                />
++                حذف از همهٔ مدرپ‌ها (بدون انتخاب تک‌تک)
++              </label>
++            )}
++            {!bulkAll && (
++              <div className="space-y-1">
++                <Label>مدرپ‌ها</Label>
++                <ScrollArea className="h-40 rounded-lg border p-2">
++                  <div className="space-y-1.5">
++                    {employees.filter((e) => e.active || bulkAction === 'unassign').length === 0 && (
++                      <p className="p-2 text-sm text-muted-foreground">مدرپی وجود ندارد</p>
++                    )}
++                    {employees
++                      .filter((e) => e.active || bulkAction === 'unassign')
++                      .map((e) => (
++                        <label key={e.id} className="flex items-center gap-2 rounded p-1.5 text-sm hover:bg-muted/60 cursor-pointer">
++                          <Checkbox
++                            checked={bulkEmps.has(e.id)}
++                            onCheckedChange={() =>
++                              setBulkEmps((prev) => {
++                                const next = new Set(prev)
++                                if (next.has(e.id)) next.delete(e.id)
++                                else next.add(e.id)
++                                return next
++                              })
++                            }
++                          />
++                          <span className="flex-1">{e.name}</span>
++                          {!e.active && <Badge variant="destructive">غیرفعال</Badge>}
++                          <span className="text-xs text-muted-foreground" dir="ltr">{e.username}</span>
++                        </label>
++                      ))}
++                  </div>
++                </ScrollArea>
++                <p className="text-xs text-muted-foreground">
++                  {bulkEmps.size > 0
++                    ? `${(checked.size * bulkEmps.size).toLocaleString('fa-IR')} عملیات انجام می‌شود`
++                    : 'حداقل یک مدرپ انتخاب کنید'}
++                </p>
++              </div>
++            )}
++          </div>
++          <DialogFooter>
++            <Button variant="outline" onClick={() => setBulkOpen(false)}>
++              انصراف
++            </Button>
++            <Button
++              className={bulkAction === 'assign' ? 'bg-teal-600 hover:bg-teal-700' : 'bg-destructive hover:bg-destructive'}
++              onClick={runBulk}
++              disabled={bulkBusy || (!bulkAll && bulkEmps.size === 0)}
++            >
++              {bulkBusy ? 'در حال انجام…' : bulkAction === 'assign' ? 'انتساب گروهی' : 'لغو انتساب'}
++            </Button>
++          </DialogFooter>
++        </DialogContent>
++      </Dialog>
++
++      {/* package 7 — bulk result (exact counters; partial failures listed) */}
++      <Dialog open={bulkResult !== null} onOpenChange={(o) => !o && setBulkResult(null)}>
++        <DialogContent dir="rtl" className="sm:max-w-md">
++          <DialogHeader>
++            <DialogTitle>نتیجهٔ عملیات گروهی</DialogTitle>
++          </DialogHeader>
++          {bulkResult && (
++            <div className="grid gap-2 text-sm">
++              {bulkResult.action === 'assign' ? (
++                <>
++                  <p>✅ {bulkResult.created?.toLocaleString('fa-IR') ?? 0} انتساب جدید ایجاد شد</p>
++                  {(bulkResult.already ?? 0) > 0 && (
++                    <p className="text-muted-foreground">↺ {bulkResult.already?.toLocaleString('fa-IR')} مورد از قبل موجود بود (دوباره‌سازی نشد)</p>
++                  )}
++                </>
++              ) : (
++                <>
++                  <p>✅ {bulkResult.removed?.toLocaleString('fa-IR') ?? 0} انتساب حذف شد</p>
++                  {(bulkResult.missing ?? 0) > 0 && (
++                    <p className="text-muted-foreground">↺ {bulkResult.missing?.toLocaleString('fa-IR')} مورد وجود نداشت</p>
++                  )}
++                </>
++              )}
++              {bulkResult.failed && bulkResult.failed.length > 0 && (
++                <div className="rounded-lg border border-red-300 bg-red-50 p-2">
++                  <p className="font-medium text-red-700">
++                    ⚠ {bulkResult.failed.length.toLocaleString('fa-IR')} مورد با خطا مواجه شد:
++                  </p>
++                  <ul className="mt-1 list-disc pr-4 text-xs text-red-700">
++                    {bulkResult.failed.slice(0, 10).map((f, i) => (
++                      <li key={i}>
++                        {f.employeeName ? `${f.employeeName} ← ` : ''}
++                        {f.customerName ? `«${f.customerName}»` : f.reason.includes('مشتری') ? 'مشتری حذف‌شده' : ''} — {f.reason}
++                      </li>
++                    ))}
++                    {bulkResult.failed.length > 10 && (
++                      <li>… و {bulkResult.failed.length - 10} مورد دیگر</li>
++                    )}
++                  </ul>
++                </div>
++              )}
++              <p className="text-xs text-muted-foreground">سوابق بازدید، چک‌این و فایل‌های صوتی همیشه محفوظ می‌مانند.</p>
++            </div>
++          )}
++          <DialogFooter>
++            <Button variant="outline" onClick={() => setBulkResult(null)}>
++              بستن
++            </Button>
++          </DialogFooter>
++        </DialogContent>
++      </Dialog>
++
+       {/* Edit / Create dialog */}
+       <Dialog open={editing !== null || creating} onOpenChange={(o) => !o && (setEditing(null), setCreating(false))}>
+         <DialogContent dir="rtl" className="sm:max-w-md">
