@@ -5,10 +5,12 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
+import android.text.InputType
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
@@ -19,11 +21,13 @@ import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.medpad.tracker.R
+import com.medpad.tracker.api.ApiClient
 import com.medpad.tracker.db.PlannedVisitEntity
 import com.medpad.tracker.location.TrackingService
 import com.medpad.tracker.Session
 import com.medpad.tracker.sync.CheckinSync
 import com.medpad.tracker.sync.PlansSync
+import org.json.JSONObject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -92,6 +96,7 @@ class PlansActivity : AppCompatActivity() {
         recycler.adapter = adapter
 
         findViewById<ImageButton>(R.id.btnBack).setOnClickListener { finish() }
+        findViewById<ImageButton>(R.id.btnRequests).setOnClickListener { showMyRequests() }
         findViewById<ImageButton>(R.id.btnRefresh).setOnClickListener { sync(true) }
         findViewById<ImageButton>(R.id.btnPrevDay).setOnClickListener { shiftDay(-1) }
         findViewById<ImageButton>(R.id.btnNextDay).setOnClickListener { shiftDay(+1) }
@@ -308,6 +313,7 @@ class PlansActivity : AppCompatActivity() {
         val tvVisit = view.findViewById<TextView>(R.id.tvVisit)
         val tvNote = view.findViewById<TextView>(R.id.tvNote)
         val btnStart = view.findViewById<Button>(R.id.btnStart)
+        val btnRequestAssign = view.findViewById<Button>(R.id.btnRequestAssign)
 
         if (plan.customerAssigned) {
             tvCustomer.text = plan.customerName ?: ""
@@ -336,6 +342,9 @@ class PlansActivity : AppCompatActivity() {
             tvType.visibility = View.GONE
             tvMasked.text = getString(R.string.plan_customer_masked)
             tvMasked.visibility = View.VISIBLE
+            // package 6 — the rep can ASK the admin for this customer
+            btnRequestAssign.visibility = View.VISIBLE
+            btnRequestAssign.setOnClickListener { showRequestAssign(plan) }
         }
 
         val priorityLabel = when (plan.priority) {
@@ -404,6 +413,118 @@ class PlansActivity : AppCompatActivity() {
             },
         )
         dialog.show(supportFragmentManager, "checkin_plan")
+    }
+
+    // ── assignment requests (package 6) ─────────────────────
+
+    /**
+     * Ask the admin for a MASKED customer seen in one of my plans. The
+     * customer id comes from the server's own plan payload — the app never
+     * sees (and can never request by) a name it isn't entitled to. Needs
+     * the server (a request is a server-side workflow — no offline queue
+     * here by design; the error paths say so honestly).
+     */
+    private fun showRequestAssign(plan: PlannedVisitEntity) {
+        val input = EditText(this).apply {
+            hint = getString(R.string.arq_note_hint)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            minLines = 1
+            maxLines = 3
+        }
+        val pad = (16 * resources.displayMetrics.density).toInt()
+        val wrap = android.widget.FrameLayout(this).apply {
+            setPadding(pad, pad / 2, pad, 0)
+            addView(input)
+        }
+        var sending = false
+        AlertDialog.Builder(this)
+            .setTitle(R.string.arq_request_assign)
+            .setMessage(getString(R.string.arq_offline_hint))
+            .setView(wrap)
+            .setPositiveButton(R.string.arq_submit) { d, _ ->
+                if (sending) return@setPositiveButton
+                sending = true
+                val note = input.text?.toString()?.trim().orEmpty()
+                scope.launch {
+                    try {
+                        withContext(Dispatchers.IO) {
+                            ApiClient.createAssignmentRequest(plan.customerId, note)
+                        }
+                        Toast.makeText(this@PlansActivity, R.string.arq_sent, Toast.LENGTH_LONG).show()
+                        d.dismiss()
+                    } catch (e: ApiClient.HttpException) {
+                        sending = false
+                        if (e.code == 401) {
+                            d.dismiss()
+                            showAuthExpired()
+                        } else {
+                            // the server's Persian error is actionable
+                            // (duplicate pending / already assigned / …)
+                            Toast.makeText(this@PlansActivity, e.message, Toast.LENGTH_LONG).show()
+                        }
+                    } catch (_: Exception) {
+                        sending = false
+                        Toast.makeText(this@PlansActivity, R.string.arq_load_error, Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+            .setNegativeButton(R.string.plan_close, null)
+            .show()
+    }
+
+    /** My assignment requests with their outcomes (pending/approved/rejected). */
+    private fun showMyRequests() {
+        scope.launch {
+            val json = try {
+                withContext(Dispatchers.IO) { ApiClient.assignmentRequests() }
+            } catch (e: ApiClient.HttpException) {
+                if (e.code == 401) { showAuthExpired(); return@launch }
+                Toast.makeText(this@PlansActivity, R.string.arq_load_error, Toast.LENGTH_LONG).show()
+                return@launch
+            } catch (_: Exception) {
+                Toast.makeText(this@PlansActivity, R.string.arq_load_error, Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            val reqs = json.optJSONArray("requests") ?: run {
+                Toast.makeText(this@PlansActivity, R.string.arq_load_error, Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            if (reqs.length() == 0) {
+                AlertDialog.Builder(this@PlansActivity)
+                    .setTitle(R.string.arq_requests_title)
+                    .setMessage(R.string.arq_none)
+                    .setPositiveButton(R.string.plan_close, null)
+                    .show()
+                return@launch
+            }
+            val lines = ArrayList<String>()
+            for (i in 0 until reqs.length()) {
+                val r: JSONObject = reqs.optJSONObject(i) ?: continue
+                val status = when (r.optString("status")) {
+                    "approved" -> getString(R.string.arq_status_approved)
+                    "rejected" -> getString(R.string.arq_status_rejected)
+                    else -> getString(R.string.arq_status_pending)
+                }
+                val name = if (r.optBoolean("assigned")) r.optString("customerName") else getString(R.string.arq_customer_label)
+                val sb = StringBuilder("«$name» — $status — ${isoToFaDate(r.optString("createdAt"))}")
+                r.optString("note").takeIf { it.isNotEmpty() }?.let { sb.append("\n").append(getString(R.string.arq_note_sent, it)) }
+                r.optString("adminNote").takeIf { it.isNotEmpty() }?.let { sb.append("\n").append(getString(R.string.arq_admin_reply, it)) }
+                lines.add(sb.toString())
+            }
+            AlertDialog.Builder(this@PlansActivity)
+                .setTitle(R.string.arq_requests_title)
+                .setItems(lines.toTypedArray(), null)
+                .setPositiveButton(R.string.plan_close, null)
+                .show()
+        }
+    }
+
+    private fun isoToFaDate(iso: String): String {
+        return try {
+            val m = Regex("^(\\d{4})-(\\d{2})-(\\d{2})").find(iso) ?: return iso
+            val (y, mo, d) = m.destructured
+            JalaliDate.formatFa(JalaliDate.fromGregorian(y.toInt(), mo.toInt(), d.toInt()))
+        } catch (_: Exception) { iso }
     }
 
     // ── list rows ───────────────────────────────────────────

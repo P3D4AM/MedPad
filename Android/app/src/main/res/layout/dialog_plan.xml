@@ -106,5 +106,15 @@
             android:layout_marginTop="18dp"
             android:textSize="15sp"
             android:visibility="gone" />
+
+        <!-- package 6 — shown only for masked (unassigned) customers -->
+        <Button
+            android:id="@+id/btnRequestAssign"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:layout_marginTop="18dp"
+            android:text="@string/arq_request_assign"
+            android:textSize="15sp"
+            android:visibility="gone" />
     </LinearLayout>
 </ScrollView>

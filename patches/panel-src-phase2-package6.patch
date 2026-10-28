@@ -1,0 +1,780 @@
+diff -ruN orig/prisma/schema.prisma b/prisma/schema.prisma
+--- orig/prisma/schema.prisma	2026-10-28 12:12:51.000000000 +0000
++++ b/prisma/schema.prisma	2026-10-28 12:15:24.000000000 +0000
+@@ -206,6 +206,37 @@
+   value String
+ }
+ 
++// package 6 (phase 2 / task 4): customer assignment REQUESTS.
++//
++// The rep (مدرپ) asks the admin to be assigned a customer they know from
++// their own plans (the server only ever discloses ids it already showed
++// them); the admin approves or rejects from the panel.
++//  * employeeId/customerId are PLAIN STRINGS (no FK) — the request history
++//    survives employee/customer deletion (display falls back to «حذف‌شده»;
++//    approve on a missing row is refused with 409 and the admin can reject).
++//  * status: 'pending' | 'approved' | 'rejected' — decisions are terminal.
++//  * a PARTIAL unique index (employeeId, customerId WHERE status='pending')
++//    is created by instrumentation.ts at boot: at most ONE pending request
++//    per (rep, customer) — concurrent submits race into a P2002, not a
++//    duplicate. Decided requests never block a fresh request (a rejected
++//    rep may ask again later).
++//  * approve creates the real Assignment (its own @@unique makes double
++//    approval / racing with a manual assignment impossible) and notifies
++//    the rep via AppNotification; the admin bell hears about new requests
++//    via PanelNotification (kind='request').
++model AssignmentRequest {
++  id         String    @id @default(cuid())
++  employeeId String
++  customerId String
++  status     String    @default("pending") // pending | approved | rejected
++  note       String?   // the rep's note (≤500 chars, server-validated)
++  adminNote  String?   // the admin's decision note (visible to the rep)
++  decidedAt  DateTime?
++  decidedBy  String?   // admin username (Config.adminUser) at decision time
++  createdAt  DateTime  @default(now())
++  updatedAt  DateTime  @updatedAt
++}
++
+ // phase 1 / task 2 (G-3): administrative audit trail. Actor is the panel's
+ // single admin account (Config.adminUser) — actorType leaves room for future
+ // actor kinds. `detail` carries a short human-readable summary and MUST
+diff -ruN orig/src/app/api/app/assignment-requests/route.ts b/src/app/api/app/assignment-requests/route.ts
+--- orig/src/app/api/app/assignment-requests/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/app/assignment-requests/route.ts	2026-10-28 12:16:34.000000000 +0000
+@@ -0,0 +1,149 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { appEmployee } from '@/lib/auth'
++import { notifyAdmin } from '@/lib/notify'
++import { writeAudit } from '@/lib/audit'
++
++/**
++ * package 6 (phase 2 / task 4) — the REP'S side of assignment requests.
++ *
++ * POST /api/app/assignment-requests   { customerId, note? }
++ *   The rep asks the admin to be assigned a customer. The customer id can
++ *   only sensibly come from data the server already showed the rep (their
++ *   own planned visits — masked or not), so no customer browse/search
++ *   surface is exposed here. Server-side gates, in order:
++ *     401  invalid/expired/revoked token, deactivated employee
++ *     400  missing customerId / note longer than 500 chars
++ *     404  unknown customer id
++ *     409  customer already assigned to this rep
++ *     409  a PENDING request for the same (rep, customer) already exists
++ *   A new request notifies the ADMIN (bell, kind='request') with a stable
++ *   eventKey (ar:<id> — a retried POST is a new row, never a duplicate
++ *   notification) and writes an employee-actor audit row.
++ *
++ * GET /api/app/assignment-requests
++ *   The rep's own requests, newest first, capped at 100. Customer names
++ *   are disclosed ONLY for customers currently assigned to the rep — a
++ *   pending or rejected request never unmasks a customer the rep is not
++ *   entitled to see (consistent with the planned-visits masking policy).
++ */
++
++const NOTE_MAX = 500
++const LIST_LIMIT = 100
++
++function isUniqueViolation(e: unknown): boolean {
++  const err = e as { code?: string; message?: string }
++  if (err?.code === 'P2002') return true
++  // raw SQLite "UNIQUE constraint failed: ..." — including the partial
++  // AssignmentRequest_pending_key index (defence in depth beside P2002)
++  return /unique constraint failed/i.test(err?.message ?? '')
++}
++
++export async function GET(req: Request) {
++  const emp = await appEmployee(req)
++  if (!emp) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++
++  const rows = await db.assignmentRequest.findMany({
++    where: { employeeId: emp.id },
++    orderBy: { createdAt: 'desc' },
++    take: LIST_LIMIT,
++  })
++
++  // resolve customer names ONLY for customers currently assigned to this rep
++  const assigned = await db.assignment.findMany({
++    where: { employeeId: emp.id },
++    select: { customerId: true },
++  })
++  const assignedIds = new Set(assigned.map((a) => a.customerId))
++  const customers = await db.customer.findMany({
++    where: { id: { in: rows.map((r) => r.customerId) } },
++    select: { id: true, name: true },
++  })
++  const nameById = new Map(customers.map((c) => [c.id, c.name]))
++
++  return NextResponse.json({
++    ok: true,
++    requests: rows.map((r) => {
++      const isAssigned = assignedIds.has(r.customerId)
++      return {
++        id: r.id,
++        customerId: r.customerId,
++        // masking policy: name only once the customer is actually the rep's
++        customerName: isAssigned ? (nameById.get(r.customerId) ?? null) : null,
++        assigned: isAssigned,
++        status: r.status,
++        note: r.note,
++        adminNote: r.adminNote,
++        createdAt: r.createdAt,
++        decidedAt: r.decidedAt,
++      }
++    }),
++    serverTime: new Date().toISOString(),
++  })
++}
++
++export async function POST(req: Request) {
++  const emp = await appEmployee(req)
++  if (!emp) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++
++  const body = await req.json().catch(() => null) as { customerId?: string; note?: string } | null
++  const customerId = typeof body?.customerId === 'string' ? body.customerId.trim() : ''
++  const note = typeof body?.note === 'string' ? body.note.trim() : ''
++  if (!customerId) {
++    return NextResponse.json({ ok: false, error: 'شناسهٔ مشتری لازم است' }, { status: 400 })
++  }
++  if (note.length > NOTE_MAX) {
++    return NextResponse.json({ ok: false, error: `یادداشت حداکثر ${NOTE_MAX} نویسه می‌تواند باشد` }, { status: 400 })
++  }
++
++  const cus = await db.customer.findUnique({ where: { id: customerId }, select: { id: true, name: true } })
++  if (!cus) {
++    return NextResponse.json({ ok: false, error: 'مشتری پیدا نشد' }, { status: 404 })
++  }
++
++  const already = await db.assignment.findFirst({ where: { employeeId: emp.id, customerId } })
++  if (already) {
++    return NextResponse.json({ ok: false, error: 'این مشتری از قبل به شما اختصاص دارد' }, { status: 409 })
++  }
++
++  const pending = await db.assignmentRequest.findFirst({
++    where: { employeeId: emp.id, customerId, status: 'pending' },
++  })
++  if (pending) {
++    return NextResponse.json({ ok: false, error: 'برای این مشتری درخواست در انتظار بررسی دارید' }, { status: 409 })
++  }
++
++  let row
++  try {
++    row = await db.assignmentRequest.create({
++      data: { employeeId: emp.id, customerId, note: note || null },
++    })
++  } catch (e) {
++    // the partial unique index makes a concurrent duplicate a clean 409
++    if (isUniqueViolation(e)) {
++      return NextResponse.json({ ok: false, error: 'برای این مشتری درخواست در انتظار بررسی دارید' }, { status: 409 })
++    }
++    throw e
++  }
++
++  // admin bell notification — stable event key on the request row id
++  await notifyAdmin({
++    kind: 'request',
++    title: 'درخواست تخصیص مشتری',
++    body: `${emp.name} درخواست تخصیص مشتری «${cus.name}» را دارد.`,
++    employeeId: emp.id,
++    customerId,
++    eventKey: `ar:${row.id}`,
++  })
++
++  await writeAudit({
++    action: 'assignment_request.create',
++    actorType: 'employee',
++    actorId: emp.id,
++    targetType: 'customer',
++    targetId: customerId,
++    detail: `rep ${emp.name} (${emp.username}) requested assignment of customer «${cus.name}»`,
++  })
++
++  return NextResponse.json({ ok: true, request: { id: row.id, status: row.status, createdAt: row.createdAt } })
++}
+diff -ruN orig/src/app/api/assignment-requests/[id]/approve/route.ts b/src/app/api/assignment-requests/[id]/approve/route.ts
+--- orig/src/app/api/assignment-requests/[id]/approve/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/assignment-requests/[id]/approve/route.ts	2026-10-28 12:16:59.000000000 +0000
+@@ -0,0 +1,108 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { isAdmin, getConfig } from '@/lib/auth'
++import { notifyEmployee } from '@/lib/notify'
++import { writeAudit } from '@/lib/audit'
++import { emitEvent } from '@/lib/emit'
++
++/**
++ * package 6 (phase 2 / task 4) — approve an assignment request (admin).
++ *
++ * POST /api/assignment-requests/:id/approve
++ *   401  admin session required
++ *   404  unknown request id
++ *   409  request already decided (terminal state machine)
++ *   409  employee or customer deleted / employee deactivated — the request
++ *        STAYS pending (nothing is silently auto-decided); the admin sees
++ *        the reason and can reject it explicitly with a note.
++ *   200  approved. If the assignment already exists (a manual assignment
++ *        raced the request, or a previous approve on another pending
++ *        duplicate), the request is approved WITHOUT creating a duplicate —
++ *        Assignment's own @@unique([employeeId, customerId]) is the last
++ *        line of defence against double assignment under concurrency.
++ *   Side effects: the real Assignment row, an AppNotification for the rep
++ *   (stable eventKey ar-approved:<id>), a realtime emit (parity with the
++ *   manual assignment route) and an admin audit row.
++ */
++export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const { id } = await ctx.params
++
++  const reqRow = await db.assignmentRequest.findUnique({ where: { id } })
++  if (!reqRow) {
++    return NextResponse.json({ ok: false, error: 'درخواست پیدا نشد' }, { status: 404 })
++  }
++  if (reqRow.status !== 'pending') {
++    return NextResponse.json({ ok: false, error: 'این درخواست قبلاً بررسی شده است' }, { status: 409 })
++  }
++
++  const [emp, cus] = await Promise.all([
++    db.employee.findUnique({ where: { id: reqRow.employeeId } }),
++    db.customer.findUnique({ where: { id: reqRow.customerId } }),
++  ])
++  if (!emp || !cus) {
++    return NextResponse.json(
++      { ok: false, error: 'کارمند یا مشتری حذف شده است — درخواست قابل تأیید نیست (می‌توانید رد کنید)' },
++      { status: 409 },
++    )
++  }
++  if (!emp.active) {
++    return NextResponse.json(
++      { ok: false, error: 'این مدرپ غیرفعال است — ابتدا حساب را فعال کنید' },
++      { status: 409 },
++    )
++  }
++
++  // the real assignment — idempotent under the unique constraint
++  let alreadyAssigned = false
++  try {
++    await db.assignment.create({ data: { employeeId: emp.id, customerId: cus.id } })
++  } catch (e) {
++    const err = e as { code?: string; message?: string }
++    if (err?.code === 'P2002' || /unique constraint failed/i.test(err?.message ?? '')) {
++      alreadyAssigned = true // raced with a manual assignment / prior approve
++    } else {
++      throw e
++    }
++  }
++
++  const adminUser = await getConfig('adminUser', 'admin')
++  await db.assignmentRequest.update({
++    where: { id },
++    data: {
++      status: 'approved',
++      decidedAt: new Date(),
++      decidedBy: adminUser,
++      ...(alreadyAssigned && !reqRow.adminNote
++        ? { adminNote: 'این مشتری از قبل به این مدرپ اختصاص یافته بود' }
++        : {}),
++    },
++  })
++
++  // the rep hears the outcome (name is safe to disclose now — it's theirs)
++  await notifyEmployee({
++    employeeId: emp.id,
++    kind: 'assignment',
++    title: 'درخواست تخصیص تأیید شد',
++    body: `«${cus.name}» به شما اختصاص یافت.`,
++    customerId: cus.id,
++    eventKey: `ar-approved:${id}`,
++  })
++  await emitEvent('notification', {
++    employeeId: emp.id,
++    employeeName: emp.name,
++    title: 'درخواست تخصیص تأیید شد',
++    body: `«${cus.name}» به شما اختصاص یافت.`,
++  })
++
++  await writeAudit({
++    action: 'assignment_request.approve',
++    targetType: 'assignment_request',
++    targetId: id,
++    detail: `approved ${emp.name} <- «${cus.name}»${alreadyAssigned ? ' (assignment already existed)' : ''}`,
++  })
++
++  return NextResponse.json({ ok: true, alreadyAssigned })
++}
+diff -ruN orig/src/app/api/assignment-requests/[id]/reject/route.ts b/src/app/api/assignment-requests/[id]/reject/route.ts
+--- orig/src/app/api/assignment-requests/[id]/reject/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/assignment-requests/[id]/reject/route.ts	2026-10-28 12:17:08.000000000 +0000
+@@ -0,0 +1,73 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { isAdmin, getConfig } from '@/lib/auth'
++import { notifyEmployee } from '@/lib/notify'
++import { writeAudit } from '@/lib/audit'
++
++/**
++ * package 6 (phase 2 / task 4) — reject an assignment request (admin).
++ *
++ * POST /api/assignment-requests/:id/reject   { adminNote? }
++ *   401  admin session required
++ *   404  unknown request id
++ *   409  request already decided
++ *   400  adminNote longer than 500 chars
++ *   200  rejected — terminal. The rep is notified in-app (stable eventKey
++ *        ar-rejected:<id>); the customer's NAME is deliberately NOT
++ *        included (it may be another rep's customer — no unmasking on
++ *        rejection). A rejected rep may file a fresh request later (the
++ *        partial unique index only covers pending rows).
++ */
++const NOTE_MAX = 500
++
++export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const { id } = await ctx.params
++
++  const reqRow = await db.assignmentRequest.findUnique({ where: { id } })
++  if (!reqRow) {
++    return NextResponse.json({ ok: false, error: 'درخواست پیدا نشد' }, { status: 404 })
++  }
++  if (reqRow.status !== 'pending') {
++    return NextResponse.json({ ok: false, error: 'این درخواست قبلاً بررسی شده است' }, { status: 409 })
++  }
++
++  const body = await req.json().catch(() => null) as { adminNote?: string } | null
++  const adminNote = typeof body?.adminNote === 'string' ? body.adminNote.trim() : ''
++  if (adminNote.length > NOTE_MAX) {
++    return NextResponse.json({ ok: false, error: `یادداشت حداکثر ${NOTE_MAX} نویسه می‌تواند باشد` }, { status: 400 })
++  }
++
++  const adminUser = await getConfig('adminUser', 'admin')
++  await db.assignmentRequest.update({
++    where: { id },
++    data: {
++      status: 'rejected',
++      adminNote: adminNote || null,
++      decidedAt: new Date(),
++      decidedBy: adminUser,
++    },
++  })
++
++  const emp = await db.employee.findUnique({ where: { id: reqRow.employeeId } })
++  if (emp) {
++    await notifyEmployee({
++      employeeId: emp.id,
++      kind: 'assignment',
++      title: 'درخواست تخصیص رد شد',
++      body: adminNote ? `درخواست تخصیص شما رد شد. ${adminNote}` : 'درخواست تخصیص شما رد شد.',
++      eventKey: `ar-rejected:${id}`,
++    })
++  }
++
++  await writeAudit({
++    action: 'assignment_request.reject',
++    targetType: 'assignment_request',
++    targetId: id,
++    detail: `rejected${adminNote ? ` — ${adminNote}` : ''}`,
++  })
++
++  return NextResponse.json({ ok: true })
++}
+diff -ruN orig/src/app/api/assignment-requests/route.ts b/src/app/api/assignment-requests/route.ts
+--- orig/src/app/api/assignment-requests/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/assignment-requests/route.ts	2026-10-28 12:16:45.000000000 +0000
+@@ -0,0 +1,71 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { isAdmin } from '@/lib/auth'
++
++/**
++ * package 6 (phase 2 / task 4) — the ADMIN's assignment-request list.
++ *
++ * GET /api/assignment-requests?status=pending|approved|rejected (admin only)
++ *   Newest first, capped at 200. Employee/customer names are resolved with
++ *   bulk lookups and fall back to null for deleted rows (the request ids
++ *   are plain strings with no FK — history survives deletion; the UI shows
++ *   «حذف‌شده»). Decisions happen in the [id]/approve and [id]/reject routes.
++ */
++
++const LIST_LIMIT = 200
++const STATUSES = new Set(['pending', 'approved', 'rejected'])
++
++export async function GET(req: Request) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const url = new URL(req.url)
++  const status = url.searchParams.get('status')
++  if (status !== null && !STATUSES.has(status)) {
++    return NextResponse.json({ ok: false, error: 'وضعیت نامعتبر است' }, { status: 400 })
++  }
++
++  const rows = await db.assignmentRequest.findMany({
++    where: status ? { status } : undefined,
++    orderBy: { createdAt: 'desc' },
++    take: LIST_LIMIT,
++  })
++
++  const empIds = [...new Set(rows.map((r) => r.employeeId))]
++  const cusIds = [...new Set(rows.map((r) => r.customerId))]
++  const [employees, customers] = await Promise.all([
++    empIds.length
++      ? db.employee.findMany({ where: { id: { in: empIds } }, select: { id: true, name: true, username: true, active: true } })
++      : Promise.resolve([]),
++    cusIds.length
++      ? db.customer.findMany({ where: { id: { in: cusIds } }, select: { id: true, name: true } })
++      : Promise.resolve([]),
++  ])
++  const empById = new Map(employees.map((e) => [e.id, e]))
++  const cusById = new Map(customers.map((c) => [c.id, c]))
++
++  // how many requests are still open (shown as the badge in the panel)
++  const pendingCount = status === 'pending'
++    ? rows.length
++    : await db.assignmentRequest.count({ where: { status: 'pending' } })
++
++  return NextResponse.json({
++    ok: true,
++    pendingCount,
++    requests: rows.map((r) => {
++      const emp = empById.get(r.employeeId)
++      const cus = cusById.get(r.customerId)
++      return {
++        id: r.id,
++        status: r.status,
++        note: r.note,
++        adminNote: r.adminNote,
++        createdAt: r.createdAt,
++        decidedAt: r.decidedAt,
++        decidedBy: r.decidedBy,
++        employee: emp ? { id: emp.id, name: emp.name, username: emp.username, active: emp.active } : null,
++        customer: cus ? { id: cus.id, name: cus.name } : null,
++      }
++    }),
++  })
++}
+diff -ruN orig/src/components/panel/EmployeesTab.tsx b/src/components/panel/EmployeesTab.tsx
+--- orig/src/components/panel/EmployeesTab.tsx	2026-10-28 12:12:51.000000000 +0000
++++ b/src/components/panel/EmployeesTab.tsx	2026-10-28 12:18:00.000000000 +0000
+@@ -15,7 +15,9 @@
+ } from '@/components/ui/dialog'
+ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+ import {
++  Check,
+   History,
++  Inbox,
+   KeyRound,
+   Link2,
+   Lock,
+@@ -27,8 +29,9 @@
+   Trash2,
+   Unlink,
+   UserPlus,
++  X,
+ } from 'lucide-react'
+-import type { Assignment, Customer, Employee } from '@/lib/types'
++import type { Assignment, AssignmentRequest, Customer, Employee } from '@/lib/types'
+ import { faDateTime } from '@/lib/realtime'
+ 
+ interface AuditEntry {
+@@ -56,16 +59,24 @@
+   const [passForm, setPassForm] = useState({ password: '', confirm: '' })
+   const [auditOpen, setAuditOpen] = useState(false)
+   const [auditRows, setAuditRows] = useState<AuditEntry[]>([])
++  // package 6 — assignment requests from the reps
++  const [requests, setRequests] = useState<AssignmentRequest[]>([])
++  const [reqShowAll, setReqShowAll] = useState(false)
++  const [reqBusy, setReqBusy] = useState<string | null>(null)
++  const [rejectReq, setRejectReq] = useState<AssignmentRequest | null>(null)
++  const [rejectNote, setRejectNote] = useState('')
+ 
+   const load = useCallback(async () => {
+     setLoading(true)
+     try {
+-      const [e, c] = await Promise.all([
++      const [e, c, ar] = await Promise.all([
+         fetch('/api/employees', { cache: 'no-store' }).then((r) => r.json()),
+         fetch('/api/customers', { cache: 'no-store' }).then((r) => r.json()),
++        fetch('/api/assignment-requests', { cache: 'no-store' }).then((r) => r.json()),
+       ])
+       if (e.ok) setRows(e.employees)
+       if (c.ok) setCustomers(c.customers)
++      if (ar.ok) setRequests(ar.requests)
+     } finally {
+       setLoading(false)
+     }
+@@ -210,10 +221,121 @@
+     if (data.ok) setAuditRows(data.entries)
+   }
+ 
++  // package 6 — approve / reject an assignment request
++  async function approveRequest(r: AssignmentRequest) {
++    setReqBusy(r.id)
++    try {
++      const res = await fetch(`/api/assignment-requests/${r.id}/approve`, { method: 'POST' })
++      const data = await res.json().catch(() => ({ ok: false }))
++      if (data.ok) await load()
++      else alert(data.error || 'خطا در تأیید درخواست')
++    } finally {
++      setReqBusy(null)
++    }
++  }
++
++  async function rejectRequest() {
++    if (!rejectReq) return
++    setReqBusy(rejectReq.id)
++    try {
++      const res = await fetch(`/api/assignment-requests/${rejectReq.id}/reject`, {
++        method: 'POST',
++        headers: { 'content-type': 'application/json' },
++        body: JSON.stringify({ adminNote: rejectNote }),
++      })
++      const data = await res.json().catch(() => ({ ok: false }))
++      if (data.ok) {
++        setRejectReq(null)
++        setRejectNote('')
++        await load()
++      } else alert(data.error || 'خطا در رد درخواست')
++    } finally {
++      setReqBusy(null)
++    }
++  }
++
+   const activeCount = rows.filter((r) => r.active).length
++  const pendingReqs = requests.filter((r) => r.status === 'pending')
++  const shownReqs = reqShowAll ? requests : pendingReqs
+ 
+   return (
+     <div className="space-y-4">
++      {/* package 6 — assignment requests from the reps */}
++      {(pendingReqs.length > 0 || reqShowAll) && (
++        <div className="rounded-xl border bg-amber-50/50">
++          <div className="flex items-center gap-2 border-b px-3 py-2 flex-wrap">
++            <Inbox className="h-4 w-4 text-amber-600" />
++            <span className="text-sm font-medium">درخواست‌های تخصیص مشتری</span>
++            {pendingReqs.length > 0 && (
++              <Badge className="bg-amber-500 hover:bg-amber-500">
++                {pendingReqs.length.toLocaleString('fa-IR')} در انتظار
++              </Badge>
++            )}
++            <Button
++              variant="ghost"
++              size="sm"
++              className="mr-auto h-7 text-xs"
++              onClick={() => setReqShowAll((v) => !v)}
++            >
++              {reqShowAll ? 'فقط در انتظار' : 'نمایش همه'}
++            </Button>
++          </div>
++          <div className="divide-y">
++            {shownReqs.length === 0 && (
++              <p className="px-3 py-2.5 text-sm text-muted-foreground">درخواستی ثبت نشده است</p>
++            )}
++            {shownReqs.slice(0, 20).map((r) => (
++              <div key={r.id} className="flex items-start gap-2 px-3 py-2.5 flex-wrap">
++                <div className="flex-1 min-w-0">
++                  <div className="flex items-center gap-2 flex-wrap">
++                    <span className="text-sm font-medium">
++                      {r.employee ? r.employee.name : 'مدرپ حذف‌شده'}
++                    </span>
++                    <span className="text-xs text-muted-foreground">→</span>
++                    <span className="text-sm">
++                      {r.customer ? `«${r.customer.name}»` : 'مشتری حذف‌شده'}
++                    </span>
++                    {r.status === 'pending' ? (
++                      <Badge variant="outline" className="border-amber-500 text-amber-700">در انتظار</Badge>
++                    ) : r.status === 'approved' ? (
++                      <Badge variant="outline" className="border-emerald-500 text-emerald-700">تأییدشده</Badge>
++                    ) : (
++                      <Badge variant="outline" className="border-red-500 text-red-700">ردشده</Badge>
++                    )}
++                    <span className="text-xs text-muted-foreground">{faDateTime(r.createdAt)}</span>
++                  </div>
++                  {r.note && <p className="mt-1 text-xs text-muted-foreground">یادداشت مدرپ: {r.note}</p>}
++                  {r.adminNote && (
++                    <p className="mt-0.5 text-xs text-muted-foreground">پاسخ مدیر: {r.adminNote}</p>
++                  )}
++                </div>
++                {r.status === 'pending' && (
++                  <div className="flex items-center gap-1">
++                    <Button
++                      size="sm"
++                      className="h-8 bg-emerald-600 hover:bg-emerald-700"
++                      disabled={reqBusy === r.id}
++                      onClick={() => approveRequest(r)}
++                    >
++                      <Check className="h-4 w-4" /> تأیید
++                    </Button>
++                    <Button
++                      size="sm"
++                      variant="outline"
++                      className="h-8 text-destructive hover:text-destructive"
++                      disabled={reqBusy === r.id}
++                      onClick={() => { setRejectReq(r); setRejectNote('') }}
++                    >
++                      <X className="h-4 w-4" /> رد
++                    </Button>
++                  </div>
++                )}
++              </div>
++            ))}
++          </div>
++        </div>
++      )}
++
+       <div className="flex items-center gap-2 flex-wrap">
+         <Button size="sm" className="bg-teal-600 hover:bg-teal-700" onClick={() => setAdding(true)}>
+           <UserPlus className="h-4 w-4" /> کارمند جدید
+@@ -432,6 +554,41 @@
+         </DialogContent>
+       </Dialog>
+ 
++      {/* package 6 — reject an assignment request (optional note for the rep) */}
++      <Dialog open={rejectReq !== null} onOpenChange={(o) => !o && setRejectReq(null)}>
++        <DialogContent dir="rtl" className="sm:max-w-sm">
++          <DialogHeader>
++            <DialogTitle>رد درخواست تخصیص</DialogTitle>
++          </DialogHeader>
++          <div className="grid gap-3">
++            <p className="text-sm">
++              {rejectReq?.employee ? rejectReq.employee.name : 'مدرپ حذف‌شده'} ←{' '}
++              {rejectReq?.customer ? `«${rejectReq.customer.name}»` : 'مشتری حذف‌شده'}
++            </p>
++            <div className="space-y-1">
++              <Label>یادداشت برای مدرپ (اختیاری)</Label>
++              <Input
++                value={rejectNote}
++                onChange={(e) => setRejectNote(e.target.value)}
++                placeholder="مثلاً: این مشتری به مدرپ دیگری اختصاص دارد"
++              />
++            </div>
++          </div>
++          <DialogFooter>
++            <Button variant="outline" onClick={() => setRejectReq(null)}>
++              انصراف
++            </Button>
++            <Button
++              variant="destructive"
++              onClick={rejectRequest}
++              disabled={reqBusy === rejectReq?.id}
++            >
++              رد درخواست
++            </Button>
++          </DialogFooter>
++        </DialogContent>
++      </Dialog>
++
+       {/* Assign dialog */}
+       <Dialog open={assignEmp !== null} onOpenChange={(o) => !o && setAssignEmp(null)}>
+         <DialogContent dir="rtl" className="sm:max-w-sm">
+diff -ruN orig/src/instrumentation.ts b/src/instrumentation.ts
+--- orig/src/instrumentation.ts	2026-10-28 12:12:51.000000000 +0000
++++ b/src/instrumentation.ts	2026-10-28 12:15:33.000000000 +0000
+@@ -98,12 +98,34 @@
+ const PANEL_NOTIFICATION_INDEX_DDL =
+   'CREATE UNIQUE INDEX IF NOT EXISTS "PanelNotification_eventKey_key" ON "PanelNotification"("eventKey")'
+ 
++// package 6 (phase 2 / task 4) — customer assignment requests (new table;
++// layout = prisma db push output). The PARTIAL unique index keeps at most
++// one PENDING request per (employee, customer) at the database level —
++// concurrent submits race into a unique violation instead of a duplicate.
++// SQLite has supported partial indexes since 3.8.0 (2013); decided rows are
++// excluded, so a rejected rep can file a fresh request later.
++const ASSIGNMENT_REQUEST_DDL = `CREATE TABLE IF NOT EXISTS "AssignmentRequest" (
++  "id" TEXT NOT NULL PRIMARY KEY,
++  "employeeId" TEXT NOT NULL,
++  "customerId" TEXT NOT NULL,
++  "status" TEXT NOT NULL DEFAULT 'pending',
++  "note" TEXT,
++  "adminNote" TEXT,
++  "decidedAt" DATETIME,
++  "decidedBy" TEXT,
++  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
++  "updatedAt" DATETIME NOT NULL
++)`
++const ASSIGNMENT_REQUEST_PENDING_INDEX_DDL =
++  `CREATE UNIQUE INDEX IF NOT EXISTS "AssignmentRequest_pending_key" ` +
++  `ON "AssignmentRequest"("employeeId","customerId") WHERE "status"='pending'`
++
+ export async function register() {
+   if (process.env.NEXT_RUNTIME !== 'nodejs') return
+   const { PrismaClient } = await import('@prisma/client')
+   const db = new PrismaClient()
+   let applied = 0
+-  for (const sql of [...MIGRATIONS, AUDIT_TABLE_DDL, PLANNED_VISIT_DDL, PLANNED_VISIT_INDEX_DDL, NOTIF_EVENTKEY_DDL, NOTIF_EVENTKEY_INDEX_DDL, PANEL_NOTIFICATION_DDL, PANEL_NOTIFICATION_INDEX_DDL]) {
++  for (const sql of [...MIGRATIONS, AUDIT_TABLE_DDL, PLANNED_VISIT_DDL, PLANNED_VISIT_INDEX_DDL, NOTIF_EVENTKEY_DDL, NOTIF_EVENTKEY_INDEX_DDL, PANEL_NOTIFICATION_DDL, PANEL_NOTIFICATION_INDEX_DDL, ASSIGNMENT_REQUEST_DDL, ASSIGNMENT_REQUEST_PENDING_INDEX_DDL]) {
+     try {
+       await db.$executeRawUnsafe(sql)
+       applied++
+diff -ruN orig/src/lib/audit.ts b/src/lib/audit.ts
+--- orig/src/lib/audit.ts	2026-10-28 12:12:51.000000000 +0000
++++ b/src/lib/audit.ts	2026-10-28 12:15:58.000000000 +0000
+@@ -16,6 +16,12 @@
+ 
+ export interface AuditInput {
+   action: string
++  /** package 6: by default the actor is the panel's admin account; the
++   *  app-side assignment-request creation overrides this with the acting
++   *  employee (actorType='employee', actorId=employee id — the schema's
++   *  actorType column anticipated non-admin actors). */
++  actorType?: 'admin' | 'employee'
++  actorId?: string
+   targetType?: string
+   targetId?: string
+   detail?: string
+@@ -24,10 +30,11 @@
+ 
+ export async function writeAudit(input: AuditInput): Promise<void> {
+   try {
+-    const actorId = await getConfig('adminUser', 'admin')
++    const actorType = input.actorType ?? 'admin'
++    const actorId = input.actorId ?? (await getConfig('adminUser', 'admin'))
+     await db.auditLog.create({
+       data: {
+-        actorType: 'admin',
++        actorType,
+         actorId,
+         action: input.action,
+         targetType: input.targetType ?? null,
+diff -ruN orig/src/lib/notify.ts b/src/lib/notify.ts
+--- orig/src/lib/notify.ts	2026-10-28 12:12:51.000000000 +0000
++++ b/src/lib/notify.ts	2026-10-28 12:15:43.000000000 +0000
+@@ -47,7 +47,7 @@
+   }
+ }
+ 
+-type AdminKind = 'checkin' | 'checkout' | 'assignment' | 'plan' | 'info'
++type AdminKind = 'checkin' | 'checkout' | 'assignment' | 'plan' | 'request' | 'info'
+ 
+ export async function notifyAdmin(opts: {
+   kind: AdminKind
+diff -ruN orig/src/lib/types.ts b/src/lib/types.ts
+--- orig/src/lib/types.ts	2026-10-28 12:12:51.000000000 +0000
++++ b/src/lib/types.ts	2026-10-28 12:17:22.000000000 +0000
+@@ -50,6 +50,23 @@
+   customer: { id: string; name: string }
+ }
+ 
++// package 6 (phase 2 / task 4) — customer assignment requests (rep → admin).
++// employee/customer are resolved lookups, null when the row was deleted
++// (no FK by design — the request history survives).
++export type AssignmentRequestStatus = 'pending' | 'approved' | 'rejected'
++
++export interface AssignmentRequest {
++  id: string
++  status: AssignmentRequestStatus
++  note?: string | null
++  adminNote?: string | null
++  createdAt: string
++  decidedAt?: string | null
++  decidedBy?: string | null
++  employee: { id: string; name: string; username: string; active: boolean } | null
++  customer: { id: string; name: string } | null
++}
++
+ // phase 2 / task 1 — planned field visits (the INTENT layer; Visit stays the
+ // source of truth for what actually happened).
+ export type PlanStatus = 'scheduled' | 'done' | 'cancelled' | 'needs_reschedule'

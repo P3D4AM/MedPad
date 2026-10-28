@@ -206,6 +206,37 @@ model Config {
   value String
 }
 
+// package 6 (phase 2 / task 4): customer assignment REQUESTS.
+//
+// The rep (مدرپ) asks the admin to be assigned a customer they know from
+// their own plans (the server only ever discloses ids it already showed
+// them); the admin approves or rejects from the panel.
+//  * employeeId/customerId are PLAIN STRINGS (no FK) — the request history
+//    survives employee/customer deletion (display falls back to «حذف‌شده»;
+//    approve on a missing row is refused with 409 and the admin can reject).
+//  * status: 'pending' | 'approved' | 'rejected' — decisions are terminal.
+//  * a PARTIAL unique index (employeeId, customerId WHERE status='pending')
+//    is created by instrumentation.ts at boot: at most ONE pending request
+//    per (rep, customer) — concurrent submits race into a P2002, not a
+//    duplicate. Decided requests never block a fresh request (a rejected
+//    rep may ask again later).
+//  * approve creates the real Assignment (its own @@unique makes double
+//    approval / racing with a manual assignment impossible) and notifies
+//    the rep via AppNotification; the admin bell hears about new requests
+//    via PanelNotification (kind='request').
+model AssignmentRequest {
+  id         String    @id @default(cuid())
+  employeeId String
+  customerId String
+  status     String    @default("pending") // pending | approved | rejected
+  note       String?   // the rep's note (≤500 chars, server-validated)
+  adminNote  String?   // the admin's decision note (visible to the rep)
+  decidedAt  DateTime?
+  decidedBy  String?   // admin username (Config.adminUser) at decision time
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+}
+
 // phase 1 / task 2 (G-3): administrative audit trail. Actor is the panel's
 // single admin account (Config.adminUser) — actorType leaves room for future
 // actor kinds. `detail` carries a short human-readable summary and MUST

@@ -148,4 +148,20 @@
     <string name="plan_type_other">مشتری</string>
     <string name="plan_status_hint_cancelled">این برنامه لغو شده است و قابل ثبت از اپ نیست.</string>
     <string name="plan_status_hint_done">این برنامه با یک بازدید واقعی تکمیل شده است.</string>
+
+    <!-- Assignment requests (package 6 — rep asks the admin for a customer) -->
+    <string name="arq_requests_title">درخواست‌های تخصیص</string>
+    <string name="arq_request_assign">درخواست تخصیص این مشتری</string>
+    <string name="arq_note_hint">یادداشت برای مدیر (اختیاری)</string>
+    <string name="arq_submit">ارسال درخواست</string>
+    <string name="arq_sent">درخواست تخصیص ثبت شد — پس از بررسی مدیر، نتیجه از طریق اعلان اعلام می‌شود</string>
+    <string name="arq_none">هنوز درخواستی ثبت نکرده‌اید. در جزئیات برنامهٔ یک مشتری منتسب‌نشده می‌توانید درخواست تخصیص بدهید.</string>
+    <string name="arq_load_error">دریافت درخواست‌ها ناموفق بود — اتصال به سرور لازم است</string>
+    <string name="arq_status_pending">در انتظار بررسی مدیر</string>
+    <string name="arq_status_approved">تأیید شد</string>
+    <string name="arq_status_rejected">رد شد</string>
+    <string name="arq_offline_hint">برای ثبت درخواست، اتصال به سرور لازم است</string>
+    <string name="arq_customer_label">مشتری درخواستی</string>
+    <string name="arq_admin_reply">پاسخ مدیر: %s</string>
+    <string name="arq_note_sent">یادداشت شما: %s</string>
 </resources>

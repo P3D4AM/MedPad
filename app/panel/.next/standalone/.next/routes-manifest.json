@@ -38,6 +38,22 @@
       "namedRegex": "^/api/app/customers/(?<nxtPid>[^/]+?)(?:/)?$"
     },
     {
+      "page": "/api/assignment-requests/[id]/approve",
+      "regex": "^/api/assignment\\-requests/([^/]+?)/approve(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/assignment\\-requests/(?<nxtPid>[^/]+?)/approve(?:/)?$"
+    },
+    {
+      "page": "/api/assignment-requests/[id]/reject",
+      "regex": "^/api/assignment\\-requests/([^/]+?)/reject(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/assignment\\-requests/(?<nxtPid>[^/]+?)/reject(?:/)?$"
+    },
+    {
       "page": "/api/checkins/[id]",
       "regex": "^/api/checkins/([^/]+?)(?:/)?$",
       "routeKeys": {
@@ -170,6 +186,12 @@
       "namedRegex": "^/api/admin/socket\\-auth(?:/)?$"
     },
     {
+      "page": "/api/app/assignment-requests",
+      "regex": "^/api/app/assignment\\-requests(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/app/assignment\\-requests(?:/)?$"
+    },
+    {
       "page": "/api/app/checkin",
       "regex": "^/api/app/checkin(?:/)?$",
       "routeKeys": {},
@@ -234,6 +256,12 @@
       "regex": "^/api/app/reports(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api/app/reports(?:/)?$"
+    },
+    {
+      "page": "/api/assignment-requests",
+      "regex": "^/api/assignment\\-requests(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/assignment\\-requests(?:/)?$"
     },
     {
       "page": "/api/assignments",

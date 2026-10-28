@@ -209,9 +209,12 @@ chk "NI8 emp2 never sees emp1's plan/assignment notifications" "py \"import json
 # ── NI9: upgrade path from the pre-package-4 database ────────
 (cd "$W/inst" && node server-manager.mjs stop --quiet > /dev/null 2>&1) || true
 # the DB the installer created was seeded from the NEW template; replace it
-# with the OLD (pre-package-4) shape to prove the migration path
+# with the OLD (pre-package-4) shape to prove the migration path.
+# Pinned to the v1.9.13-dev.2 TAG (the last release before package 4) —
+# "HEAD" advances with every package and stopped being pre-package-4 the
+# moment package 4 was committed (fixture fix, package 6 session).
 OLD_DB="$W/old-template.db"
-( cd /home/z/my-project/medpad-repo && git show HEAD:app/panel/db/template.db > "$OLD_DB" ) 2>/dev/null
+( cd "$PKG" && git show v1.9.13-dev.2:app/panel/db/template.db > "$OLD_DB" ) 2>/dev/null
 if [ -s "$OLD_DB" ]; then
   HAS_OLD=$(python3 -c "
 import sqlite3

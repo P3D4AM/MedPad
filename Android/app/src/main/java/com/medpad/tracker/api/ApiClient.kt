@@ -165,6 +165,17 @@ object ApiClient {
     @Throws(Exception::class)
     fun notifications(): JSONObject = exec(req("/api/app/notifications"))
 
+    // ── assignment requests (package 6 — rep asks the admin for a customer) ──
+    @Throws(Exception::class)
+    fun assignmentRequests(): JSONObject = exec(req("/api/app/assignment-requests"))
+
+    @Throws(Exception::class)
+    fun createAssignmentRequest(customerId: String, note: String): JSONObject {
+        val body = JSONObject().put("customerId", customerId).put("note", note)
+            .toString().toRequestBody("application/json".toMediaType())
+        return exec(req("/api/app/assignment-requests", "POST", body))
+    }
+
     @Throws(Exception::class)
     fun markNotificationsRead(ids: List<String>? = null): JSONObject {
         val body = JSONObject()

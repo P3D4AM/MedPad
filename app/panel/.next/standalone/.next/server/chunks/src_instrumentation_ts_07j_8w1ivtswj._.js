@@ -34,6 +34,17 @@ module.exports=[23322,T=>{"use strict";let E=['ALTER TABLE "AppToken" ADD COLUMN
   "customerId" TEXT,
   "readAt" DATETIME,
   "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-)`;async function L(){let{PrismaClient:L}=await T.A(83700),i=new L,A=0;for(let T of[...E,e,N,'CREATE UNIQUE INDEX IF NOT EXISTS "PlannedVisit_visitId_key" ON "PlannedVisit"("visitId")','ALTER TABLE "AppNotification" ADD COLUMN "eventKey" TEXT','CREATE UNIQUE INDEX IF NOT EXISTS "AppNotification_eventKey_key" ON "AppNotification"("eventKey")',t,'CREATE UNIQUE INDEX IF NOT EXISTS "PanelNotification_eventKey_key" ON "PanelNotification"("eventKey")'])try{await i.$executeRawUnsafe(T),A++}catch(e){let E=e instanceof Error?e.message:String(e);if(/duplicate column name|already exists/i.test(E))continue;console.error(`[medpad][migrate] FAILED: ${T} -> ${E}`)}await i.$disconnect(),A>0&&console.log(`[medpad][migrate] applied ${A} migration statement(s)`)}T.s(["register",0,L])}];
+)`,L=`CREATE TABLE IF NOT EXISTS "AssignmentRequest" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "employeeId" TEXT NOT NULL,
+  "customerId" TEXT NOT NULL,
+  "status" TEXT NOT NULL DEFAULT 'pending',
+  "note" TEXT,
+  "adminNote" TEXT,
+  "decidedAt" DATETIME,
+  "decidedBy" TEXT,
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" DATETIME NOT NULL
+)`;async function A(){let{PrismaClient:A}=await T.A(83700),i=new A,n=0;for(let T of[...E,e,N,'CREATE UNIQUE INDEX IF NOT EXISTS "PlannedVisit_visitId_key" ON "PlannedVisit"("visitId")','ALTER TABLE "AppNotification" ADD COLUMN "eventKey" TEXT','CREATE UNIQUE INDEX IF NOT EXISTS "AppNotification_eventKey_key" ON "AppNotification"("eventKey")',t,'CREATE UNIQUE INDEX IF NOT EXISTS "PanelNotification_eventKey_key" ON "PanelNotification"("eventKey")',L,'CREATE UNIQUE INDEX IF NOT EXISTS "AssignmentRequest_pending_key" ON "AssignmentRequest"("employeeId","customerId") WHERE "status"=\'pending\''])try{await i.$executeRawUnsafe(T),n++}catch(e){let E=e instanceof Error?e.message:String(e);if(/duplicate column name|already exists/i.test(E))continue;console.error(`[medpad][migrate] FAILED: ${T} -> ${E}`)}await i.$disconnect(),n>0&&console.log(`[medpad][migrate] applied ${n} migration statement(s)`)}T.s(["register",0,A])}];
 
 //# sourceMappingURL=src_instrumentation_ts_07j_8w1ivtswj._.js.map
