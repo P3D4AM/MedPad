@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * MedPad Server Manager v1.9.13-dev.2 — start / stop / restart / status / GUI
+ * MedPad Server Manager v1.9.13-dev.3 — start / stop / restart / status / GUI
  *
  * The ONE place where MedPad services are started and stopped (v1.9.11):
  *
@@ -59,7 +59,7 @@ const cfg = readConfig(__dirname)
 const PANEL_PORT = Number(cfg.panelPort) || 3000
 const RT_PORT = Number(cfg.rtPort) || 3003
 const PANEL_URL = `http://localhost:${PANEL_PORT}`
-const MANAGER_VER = '1.9.13-dev.2'
+const MANAGER_VER = '1.9.13-dev.3'
 
 const say = (m) => console.log(m)
 const ok = (m) => console.log(`[OK] ${m}`)

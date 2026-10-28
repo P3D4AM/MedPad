@@ -1,10 +1,10 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 chcp 65001 >nul 2>&1
-title MedPad Offline Installer v1.9.13-dev.2
+title MedPad Offline Installer v1.9.13-dev.3
 
 rem ============================================================
-rem  MedPad Offline Installer v1.9.13-dev.2
+rem  MedPad Offline Installer v1.9.13-dev.3
 rem
 rem  IMPORTANT: this file is ASCII-ONLY on purpose.
 rem  Windows cmd.exe cannot reliably parse batch files that
@@ -110,7 +110,7 @@ exit /b 0
 cd /d "%~dp0"
 echo.
 echo ==============================================
-echo   MedPad Offline Installer v1.9.13-dev.2
+echo   MedPad Offline Installer v1.9.13-dev.3
 echo   Node.js and all prerequisites are bundled.
 echo   100%% offline - no internet needed.
 echo ==============================================

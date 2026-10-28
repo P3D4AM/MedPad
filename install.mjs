@@ -130,7 +130,7 @@ function lanAddresses() {
 }
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url))
-export const INSTALLER_VER = '1.9.13-dev.2'
+export const INSTALLER_VER = '1.9.13-dev.3'
 const PANEL_PORT_DEFAULT = 3000
 const RT_PORT_DEFAULT = 3003
 const LOG = path.join(__dirname, 'install.log')
