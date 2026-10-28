@@ -19,7 +19,7 @@
 
 ## ۲. وضعیت فعلی مخزن (آخرین راستی‌آزمایی: Oct 29 — عامل فاز ۵-A)
 
-- **آخرین SHA تأییدشدهٔ `develop`:** `73806a6a57b9c8933347fbdb75f127eab5bb378b` — «feat(panel-notifications): phase 5-C — the notification-center bell UI …» (راستی‌آزمایی با fetch تازه + API گیت‌هاب؛ Oct 29 — عامل پروتکل دائمی). `main` دست‌نخورده: `8db3319`.
+- **آخرین SHA تأییدشدهٔ `develop`:** `052e777` — «docs(progress): phase 5-D — package 5 final verification & closure …» (راستی‌آزمایی با fetch تازه + API گیت‌هاب؛ Oct 29 — عامل پروتکل دائمی). `main` دست‌نخورده: `8db3319`. **بستهٔ ۵ کامل شد (۵-A تا ۵-D همه DONE_VERIFIED).**
 - بسته‌های ۰ تا ۴ و ۶ تا ۱۱ روی `develop` پوش و تأیید شده‌اند: `3be0bb0` (۰) · `9023eb9` (۱) · `68348df` (۲) · `0a610fc` (۳) · `eab7279` (۴) · `73e720f` (۶) · `22afd62` (۷) · `c1f199e` (۸) · `7b0996a` (۹) · `e42cc52` (۱۰) · `eaf48d1` (۱۱).
 - آخرین انتشار: **v1.9.13-dev.2** (2026-10-26؛ Pre-release با ZIP پنل + APK + هش‌ها). **هیچ dev.3 وجود ندارد** (تأیید مجدد با API ریلیزها؛ Oct 29).
 - نسخه‌های فعلی: INSTALLER_VER / APP-VERSION = `1.9.13-dev.2` · Android versionCode=13, versionName=`1.9.13-dev.2` · Room DB v10 · Prisma با `PlannedVisit` + `AppNotification.eventKey` + `PanelNotification` + `AuditLog` + `Customer.city/province` + تنظیم `defaultCity` (بستهٔ ۹).
