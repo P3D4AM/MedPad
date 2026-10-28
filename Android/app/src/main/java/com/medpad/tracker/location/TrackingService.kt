@@ -28,6 +28,7 @@ import com.medpad.tracker.db.PendingLocation
 import com.medpad.tracker.location.DeviceGps
 import com.medpad.tracker.sync.AppNotifier
 import com.medpad.tracker.sync.CheckinSync
+import com.medpad.tracker.sync.ServerNotifications
 import com.medpad.tracker.util.NotificationPrefs
 import com.medpad.tracker.ui.MainActivity
 import kotlinx.coroutines.Dispatchers
@@ -165,23 +166,18 @@ class TrackingService : LifecycleService() {
         // across polls/restarts via the persisted shown-id set — a poll that
         // succeeds while the mark-read call fails can no longer re-fire the
         // same notification on the next poll)
+        // P07 (permanent protocol): the poll now lives in ServerNotifications —
+        // display failures no longer silently lose the notification (dedup
+        // and mark-read happen ONLY after a successful display; failed ones
+        // are retried on the next poll) and read is marked per-id, never
+        // blanket mark-all.
         if (now - lastNotifPollAt > 40_000 && NotificationPrefs.serverEnabled) {
             lastNotifPollAt = now
             try {
                 if (Session.isLoggedIn) {
-                    val resp = ApiClient.notifications()
-                    val arr = resp.optJSONArray("notifications")
-                    if (arr != null) {
-                        for (i in 0 until arr.length()) {
-                            val n = arr.getJSONObject(i)
-                            if (n.has("readAt") && !n.isNull("readAt")) continue
-                            val id = n.getString("id")
-                            if (NotificationPrefs.wasShown(applicationContext, id)) continue
-                            NotificationPrefs.markShown(applicationContext, id)
-                            AppNotifier.notify(this@TrackingService, id.hashCode(), n.optString("title"), n.optString("body"))
-                        }
+                    ServerNotifications.pollOnce(applicationContext) { id, title, body ->
+                        AppNotifier.notify(this@TrackingService, id, title, body)
                     }
-                    ApiClient.markNotificationsRead(null)
                 }
             } catch (_: Exception) { /* offline */ }
         }

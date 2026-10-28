@@ -9,7 +9,14 @@ import com.medpad.tracker.TrackerApp
 /** Shared helper for in-app notifications (service + activities). */
 object AppNotifier {
 
-    fun notify(context: Context, id: Int, title: String, text: String) {
+    /** P07 (permanent protocol): returns true when the notification was
+     *  successfully handed to the system NotificationManager, false when
+     *  the display failed (app notifications disabled, channel blocked,
+     *  manager error…). Callers that track delivery (the server-notification
+     *  poll) use the result to keep the notification for a retry instead of
+     *  silently losing it; fire-and-forget callers (proximity alerts) may
+     *  ignore it. */
+    fun notify(context: Context, id: Int, title: String, text: String): Boolean {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val n = NotificationCompat.Builder(context, TrackerApp.CHANNEL_ALERTS)
             .setSmallIcon(R.drawable.ic_calendar)
@@ -18,10 +25,11 @@ object AppNotifier {
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setAutoCancel(true)
             .build()
-        try {
+        return try {
             nm.notify(id, n)
+            true
         } catch (_: Exception) {
-            /* notifications disabled */
+            false // notifications disabled — caller may retry later
         }
     }
 }
