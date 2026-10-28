@@ -1152,3 +1152,25 @@ Work Log:
 Stage Summary:
 - فاز ۵-B کامل: قرارداد API اعلان‌های پنل مستند/آزمون‌شد (62 چک full + 43 رگرسیون + 32 baseline)، دو نقص اثبات‌شده در سورس اصلاح و در وصلهٔ panel-src-phase2-package5 ماندگار شد. UI فاز ۵-C باید totalUnread ?? unread مصرف کند، فهرست را «آخرین اعلان‌ها» بنامد، و پس از mark-all همیشه refetch کند.
 - تأیید Push فاز ۵-B: SHA ریموت `4386f192241b9c1d3a8d818946fada49bc71bf69` با fetch تازه + API گیت‌هاب تأیید شد (develop). `main` دست‌نخورده: `8db3319` (تأیید API). وضعیت P05-B → DONE_VERIFIED.
+
+---
+Task ID: 39
+Agent: main (Z.ai — permanent-protocol session)
+Task: فاز P05-C — رابط کاربری زنگ مرکز اعلان‌ها (طبق پروتکل دائمی؛ ادامهٔ مستقیم پس از P05-B)
+Date: Oct 29, 2026
+
+Work Log:
+- بررسی نقاط ادغام: Dashboard.tsx (هدر، ۳۰۵ خط)؛ تنها زنگ موجود = دکمهٔ «اعلان‌های مرورگر» پایه (requestNotifyPermission)؛ سوکت با useRealtimeSocket و رویدادهای checkin/checkout/notification/proximity/customer-added → bumpRefresh (debounce 400ms).
+- پیاده‌سازی NotificationsBell.tsx (جدید، ~290 خط): نشانگر totalUnread ?? unread با سقف نمایش 99+، polling 30s (غیرفعال وقتی tab hidden)، refetch در باز شدن popover و پس از هر علامت‌گذاری، علامت‌گذاری تکی/همه، حالت‌های loading/empty/error+retry/expired+relogin، آیکون kind با fallback، تاریخ فارسی، dir=rtl، popover واکنش‌گرا w-[min(92vw,24rem)] با max-h-80 scroll، برچسب پنجرهٔ ۱۰۰تایی.
+- دفاع‌های ۵-A: H1 refetch تضمینی (پاسخ POST بدون شمارنده) · H2 data-testid برای همهٔ عناصر (bell-button/bell-unread-count/bell-list/bell-item-*/bell-mark-one-*/bell-mark-all/bell-empty/bell-loading/bell-error/bell-retry/bell-session-expired/bell-relogin) · H3 توقف polling پس از 401 + حالت صریح + ورود مجدد · H4 نسخه‌بندی پاسخ‌ها (seq ref) + رویداد سوکت فقط از طریق refreshSignal از والد.
+- ادغام Dashboard: <NotificationsBell refreshSignal={refreshKey} onSessionExpired={logout}/> در هدر قبل از زنگ مجوز؛ زنگ پایه دست‌نخورده (قابلیت مکمل).
+- بیلد: همان فرایند ثبت‌شدهٔ Task 38 (npm install موجود + prisma generate + npm run build)؛ کد زنگ در چانک‌های SSR و static تأیید شد.
+- درس مهم مونتاژ باندل: کپی کامل .next (به‌جای چیدمان قراردادی {BUILD_ID, standalone, static}) دو شکست سخت‌سازی داد: (۱) sourcemap غیرقابل‌ship حاوی متن کامنت سورس login/route.ts با رشتهٔ admin123 (در چانک‌های minified نیست — بررسی شد؛ false-positive از نظر امنیتی ولی طبق قرارداد نباید در باندل باشد)؛ (۲) symlinkهای .next/node_modules و standalone/.next/node_modules (bcryptjs/@prisma). حل: مونتاژ باریک فقط سه مسیر با cp -rL. پس از آن ۱۵/۱۵ چک سخت‌سازی سبز (روی باندل مرجع هم اجرا شد — baseline معتبر).
+- تست UI جدید test-panel-bell-ui.sh (BU0–BU8، Playwright): اجرای اول ۲۹/۳۱ — باگ انتظار خود تست (شمارش ۴ ردیف بعد از mark-one + دو رویداد جدید؛ محصول درست بود)؛ اصلاح شد؛ اجرای دوم روی باندل باریک‌شده ۳۱/۳۱ (ALL-P5UI-CHECKS-PASS).
+- رگرسیون روی باندل نهایی: NI 43/43 · P5API 62/62 (MODE=full) — هر دو پس از باریک‌سازی دوباره اجرا شدند.
+- وصلهٔ panel-src-phase2-package5.patch بازتولید شد (۴ فایل: دو route از ۵-B + Dashboard.tsx + NotificationsBell.tsx جدید)؛ زنجیرهٔ ۱۱-وصله‌ای روی استخراج تازه: صفر reject، هر ۴ فایل بایت‌به‌بایت هم‌ارز سورس تست‌شده، هیچ فایل دیگری تفاوت ندارد.
+- باندل مخزن (app/panel/.next) با بیلد جدید جایگزین شد (۸۲ M + ۱۵ D + ۶ A در git)؛ template.db/prisma-schema/uploads بدون تغییر.
+- تغییرات محصول اندروید: هیچ. main دست‌نخورده (8db3319). بدون ریلیز.
+
+Stage Summary:
+- فاز ۵-C کامل: زنگ مرکز اعلان‌ها در سورس و باندل کامیت‌شده حاضر است؛ همهٔ الزامات دفاعی H1–H4 در مرورگر واقعی اثبات شد (۳۱/۳۱)؛ رگرسیون سبز (NI 43/43، P5API 62/62)؛ سخت‌سازی ۱۵/۱۵؛ زنجیرهٔ وصله‌ها تمیز. قدم بعدی: ۵-D (رگرسیون ۶ سوئیت + بسته‌بندی نهایی).

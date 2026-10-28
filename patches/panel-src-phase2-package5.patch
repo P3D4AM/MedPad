@@ -96,3 +96,362 @@ diff -ruN orig/src/app/api/panel-notifications/route.ts b/src/app/api/panel-noti
 -  return NextResponse.json({ ok: true, notifications: rows, unread })
 +  return NextResponse.json({ ok: true, notifications: rows, unread, totalUnread })
  }
+diff -ruN orig/src/components/panel/Dashboard.tsx b/src/components/panel/Dashboard.tsx
+--- orig/src/components/panel/Dashboard.tsx	2026-10-28 17:43:48.725778731 +0000
++++ b/src/components/panel/Dashboard.tsx	2026-10-28 18:53:56.399056209 +0000
+@@ -29,6 +29,8 @@
+ import EmployeesTab from './EmployeesTab'
+ import PlansTab from './PlansTab'
+ import CityPicker from './CityPicker'
++// package 5 / phase 5-C — the panel's notification center (persisted bell)
++import NotificationsBell from './NotificationsBell'
+ import type { Checkin, PanelConfigInfo, RealtimeEvent } from '@/lib/types'
+ import {
+   browserNotify,
+@@ -187,6 +189,12 @@
+             <Button variant="ghost" size="icon" title="تنظیمات" onClick={() => setShowSettings(true)}>
+               <Settings className="h-4 w-4" />
+             </Button>
++            {/* package 5 / phase 5-C — persisted notification center: list +
++                unread badge + mark one/all; refreshSignal makes realtime
++                events trigger a refetch (H4); expired sessions surface
++                explicitly (H3). The base "browser permission" bell below is
++                a different, complementary feature (Notification API grant). */}
++            <NotificationsBell refreshSignal={refreshKey} onSessionExpired={logout} />
+             <Button variant="ghost" size="icon" title="اعلان‌های مرورگر" onClick={requestNotifyPermission}>
+               <Bell className="h-4 w-4" />
+             </Button>
+diff -ruN orig/src/components/panel/NotificationsBell.tsx b/src/components/panel/NotificationsBell.tsx
+--- orig/src/components/panel/NotificationsBell.tsx	1970-01-01 00:00:00.000000000 +0000
++++ b/src/components/panel/NotificationsBell.tsx	2026-10-28 18:53:59.101066970 +0000
+@@ -0,0 +1,330 @@
++'use client'
++
++import { useCallback, useEffect, useRef, useState } from 'react'
++import { Button } from '@/components/ui/button'
++import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
++import { useToast } from '@/hooks/use-toast'
++import {
++  BellRing,
++  CalendarClock,
++  Check,
++  DoorOpen,
++  HelpCircle,
++  Info,
++  MapPin,
++  RefreshCw,
++  UserPlus,
++} from 'lucide-react'
++import { faDateTime } from '@/lib/realtime'
++
++/**
++ * package 5 / phase 5-C — the PANEL's notification center (the bell).
++ *
++ * Consumes the package-4/5-B API:
++ *   GET  /api/panel-notifications        -> { notifications, unread, totalUnread? }
++ *   POST /api/panel-notifications/read   -> { ids: [id] } | {} (mark all)
++ *
++ * Phase 5-A defensive requirements (WORKLOG Task ID: 36) implemented here:
++ *   H1 — the list/counters are ALWAYS refetched after mark-one/mark-all
++ *        (the response carries no counters on purpose); stable data-testid
++ *        selectors, never Persian text, are the automation contract.
++ *   H2 — every interactive element has a data-testid; Persian strings are
++ *        visual labels only.
++ *   H3 — a 401 is handled EXPLICITLY: polling stops, an understandable
++ *        expired-session state with a re-login action is shown; never a
++ *        silent failed fetch.
++ *   H4 — realtime socket events only TRIGGER a refetch (refreshSignal
++ *        prop); responses are versioned (seq) so a stale in-flight fetch
++ *        can never overwrite a newer one.
++ *
++ * 5-B contract notes:
++ *   - the badge uses totalUnread (whole table) with fallback to unread
++ *     (window) on pre-5-B bundles;
++ *   - the list is labelled «آخرین اعلان‌ها» — the API returns the latest
++ *     100 rows, never promise "all";
++ *   - mark-all posts `{}` (ids ABSENT). `ids: []` is a hard 400 since 5-B.
++ */
++
++type PanelNotificationRow = {
++  id: string
++  kind: string
++  title: string
++  body: string
++  employeeId?: string | null
++  customerId?: string | null
++  readAt?: string | null
++  createdAt: string
++}
++
++const POLL_MS = 30_000
++
++const KIND_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
++  checkin: MapPin,
++  checkout: DoorOpen,
++  assignment: UserPlus,
++  plan: CalendarClock,
++  request: HelpCircle, // package 6 — assignment requests
++  info: Info,
++}
++
++function KindIcon({ kind }: { kind: string }) {
++  const Icon = KIND_ICON[kind] ?? Info // unknown kinds degrade gracefully, never break the list
++  return <Icon className="mt-0.5 h-4 w-4 shrink-0 text-teal-700" />
++}
++
++export default function NotificationsBell({
++  refreshSignal = 0,
++  onSessionExpired,
++}: {
++  /** bump this from the parent's realtime handler — H4: socket only triggers a refetch */
++  refreshSignal?: number
++  /** called when the bell itself detects an expired admin session (H3) */
++  onSessionExpired: () => void
++}) {
++  const { toast } = useToast()
++  const [open, setOpen] = useState(false)
++  const [items, setItems] = useState<PanelNotificationRow[]>([])
++  const [unread, setUnread] = useState(0) // package-4 window counter
++  const [totalUnread, setTotalUnread] = useState<number | null>(null) // 5-B whole-table counter
++  const [status, setStatus] = useState<'loading' | 'ready' | 'error' | 'expired'>('loading')
++  const [markingAll, setMarkingAll] = useState(false)
++  const [markingIds, setMarkingIds] = useState<Set<string>>(new Set())
++
++  const seq = useRef(0) // H4: response versioning — only the newest response may set state
++  const expiredRef = useRef(false) // H3: polling stops after the first 401
++
++  const load = useCallback(async () => {
++    if (expiredRef.current) return
++    const mySeq = ++seq.current
++    try {
++      const res = await fetch('/api/panel-notifications', { cache: 'no-store' })
++      if (res.status === 401) {
++        if (seq.current === mySeq) {
++          expiredRef.current = true // stop polling (H3)
++          setStatus('expired')
++        }
++        return
++      }
++      if (!res.ok) throw new Error(String(res.status))
++      const d = (await res.json()) as {
++        notifications?: PanelNotificationRow[]
++        unread?: number
++        totalUnread?: number
++      }
++      if (seq.current !== mySeq) return // stale response — discard (H4)
++      setItems(Array.isArray(d.notifications) ? d.notifications : [])
++      setUnread(Number(d.unread ?? 0))
++      setTotalUnread(typeof d.totalUnread === 'number' ? d.totalUnread : null)
++      setStatus('ready')
++    } catch {
++      if (seq.current === mySeq) setStatus((s) => (s === 'expired' ? s : 'error'))
++    }
++  }, [])
++
++  // initial load + polling (skipped while the tab is hidden)
++  useEffect(() => {
++    load()
++    const t = setInterval(() => {
++      if (!document.hidden) load()
++    }, POLL_MS)
++    return () => clearInterval(t)
++  }, [load])
++
++  // realtime signal from the parent (H4) — refetch only, never write state directly
++  useEffect(() => {
++    if (refreshSignal > 0) load()
++  }, [refreshSignal, load])
++
++  const markOne = useCallback(
++    async (id: string) => {
++      setMarkingIds((s) => new Set(s).add(id))
++      try {
++        const res = await fetch('/api/panel-notifications/read', {
++          method: 'POST',
++          headers: { 'content-type': 'application/json' },
++          body: JSON.stringify({ ids: [id] }),
++        })
++        if (res.status === 401) {
++          expiredRef.current = true
++          setStatus('expired')
++          return
++        }
++        if (!res.ok) throw new Error(String(res.status))
++      } catch {
++        toast({ title: 'علامت‌گذاری ناموفق بود', variant: 'destructive' })
++        return
++      } finally {
++        setMarkingIds((s) => {
++          const n = new Set(s)
++          n.delete(id)
++          return n
++        })
++      }
++      await load() // H1: ALWAYS refetch after marking
++    },
++    [load, toast],
++  )
++
++  const markAll = useCallback(async () => {
++    setMarkingAll(true)
++    try {
++      const res = await fetch('/api/panel-notifications/read', {
++        method: 'POST',
++        headers: { 'content-type': 'application/json' },
++        // ids deliberately ABSENT — the 5-B contract: ids:[] is a hard 400
++        body: '{}',
++      })
++      if (res.status === 401) {
++        expiredRef.current = true
++        setStatus('expired')
++        return
++      }
++      if (!res.ok) throw new Error(String(res.status))
++    } catch {
++      toast({ title: 'علامت‌گذاری همه ناموفق بود', variant: 'destructive' })
++      return
++    } finally {
++      setMarkingAll(false)
++    }
++    await load() // H1: ALWAYS refetch after mark-all — the badge must reach 0
++  }, [load, toast])
++
++  const badge = totalUnread ?? unread // 5-B: whole table, fallback on old bundles
++  const hasUnread = badge > 0
++
++  return (
++    <Popover
++      open={open}
++      onOpenChange={(o) => {
++        setOpen(o)
++        if (o) load() // refresh on every open
++      }}
++    >
++      <PopoverTrigger asChild>
++        <Button
++          variant="ghost"
++          size="icon"
++          title="مرکز اعلان‌ها"
++          aria-label="مرکز اعلان‌ها"
++          data-testid="bell-button"
++          className="relative"
++        >
++          <BellRing className="h-4 w-4" />
++          {hasUnread && (
++            <span
++              data-testid="bell-unread-count"
++              className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-none text-white"
++            >
++              {badge > 99 ? '99+' : badge}
++            </span>
++          )}
++        </Button>
++      </PopoverTrigger>
++      <PopoverContent align="end" dir="rtl" className="w-[min(92vw,24rem)] p-0">
++        <div className="flex items-center justify-between border-b px-3 py-2">
++          <div className="flex items-center gap-1.5 text-sm font-bold">
++            <BellRing className="h-4 w-4 text-teal-700" />
++            مرکز اعلان‌ها
++          </div>
++          <Button
++            variant="ghost"
++            size="sm"
++            data-testid="bell-mark-all"
++            onClick={markAll}
++            disabled={!hasUnread || markingAll || status === 'expired'}
++            className="h-7 px-2 text-xs text-teal-700 hover:text-teal-800"
++          >
++            {markingAll ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
++            همه خوانده شد
++          </Button>
++        </div>
++
++        <div className="max-h-80 overflow-y-auto">
++          {status === 'loading' && (
++            <p data-testid="bell-loading" className="px-3 py-8 text-center text-sm text-muted-foreground">
++              در حال بارگذاری…
++            </p>
++          )}
++
++          {status === 'expired' && (
++            <div data-testid="bell-session-expired" className="px-3 py-6 text-center">
++              <p className="text-sm">نشست شما منقضی شده است.</p>
++              <p className="mt-1 text-xs text-muted-foreground">برای مشاهدهٔ اعلان‌ها دوباره وارد شوید.</p>
++              <Button data-testid="bell-relogin" size="sm" onClick={onSessionExpired} className="mt-3 bg-teal-600 hover:bg-teal-700">
++                ورود مجدد
++              </Button>
++            </div>
++          )}
++
++          {status === 'error' && (
++            <div data-testid="bell-error" className="px-3 py-6 text-center">
++              <p className="text-sm">دریافت اعلان‌ها ناموفق بود.</p>
++              <Button
++                data-testid="bell-retry"
++                size="sm"
++                variant="outline"
++                className="mt-3"
++                onClick={() => {
++                  expiredRef.current = false
++                  load()
++                }}
++              >
++                تلاش مجدد
++              </Button>
++            </div>
++          )}
++
++          {status === 'ready' && items.length === 0 && (
++            <div data-testid="bell-empty" className="px-3 py-8 text-center">
++              <p className="text-sm">اعلان جدیدی ندارید.</p>
++              <p className="mt-1 text-xs text-muted-foreground">چک‌این‌ها، انتساب‌ها و تغییر برنامه‌ها اینجا نمایش داده می‌شوند.</p>
++            </div>
++          )}
++
++          {status === 'ready' && items.length > 0 && (
++            <ul data-testid="bell-list">
++              {items.map((n) => {
++                const isUnread = !n.readAt
++                const marking = markingIds.has(n.id)
++                return (
++                  <li
++                    key={n.id}
++                    data-testid={`bell-item-${n.id}`}
++                    className={`flex gap-2 border-b px-3 py-2 last:border-b-0 ${isUnread ? 'bg-teal-50/50' : 'opacity-70'}`}
++                  >
++                    <KindIcon kind={n.kind} />
++                    <div className="min-w-0 flex-1">
++                      <div className="flex items-start gap-1.5">
++                        <p className={`min-w-0 flex-1 text-sm leading-snug ${isUnread ? 'font-semibold' : ''}`}>{n.title}</p>
++                        {isUnread && (
++                          <button
++                            data-testid={`bell-mark-one-${n.id}`}
++                            title="علامت‌گذاری به‌عنوان خوانده‌شده"
++                            aria-label="علامت‌گذاری به‌عنوان خوانده‌شده"
++                            onClick={() => markOne(n.id)}
++                            disabled={marking}
++                            className="mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-teal-700 disabled:opacity-50"
++                          >
++                            {marking ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
++                          </button>
++                        )}
++                      </div>
++                      {n.body ? <p className="mt-0.5 break-words text-xs text-muted-foreground">{n.body}</p> : null}
++                      <p className="mt-1 text-[11px] text-muted-foreground/80">{faDateTime(n.createdAt)}</p>
++                    </div>
++                  </li>
++                )
++              })}
++            </ul>
++          )}
++        </div>
++
++        {status === 'ready' && items.length >= 100 && (
++          <p className="border-t px-3 py-1.5 text-center text-[11px] text-muted-foreground">
++            ۱۰۰ اعلان آخر نمایش داده می‌شود.
++          </p>
++        )}
++      </PopoverContent>
++    </Popover>
++  )
++}

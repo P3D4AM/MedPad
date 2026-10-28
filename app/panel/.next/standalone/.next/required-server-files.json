@@ -106,7 +106,7 @@
         "transform": "lodash/{{member}}"
       }
     },
-    "outputFileTracingRoot": "/home/z/my-project/work/panel-src",
+    "outputFileTracingRoot": "/home/z/my-project/medpad-work/p5b-src",
     "enablePrerenderSourceMaps": true,
     "cacheComponents": false,
     "cacheLife": {
@@ -340,9 +340,9 @@
     ],
     "skipTrailingSlashRedirect": true,
     "turbopack": {
-      "root": "/home/z/my-project/work/panel-src"
+      "root": "/home/z/my-project/medpad-work/p5b-src"
     },
-    "repoRoot": "/home/z/my-project/work/panel-src",
+    "repoRoot": "/home/z/my-project/medpad-work/p5b-src",
     "distDirRoot": ".next",
     "_originalRewrites": {
       "beforeFiles": [],
@@ -363,7 +363,7 @@
       "fallback": []
     }
   },
-  "appDir": "/home/z/my-project/work/panel-src",
+  "appDir": "/home/z/my-project/medpad-work/p5b-src",
   "relativeAppDir": "",
   "files": [
     ".next/package.json",
