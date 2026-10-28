@@ -1,0 +1,36 @@
+diff -ruN orig/public/downloads.html b/public/downloads.html
+--- orig/public/downloads.html	2026-10-25 06:58:53.000000000 +0000
++++ b/public/downloads.html	2026-10-28 12:01:17.000000000 +0000
+@@ -46,7 +46,7 @@
+   <p class="sub">بسته‌های رسمی سیستم کنترل کارمندها — همه فایل‌ها md5-تأییدشده هستند</p>
+ 
+   <div class="card">
+-    <h2>📱 اپ اندروید بازاریاب <span class="ver">APK ۱.۹.۱</span> <span class="new">آخرین</span></h2>
++    <h2>📱 اپ اندروید مدرپ <span class="ver">APK ۱.۹.۱</span> <span class="new">آخرین</span></h2>
+     <p class="desc">
+       چک‌این با متن + ضبط صدا، چک‌اوت اجباری (متن ≥۱۰ نویسه بدون Paste + صدا)، صف آفلاین با ضدثبت‌دوبل سه‌لایه،
+       تب «گزارش‌های من» با تقویم شمسی، نقشه با پن تک‌انگشتی و ثبت با نگه‌داشتن ۱ ثانیه، اعلان‌ها و ادیت مشتری.
+diff -ruN orig/src/app/layout.tsx b/src/app/layout.tsx
+--- orig/src/app/layout.tsx	2026-10-25 06:58:53.000000000 +0000
++++ b/src/app/layout.tsx	2026-10-28 12:01:18.000000000 +0000
+@@ -5,7 +5,7 @@
+ export const metadata: Metadata = {
+   title: "MedPad — سیستم کنترل کارمندها",
+   description:
+-    "پنل مدیریت مدپد: چک‌این/چک‌اوت بازاریاب‌ها با گزارش صوتی، نقشه مشتریان و اعلان‌های لحظه‌ای",
++    "پنل مدیریت مدپد: چک‌این/چک‌اوت مدرپ‌ها با گزارش صوتی، نقشه مشتریان و اعلان‌های لحظه‌ای",
+   icons: { icon: "/logo.svg" },
+ };
+ 
+diff -ruN orig/src/components/panel/OverviewTab.tsx b/src/components/panel/OverviewTab.tsx
+--- orig/src/components/panel/OverviewTab.tsx	2026-10-28 12:12:51.000000000 +0000
++++ b/src/components/panel/OverviewTab.tsx	2026-10-28 12:01:17.000000000 +0000
+@@ -84,7 +84,7 @@
+             <div className="divide-y mp-scroll">
+               {notifs.length === 0 && (
+                 <p className="p-6 text-center text-sm text-muted-foreground">
+-                  هنوز رویدادی ثبت نشده — وقتی بازاریاب وارد محدوده مشتری شود یا مشتری به او اختصاص یابد، اینجا نمایش داده می‌شود
++                  هنوز رویدادی ثبت نشده — وقتی مدرپ وارد محدوده مشتری شود یا مشتری به او اختصاص یابد، اینجا نمایش داده می‌شود
+                 </p>
+               )}
+               {notifs.map((n) => (

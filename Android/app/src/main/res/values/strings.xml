@@ -3,7 +3,7 @@
     <string name="app_name">MedPad</string>
 
     <!-- Login (no guest mode) -->
-    <string name="login_title">MedPad بازاریاب</string>
+    <string name="login_title">MedPad مدرپ</string>
     <string name="server_url">آدرس سرور</string>
     <string name="server_url_hint">http://192.168.1.10:3000</string>
     <string name="username">نام کاربری</string>
