@@ -1123,3 +1123,31 @@ Work Log:
 
 Stage Summary:
 - P00 تحت پروتکل جدید تثبیت شد: وضعیت واقعی مخزن و فازها با شواهد تازه ثبت و پروتکل برای اجراهای بعدی ماندگار شد. عامل بعدی باید مستقیماً از جدول بخش ۲.۲ PROGRESS ادامه دهد: اولین فاز ناقص = P05-B.
+
+---
+Task ID: 38
+Agent: main (Z.ai — permanent-protocol session)
+Task: فاز P05-B — تکمیل منطق داده و API اعلان‌های پنل (طبق پروتکل دائمی؛ ادامهٔ مستقیم پس از P00)
+Date: Oct 29, 2026
+
+Work Log:
+- مبنای سورس: استخراج تازهٔ blob پایه + زنجیرهٔ ۱۰-وصله‌ای تمیز در p5b-src → بایت‌به‌بایت هم‌ارز chain-test2 (درخت تأییدشدهٔ فاز صفر؛ صفر تفاوت، صفر rej). بررسی کامل سورس API اعلان‌ها + auth + notify + اسکیما.
+- یافته‌های بررسی: احراز هویت isAdmin (کوکی medpad_admin ↔ Config.adminSession) سالم و جدا از توکن‌های اپ؛ اعلان‌های پنل سراسری (تک‌مدیره، طراحی بستهٔ ۴)؛ دی‌داپ eventKey + P2002 سالم؛ دو نقص اثبات‌شده (شمارندهٔ پنجره‌ای ۱۰۰تایی؛ سقوط ids خراب به mark-all خاموش + 500 برای ids غیررشته‌ای).
+- اصلاحات (۲ فایل، افزایشی): GET فیلد totalUnread (count کل جدول) افزود؛ unread دست‌نخورده. POST /read سخت‌سازی: bad-body برای بدنهٔ غیرشیء JSON، bad-ids برای ids تهی/غیرآرایه/غیررشته‌ای/بیش از ۱۰۰۰؛ ids غایب/null = قرارداد mark-all (سازگار با NI6). پاسخ بدون شمارنده ماند (اجبار refetch — دفاع H1).
+- فرایند بیلد بازسازی‌شده (برای P11/5-D قابل تکرار):
+  1. `npm install --no-audit --no-fund` (npm 11.19.1؛ هشدار install-scripts ولی انجین‌ها داخل tarball @prisma/engines حاضر بودند)
+  2. `DATABASE_URL="file:./dev.db" npx prisma generate` → node_modules/.prisma/client با هر سه انجین (debian .so + windows .dll + wasm) — فهرست فایل‌ها با باندل مرجع مقایسه شد
+  3. `DATABASE_URL="file:./build-time.db" npm run build` (next 16.4.3 standalone + cp static/public)
+  4. بررسی‌ها: هر دو مسیر اعلان در فهرست روت‌ها ✓ · static/public داخل standalone ✓ · بدون .env ✓ · totalUnread/bad-ids در چانک‌های سرور ✓ · این بار tracer خودش .prisma را کپی کرد (بررسی شد، نه فرض)
+  5. استیجینگ: `git archive HEAD` + جایگزینی app/panel با بیلد جدید؛ template.db و prisma-schema.prisma و uploads از باندل کامیت‌شده (اسکیما تغییر نکرد — cmp یکسان)
+- تست‌ها (همه واقعی، نصب تازه از install.mjs + بوت server-manager):
+  - سوئیت جدید test-panel-notifications-api.sh (PKG_DIR=استیجینگ) → اجرای اول ۶۰/۶۲: دو باگ خود اسکریپت (جابجایی sys.argv[1]/[2] در heredoc پایتونی PN8) → اصلاح → اجرای دوم ۶۲/۶۲ MODE=full (ALL-P5API-CHECKS-PASS). درس ۵-A (باگ اجرای اول اسکریپت) تکرار شد و صادقانه ثبت می‌شود.
+  - رگرسیون NI روی استیجینگ بدون .git → ۳۸+۱: شکست محیطی NI9 (استخراج template قدیمی از git history)؛ استیجینگ دوم p5b-repo (کلون کامل + باندل جدید) → NI کامل ۴۳/۴۳ (ALL-NOTIF-CHECKS-PASS). درس: برای NI9، PKG باید مخزن git کامل باشد.
+  - سوئیت جدید روی باندل کامیت‌شده (repo خود) → MODE=baseline: ۳۲ سبز/۰ شکست/۴ skip — probe قرارداد به‌طور خودکار totalUnread را تشخیص می‌دهد؛ تا بازسازی باندل ۵-D شکست کاذبی نیست.
+  - زنجیرهٔ ۱۱-وصله‌ای (۱۰ وصله + panel-src-phase2-package5.patch) روی استخراج تازه: صفر reject؛ خروجی بایت‌به‌بایت هم‌ارز سورس تست‌شده (cmp).
+- وصلهٔ سورس: patches/panel-src-phase2-package5.patch با قرارداد orig/b (مشابه وصله‌های قبلی؛ اعمال با patch -p1 روی نتیجهٔ زنجیرهٔ ۱۰-وصله‌ای).
+- تغییرات محصول در باندل کامیت‌شده: هیچ (عمدی — بازسازی باندل در ۵-C/۵-D). main دست‌نخورده (8db3319). بدون ریلیز.
+- پس از Push و تأیید SHA: ادامهٔ مستقیم به فاز ۵-C طبق بخش ۹ پروتکل.
+
+Stage Summary:
+- فاز ۵-B کامل: قرارداد API اعلان‌های پنل مستند/آزمون‌شد (62 چک full + 43 رگرسیون + 32 baseline)، دو نقص اثبات‌شده در سورس اصلاح و در وصلهٔ panel-src-phase2-package5 ماندگار شد. UI فاز ۵-C باید totalUnread ?? unread مصرف کند، فهرست را «آخرین اعلان‌ها» بنامد، و پس از mark-all همیشه refetch کند.
