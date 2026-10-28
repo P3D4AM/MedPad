@@ -1322,3 +1322,27 @@ Stage Summary:
 - P09 تکمیل شد: سیاست امنیت انتقال داده مستند و عملی شد — LAN بی‌تغییر، http عمومی با هشدار آگاهانهٔ فارسی، HTTPS ترجیحی؛ اثبات با ۷ تست مرزی + ۴۴/۴۴ کل. توکن در query رسانه به‌عنوان ریسک شناخته‌شدهٔ قراردادی ثبت و برای P13 صفحه‌آرایی شد.
 - پس از Push و تأیید SHA: ادامهٔ مستقیم به P10 طبق بخش ۹ پروتکل.
 - تأیید Push فاز P09: SHA ریموت `b50fbbfb8d1facd3fa2b3a9bb436753d975ba9d0` با fetch تازه + API گیت‌هاب تأیید شد (develop؛ ۶ فایل: +۲۵۷/−۱). `main` دست‌نخورده: `8db3319` (تأیید API). وضعیت P09 → **DONE_VERIFIED**. قدم بعدی: P10 طبق بخش ۹ پروتکل.
+
+---
+Task ID: 46
+Agent: main (Z.ai)
+Task: انتشار DEV Release v1.9.13-dev.3 — مجوز صریح مالک («تا اینجا ریلیزها رو منتشر کن. ریلیز DEV ای رو ریپو نمیبینم»)؛ پوشش ۴۱ کامیت develop بعد از آخرین ریلیز (v1.9.13-dev.2، Oct 26)
+
+Work Log:
+- **بازیابی §۳:** develop=`d532fbc` همگام ریموت (fetch + ls-remote) · working tree تمیز · جدول فازها با پیام کامیت‌ها تطبیق شد: P00، P05-A..D، P06، P07، P08، P09 همه DONE_VERIFIED؛ فاز ناقص بعدی P10 · API ریلیزها (احراز با توکن remote): ۴ ریلیز موجود (آخرین dev.2) → تأیید شکایت مالک: هیچ ریلیزی ۴۱ کامیت اخیر (بسته‌های ۶–۱۱ + مرکز اعلان‌ها + P06–P09) را پوشش نمی‌داد · main=`8db3319` دست‌نخورده.
+- **bump نسخه (کامیت `5910fb1`):** ۱۸ جایگزینی هدفمند در ۱۰ فایل با اسکریپت باینری-امن (خط-هدفمند، تفکیک فقط روی `\n`): build.gradle.kts (versionCode 13→14 + versionName) · APP-VERSION · INSTALLER_VER · WIZARD_VER · MANAGER_VER · بنرهای bat/ps1/sh · fallbackهای UI · هدر firewall.mjs. **CRLF بیت‌به‌بیت حفظ شد** (قانون طلایی ۴؛ bat ۱۹۲×CRLF و ps1 ۳۲×CRLF قبل/بعد یکسان — ادعای اسکریپت با شمارش واقعی). کامنت‌های تاریخی (install.mjs L116/1577، server-manager L222/297، installer.html L266/346/461، wizard L48/208)، فیکسچرهای تست (MapDefaultsTest «panelVersion»، پین NI9 به تگ dev.2)، patches و گزارش‌های قدیمی عمداً دست نخوردند.
+- **README-fa (کامیت `61ec9b3`):** عنوان به dev.3 + بخش تغییرات کامل (۱۱ قابلیت/اصلاح با شواهد تست) — هر دو کامیت push و SHA ریموت (`61ec9b333c7fb4fcbadfc1810a0378bf3fb12091`) با API تأیید شد.
+- **بیلد روی کامیت ریلیز:** `JAVA_HOME=jdk-21.0.13+9 ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon -Xmx1536m` → BUILD SUCCESSFUL در 45s (تایم‌اوت شل فقط از daemon معلق بود؛ BUILD از لاگ کامل تأیید شد) · تست واحد از XML واقعی: **۴۴ تست / ۰ شکست / ۰ خطا / ۰ اسکیپ** (۱۱ کلاس) · APK ۸٬۸۰۷٬۵۳۴ بایت · apksigner v2 VERIFIED (کلید Debug استاندارد `CN=Android Debug` — همان امضای dev.1/dev.2) · aapt: vCode=14 / vName=1.9.13-dev.3 / minSdk 24 · zipalign -c VERIFIED.
+- **باندل پنل بدون بازاجرا ولی با استناد:** `git diff 052e777..HEAD -- app/panel/` خالی → باندل بیت‌به‌بیت همان درخت ۵-D است که ۹ سوئیت/۴۲۵ چک سبز دید؛ این ادعا در یادداشت ریلیز صادقانه ذکر شد (E2E پنل بازاجرا نشد).
+- **ZIP پنل:** `git archive` از `61ec9b3` با کنارگذاری عمدی: `Android/`، `audit-tests/`، هفت گزارش فازی قدیمی (PHASE1/2 ×۴ + DEVELOP-TEST + DEVFIX dev.2 + SECURITY-AUDIT) و `SHA256SUMS.txt` کهنهٔ test.1 (ریلیز آرتیفکت قدیمی — با هش‌های جدید تداخل داشت) → ۱۴۳٬۷۲۵٬۵۹۲ بایت / ۲٬۷۰۵ فایل · unzip -t OK · **CRLF داخل ZIP بررسی شد**: install.bat = ۱۹۲×CRLF / ۰×LF-only + بنر dev.3 حاضر.
+- **انتشار:** tag annotated `v1.9.13-dev.3` → `61ec9b3` + push (تأیید ls-remote: `c6772dd…`) → POST /releases بدون `target_commitish` (درس dev.2: تگ اول) → Pre-release id=427282655 با نام فارسی و بدنهٔ کامل فارسی (۱۱ قابلیت/اصلاح + شواهد تست + ارتقا + محتویات ZIP + افشای صادقانهٔ اجرانشده‌ها) → آپلود ۴ asset: APK (۸٬۸۰۷٬۵۳۴) · ZIP (۱۴۳٬۷۲۵٬۵۹۲) · SHA256SUMS (۲۰۶) · SHA1SUMS (۱۵۸) — همه state=uploaded با حجم دقیق.
+- **راستی‌آزمایی دانلود-برگشتی (قانون طلایی ۶):** APK و ZIP ۱۴۴MB و SHA256SUMS از خود GitHub دانلود شدند — SHA-256 هر سه با نسخهٔ محلی یکسان + unzip -t سالم (APK: `3e8f6d34…fe884` · ZIP: `853cf954…c024d`).
+- میرورهای خارجی (temp.sh/x0.at/سرور :3000) این بار ساخته نشدند — دستور مالک فقط انتشار روی ریپو بود و مرجع رسمی Release گیت‌هاب است.
+- نکتهٔ API: فیلد `target_commitish: main` در پاسخ Release فقط شاخهٔ پیش‌فرض ریپو را نشان می‌دهد؛ commit واقعی تگ `61ec9b3` روی develop است (تأیید با rev-parse تگ و ls-remote).
+
+Stage Summary:
+- **DEV Release v1.9.13-dev.3 منتشر و راستی‌آزمایی شد:** https://github.com/P3D4AM/MedPad/releases/tag/v1.9.13-dev.3 (Pre-release؛ APK امضاشده Debug vCode=14 + ZIP آفلاین کامل پنل ۱۴۴MB + هش‌ها؛ هر دو با دانلود برگشتی تأیید).
+- کامیت‌ها روی develop: `5910fb1` (bump) → `61ec9b3` (README/هدف tag) → کامیت مستندات همین تسک؛ `main` دست‌نخورده (`8db3319`)؛ بدون force-push.
+- پوشش ریلیز: ۴۱ کامیت بعد از dev.2 — بسته‌های ۶ تا ۱۱ (انتساب، انتساب گروهی، شهرها، نقشه، ورود امن، اعلان اپ) + مرکز اعلان‌های پنل (۵-A..D) + P06 (حفظ 403) + P07 (تحویل اعلان) + P08 (fallback چک‌این) + P09 (هشدار HTTP عمومی).
+- آزمون: اندروید ۴۴/۴۴ + assembleDebug + apksigner/zipalign روی کامیت ریلیز؛ پنل با استناد diff خالی به رگرسیون ۴۲۵ چک ۵-D. اجرانشده: گوشی/ویندوز واقعی.
+- قدم بعدی: **P10** (سیاست Backup اندروید) طبق بخش ۹ پروتکل.
