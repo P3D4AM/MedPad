@@ -17,14 +17,22 @@
 - `Visit` (بازدید واقعی) با `PlannedVisit` (برنامه) یکی نمی‌شوند؛ سوابق مشتری/بازدید/صوت با لغو انتساب یا مهاجرت حذف نمی‌شوند.
 - ادعای بدون مدرک ممنوع: هر Build/تست/Push فقط با نتیجهٔ واقعی ثبت می‌شود.
 
-## ۲. وضعیت فعلی مخزن (آخرین راستی‌آزمایی)
+## ۲. وضعیت فعلی مخزن (آخرین راستی‌آزمایی: Oct 28 — عامل بسته‌های ۶+)
 
-- **آخرین SHA تأییدشدهٔ `develop`:** `bab6af0` — «docs(worklog): task 27 completion» (2026-10-27)
-- درخت تمیز، همگام با `origin/develop`. آخرین انتشار: **v1.9.13-dev.2** (tag روی `ff1523a`؛ Pre-release با ZIP پنل + APK + هش‌ها).
-- نسخه‌های فعلی: INSTALLER_VER / APP-VERSION = `1.9.13-dev.2` · Android versionCode=13, versionName=`1.9.13-dev.2` · Room DB v8 · Prisma با `PlannedVisit` + ایندکس یکتای `visitId`.
-- زنجیرهٔ بازسازی سورس پنل (تست‌شده، تمیز): `bd9c80b:medpad-full-1.9/inst-stage/panel-src` + ۵ وصله به‌ترتیب: `phase1-task1` → `phase2-remediation` → `phase2-task1` → `phase2-task2` → `phase2-dev2-fixes`.
-- محیط ساخت پنل: `build-panel.sh` در سندباکس قبلی بود (باید بازسازی شود) — گام‌ها: npm install + prisma generate (انجین win/debian) + `next build` standalone + کپی دستی انجین‌های Prisma داخل standalone (Next tracer کپی نمی‌کند!) + template.db + ~۱۴ چک سخت‌سازی.
-- محیط ساخت APK (باید در سندباکس تازه بازسازی شود): JDK Temurin 21 + cmdline-tools + build-tools 34.0.0 + platform android-34؛ `./gradlew assembleDebug`؛ امضا با کلید Debug (توسعه‌ای).
+- **آخرین SHA تأییدشدهٔ `develop`:** `eab7279` — «feat(notifications): stable notification infrastructure — model, events, admin API (package 4)» (راستی‌آزمایی با fetch + API در Oct 28 ~11:45 UTC)
+- بسته‌های ۰ تا ۴ روی `develop` پوش و تأیید شده‌اند: `3be0bb0` (۰) · `9023eb9` (۱) · `68348df` (۲) · `0a610fc` (۳) · `eab7279` (۴).
+- آخرین انتشار: **v1.9.13-dev.2** (2026-10-26؛ Pre-release با ZIP پنل + APK + هش‌ها). **هیچ dev.3 وجود ندارد.**
+- نسخه‌های فعلی: INSTALLER_VER / APP-VERSION = `1.9.13-dev.2` · Android versionCode=13, versionName=`1.9.13-dev.2` · Room DB v9 · Prisma با `PlannedVisit` + `AppNotification.eventKey` + `PanelNotification` + `AuditLog`.
+- زنجیرهٔ بازسازی سورس پنل (تست‌شده، تمیز): `bd9c80b:medpad-full-1.9/inst-stage/panel-src` + ۶ وصله به‌ترتیب: `phase1-task1` → `phase2-remediation` → `phase2-task1` → `phase2-task2` → `phase2-dev2-fixes` → `phase2-package4`.
+- محیط ساخت پنل: `scripts/build-panel.sh` در سندباکس فعلی موجود است (بازسازی‌شده در نشست بستهٔ ۵؛ گام‌ها: prisma generate سه‌سکویی + next build standalone + کپی دستی انجین‌ها/static/public + template.db + چک‌های سخت‌سازی).
+- محیط ساخت APK (باید بازسازی شود): JDK کامل (JRE سیستم javac/jlink ندارد) + cmdline-tools + build-tools 34.0.0 + platform android-34؛ `./gradlew assembleDebug`؛ امضا با کلید Debug.
+
+### ۲.۱ وضعیت بستهٔ ۵ (عامل جداگانه — Oct 28، ثبت‌شده توسط عامل بسته‌های ۶+)
+
+مالک، بستهٔ ۵ (آیکون زنگ پنل) را به عامل جداگانه‌ای سپرده است. راستی‌آزمایی واقعی (Oct 28 ~11:45 UTC):
+- **روی `develop` چیزی از بستهٔ ۵ نیست** — نه کامیت، نه وصله، نه باندل. آخرین ریلیز هم همان dev.2 است.
+- در سندباکس مشترک، کارِ در جریانِ کامیت‌نشده مشاهده شد (آخرین فعالیت فایل‌ها ~11:39 UTC): سورس زنگ (`audit/panel-src/src/components/panel/NotificationsBell.tsx` + ادغام در layout)، باندل `.next` بازساخته‌شده (کامیت‌نشده)، اسکریپت تست `audit-tests/test-panel-bell-ui.sh` (untracked)، فضای تست `/tmp/tbell` — تست مرورگر E2E در ساعت 11:38 با Timeout روی دکمهٔ «همه خوانده شد» شکست خورده است (لاگ `/tmp/tbell/browser.log`).
+- **تداخل‌گریزی عامل بسته‌های ۶+:** این فایل‌ها دست‌نخورده مانده‌اند (نه حذف، نه کامیت، نه بازنویسی). کار پنلِ بسته‌های ۶+ در worktree جداگانه (`medpad-wt`) و سورس پنل تمیزِ بازسازی‌شده از زنجیرهٔ ۶ وصله‌ای (بدون زنگ) انجام می‌شود. **نکتهٔ مهم برای عامل بستهٔ ۵:** پس از هر Push از سمت بسته‌های ۶+، باندل `.next` روی develop شامل تغییرات بسته‌های جدید (بدون زنگ) است؛ برای Push خود، سورس خود را روی آخرین develop ادغام و باندل را از نو بسازید (وصلهٔ `phase2-package5` طبق قرارداد پوشهٔ `patches/` کامیت شود).
 
 ## ۳. کارهای تکمیل‌شدهٔ قبلی (خلاصه — جزئیات در WORKLOG-MedPad.md)
 
@@ -56,10 +64,10 @@
 |---|---|---|---|
 | ۰ | تثبیت وضعیت + همین فایل | ✅ | `3be0bb0` |
 | ۱ | همگام‌سازی Check-in/Check-out (رفع B3+B5) | ✅ | `9023eb9` |
-| ۲ | رفع کرش Plans/Reports (B6) | ✅ | ← همین کامیت |
-| ۳ | گردش کامل Planned Visits (تست E2E ۵۰ چک) | ✅ | ← همین کامیت |
-| ۴ | زیرساخت اعلان‌ها (مدل+API+رویدادها) | ✅ | ← همین کامیت |
-| ۵ | اعلان‌های پنل (آیکون/فهرست/خوانده‌شده) | ⬜ | — |
+| ۲ | رفع کرش Plans/Reports (B6) | ✅ | `68348df` |
+| ۳ | گردش کامل Planned Visits (تست E2E ۵۰ چک) | ✅ | `0a610fc` |
+| ۴ | زیرساخت اعلان‌ها (مدل+API+رویدادها) | ✅ | `eab7279` |
+| ۵ | اعلان‌های پنل (آیکون/فهرست/خوانده‌شده) | 🔶 در حال انجام — عامل جداگانه؛ کار کامیت‌نشده در سندباکس (بخش ۲.۱) | — |
 | ۶ | درخواست انتساب مشتری + تأیید/رد | ⬜ | — |
 | ۷ | انتساب گروهی و لغو انتساب | ⬜ | — |
 | ۸ | فرم مشتری + شهرهای ایران (آفلاین) | ⬜ | — |
