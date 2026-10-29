@@ -22,6 +22,7 @@ class TrackerApp : Application() {
         Session.init(this)
         com.medpad.tracker.sync.TrackerContext.init(this)
         com.medpad.tracker.util.NotificationPrefs.init(this) // package 11
+        com.medpad.tracker.location.TrackingConfig.load() // phase 3 — last valid remote policy
         createChannels()
     }
 

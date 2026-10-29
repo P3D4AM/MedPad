@@ -125,6 +125,11 @@
     <string name="notif_channel_alerts">اعلان‌های مدیریتی</string>
     <string name="notif_tracking_title">MedPad فعال است</string>
     <string name="notif_tracking_text">ردیابی موقعیت برای چک‌این هوشمند فعال است</string>
+    <!-- phase 3 (dev.5): honest tracking states in the permanent notification -->
+    <string name="notif_tracking_disabled">ردیابی موقعیت توسط مدیر خاموش شده است</string>
+    <string name="notif_tracking_noperm">مجوز موقعیت داده نشده است — ردیابی متوقف است</string>
+    <string name="tracking_perm_banner">مجوز موقعیت مکانی داده نشده است؛ ردیابی و اعلان مجاورت کار نمی‌کنند.</string>
+    <string name="tracking_perm_grant">دادن مجوز</string>
     <string name="notif_nearby">نزدیک مشتری: %s</string>
 
     <!-- Sync -->

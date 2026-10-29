@@ -2,7 +2,16 @@
   "24052": {
     "id": 24052,
     "files": [
-      "static/chunks/061v91ild5r-g.js",
+      "static/chunks/3ee-03yem2d_8.js",
+      "static/chunks/2mucrzq-vjwop.js",
+      "static/chunks/0n8kzvw2z_6as.css"
+    ]
+  },
+  "52377": {
+    "id": 52377,
+    "files": [
+      "static/chunks/2q9pfmph4qdal.js",
+      "static/chunks/2mucrzq-vjwop.js",
       "static/chunks/0n8kzvw2z_6as.css"
     ]
   }

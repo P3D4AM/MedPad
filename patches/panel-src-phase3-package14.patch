@@ -1,0 +1,1251 @@
+diff -ruN a/prisma/schema.prisma b/prisma/schema.prisma
+--- a/prisma/schema.prisma	2026-10-29 17:54:12.287941504 +0000
++++ b/prisma/schema.prisma	2026-10-29 17:48:37.574996401 +0000
+@@ -32,6 +32,8 @@
+   notifications AppNotification[]
+   plannedVisits PlannedVisit[]
+   noteEdits    CheckinNoteVersion[] @relation("NoteEdits")
++  locationPings LocationPing[]
++  trackStatus  TrackStatus?
+ }
+ 
+ model AppToken {
+@@ -284,3 +286,47 @@
+   outcome    String   @default("success")
+   createdAt  DateTime @default(now())
+ }
++
++// ── phase 3: background location tracking ─────────────────────────
++//
++// LocationPing — ONE row per location fix the app successfully uploaded.
++//  * localId (device-generated UUID) is the idempotency key: the app keeps
++//    unsent pings locally until the server CONFIRMS them (no silent loss on
++//    internet cut), so a replay after a crash mid-upload cannot create a
++//    second row — the conflicting insert is counted as a duplicate instead.
++//  * recordedAt = device clock when the fix was measured (authoritative for
++//    freshness/route order); receivedAt = server clock at insert (device
++//    clocks are untrusted for storage decisions like pruning).
++//  * retention: rows older than trackRetentionDays are pruned (time-gated,
++//    at boot and at most once per 6h on upload) — a documented policy, never
++//    a silent loss (only RECEIVED rows are ever pruned).
++//  * employeeId FK ON DELETE CASCADE: deactivating is the MedPad lifecycle;
++//    truly deleting an employee cleans their track history with them.
++model LocationPing {
++  id         String   @id @default(cuid())
++  employeeId String
++  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
++  localId    String   @unique
++  lat        Float
++  lng        Float
++  accuracy   Float?
++  recordedAt DateTime
++  receivedAt DateTime  @default(now())
++
++  @@index([employeeId, recordedAt])
++}
++
++// TrackStatus — the app's LAST self-reported health snapshot, upserted with
++// every successful upload batch (phase 3 §1: "وضعیت مجوز و ردیابی در حدی که
++// اپ بتواند گزارش دهد"). One row per employee (1:1). Plain strings as the
++// app reports them; the panel renders them as-is with Persian labels.
++model TrackStatus {
++  employeeId          String   @id
++  employee            Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
++  locationPermission  String   @default("unknown") // fine | coarse | denied | unknown
++  backgroundLocation  String   @default("unknown") // granted | denied | unavailable | unknown
++  serviceRunning      Boolean  @default(false)
++  batteryUnrestricted Boolean  @default(false)
++  appVersion          String?
++  lastReportAt        DateTime @default(now())
++}
+diff -ruN a/src/app/api/app/locations/route.ts b/src/app/api/app/locations/route.ts
+--- a/src/app/api/app/locations/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/app/locations/route.ts	2026-10-29 17:51:58.728170753 +0000
+@@ -0,0 +1,144 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { appEmployee } from '@/lib/auth'
++import { getTrackingConfig, pruneOldPings, TRACK_BATCH_MAX } from '@/lib/tracking'
++
++/**
++ * phase 3 — bulk location upload from the app.
++ *
++ * POST /api/app/locations (employee token)
++ *   { locations: [{ localId, lat, lng, accuracy?, recordedAt }],
++ *     status?: { locationPermission, backgroundLocation, serviceRunning,
++ *                batteryUnrestricted, appVersion } }
++ *
++ * Protocol requirements honoured here:
++ *  - «قطع اینترنت نباید باعث از بین رفتن بی‌صدای داده‌های موقعیت شود»: the
++ *    app keeps every unsent ping locally and re-sends it in later batches;
++ *    only rows the server CONFIRMED are ever deleted on the device.
++ *  - «ارسال مجدد ... از نظر تکراری‌شدن امن باشد»: localId is the
++ *    idempotency key (UNIQUE index). A replay after a crash mid-upload hits
++ *    P2002 and is counted as `duplicated` — never a second row.
++ *  - the response carries the current tracking config so a running device
++ *    picks up panel changes without a separate round trip; piggy-backed
++ *    retention prune (time-gated, at most once per 6h) keeps old RECEIVED
++ *    pings from accumulating (never un-received data).
++ *
++ * Validation is strict per item (bad items are rejected with a Persian
++ * message naming the index), coordinates range-checked, structurally
++ * impossible accuracy (<=0 / NaN / >100000) discarded like G-6, recordedAt
++ * may not lie in the future (device clock skew) beyond a 5-minute
++ * tolerance. Permanently invalid items return 400 — the app marks them
++ * failed and does NOT re-send them (same policy as the check-in queue).
++ */
++
++interface PingIn {
++  localId?: unknown
++  lat?: unknown
++  lng?: unknown
++  accuracy?: unknown
++  recordedAt?: unknown
++}
++
++const LOCALID_RE = /^[A-Za-z0-9_-]{8,64}$/
++
++function parsePing(i: number, raw: PingIn): { localId: string; lat: number; lng: number; accuracy: number | null; recordedAt: Date } | string {
++  const localId = typeof raw.localId === 'string' ? raw.localId.trim() : ''
++  if (!LOCALID_RE.test(localId)) return `موقعیت ${i + 1}: شناسهٔ محلی نامعتبر است`
++  const lat = Number(raw.lat)
++  const lng = Number(raw.lng)
++  if (!Number.isFinite(lat) || lat < -90 || lat > 90) return `موقعیت ${i + 1}: عرض جغرافیایی نامعتبر است`
++  if (!Number.isFinite(lng) || lng < -180 || lng > 180) return `موقعیت ${i + 1}: طول جغرافیایی نامعتبر است`
++  let accuracy: number | null = null
++  if (raw.accuracy !== undefined && raw.accuracy !== null) {
++    const a = Number(raw.accuracy)
++    if (Number.isFinite(a) && a > 0 && a <= 100000) accuracy = a
++    // structurally impossible accuracy is discarded, not fatal (G-6 rule)
++  }
++  const t = new Date(typeof raw.recordedAt === 'string' ? raw.recordedAt : '')
++  if (isNaN(t.getTime())) return `موقعیت ${i + 1}: زمان ثبت نامعتبر است`
++  if (t.getTime() - Date.now() > 5 * 60 * 1000) return `موقعیت ${i + 1}: زمان ثبت در آینده است`
++  return { localId, lat, lng, accuracy, recordedAt: t }
++}
++
++const PERM_VALUES = new Set(['fine', 'coarse', 'denied', 'unknown'])
++const BG_VALUES = new Set(['granted', 'denied', 'unavailable', 'unknown'])
++
++export async function POST(req: Request) {
++  const emp = await appEmployee(req)
++  if (!emp) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  const body = await req.json().catch(() => null) as { locations?: unknown; status?: unknown } | null
++  if (!body || typeof body !== 'object' || !Array.isArray(body.locations)) {
++    return NextResponse.json({ ok: false, error: 'بدنهٔ درخواست نامعتبر است' }, { status: 400 })
++  }
++  if (body.locations.length === 0) {
++    return NextResponse.json({ ok: false, error: 'فهرست موقعیت‌ها خالی است' }, { status: 400 })
++  }
++  if (body.locations.length > TRACK_BATCH_MAX) {
++    return NextResponse.json(
++      { ok: false, error: `هر بستهٔ ارسال حداکثر ${TRACK_BATCH_MAX} موقعیت می‌تواند داشته باشد` },
++      { status: 400 },
++    )
++  }
++
++  let accepted = 0
++  let duplicated = 0
++  // validate the WHOLE batch first — a 400 then means NOTHING was stored
++  // and the app can safely drop permanently-invalid pings (same policy as
++  // the check-in queue: transient failures keep data, permanent rejections
++  // do not retry forever).
++  const parsedAll: { localId: string; lat: number; lng: number; accuracy: number | null; recordedAt: Date }[] = []
++  for (let i = 0; i < body.locations.length; i++) {
++    const parsed = parsePing(i, body.locations[i] as PingIn)
++    if (typeof parsed === 'string') {
++      return NextResponse.json({ ok: false, error: parsed }, { status: 400 })
++    }
++    parsedAll.push(parsed)
++  }
++  for (const p of parsedAll) {
++    try {
++      await db.locationPing.create({
++        data: {
++          employeeId: emp.id,
++          localId: p.localId,
++          lat: p.lat,
++          lng: p.lng,
++          accuracy: p.accuracy,
++          recordedAt: p.recordedAt,
++        },
++      })
++      accepted++
++    } catch (e) {
++      const msg = e instanceof Error ? e.message : String(e)
++      if (/Unique constraint/i.test(msg)) {
++        duplicated++ // idempotent replay — the row already exists
++        continue
++      }
++      throw e
++    }
++  }
++
++  // device health snapshot (phase 3 §3: "وضعیت مجوز و ردیابی در حدی که اپ
++  // بتواند گزارش دهد") — upserted with every confirmed batch
++  if (body.status && typeof body.status === 'object') {
++    const st = body.status as Record<string, unknown>
++    const locationPermission = typeof st.locationPermission === 'string' && PERM_VALUES.has(st.locationPermission)
++      ? st.locationPermission : 'unknown'
++    const backgroundLocation = typeof st.backgroundLocation === 'string' && BG_VALUES.has(st.backgroundLocation)
++      ? st.backgroundLocation : 'unknown'
++    const serviceRunning = st.serviceRunning === true
++    const batteryUnrestricted = st.batteryUnrestricted === true
++    const appVersion = typeof st.appVersion === 'string' ? st.appVersion.slice(0, 40) : null
++    await db.trackStatus.upsert({
++      where: { employeeId: emp.id },
++      update: { locationPermission, backgroundLocation, serviceRunning, batteryUnrestricted, appVersion, lastReportAt: new Date() },
++      create: { employeeId: emp.id, locationPermission, backgroundLocation, serviceRunning, batteryUnrestricted, appVersion, lastReportAt: new Date() },
++    })
++  }
++
++  // piggy-backed retention prune (time-gated; failure must not fail the
++  // upload — the pings are already safely stored)
++  pruneOldPings().catch(() => {})
++
++  const config = await getTrackingConfig()
++  return NextResponse.json({ ok: true, accepted, duplicated, config })
++}
+diff -ruN a/src/app/api/app/tracking-config/route.ts b/src/app/api/app/tracking-config/route.ts
+--- a/src/app/api/app/tracking-config/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/app/tracking-config/route.ts	2026-10-29 17:49:44.474384157 +0000
+@@ -0,0 +1,23 @@
++import { NextResponse } from 'next/server'
++import { appEmployee } from '@/lib/auth'
++import { getTrackingConfig } from '@/lib/tracking'
++
++/**
++ * phase 3 — tracking policy for the app.
++ *
++ * GET /api/app/tracking-config (employee token)
++ *
++ * The app calls this at service start and periodically (and every upload
++ * response carries the same object), so a panel change reaches running
++ * devices without an app restart or reinstall. Values are TARGETS, never a
++ * guarantee of the real GPS rate (Android doze / battery savers may stretch
++ * intervals — the panel renders actual receipt times, not promises).
++ * The app caches the last VALID response locally and keeps using it while
++ * offline («آخرین تنظیمات معتبر را برای حالت آفلاین حفظ کند»).
++ */
++export async function GET(req: Request) {
++  const emp = await appEmployee(req)
++  if (!emp) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  const config = await getTrackingConfig()
++  return NextResponse.json({ ok: true, config, serverTime: new Date().toISOString() })
++}
+diff -ruN a/src/app/api/panel/tracking/history/route.ts b/src/app/api/panel/tracking/history/route.ts
+--- a/src/app/api/panel/tracking/history/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/panel/tracking/history/route.ts	2026-10-29 17:50:19.764588202 +0000
+@@ -0,0 +1,101 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { isAdmin } from '@/lib/auth'
++
++/**
++ * phase 3 — route history for ONE marketer (admin session).
++ *
++ * GET /api/panel/tracking/history?employeeId=...&from=ISO&to=ISO
++ *
++ * Returns, for the requested window (default: last 24h, max span 31 days):
++ *  - `points`: the tracked route, OLDEST FIRST (ready for a polyline),
++ *    capped at the newest 2000 pings (honest `capped: true` flag — the
++ *    panel tells the admin the view was truncated instead of hiding it)
++ *  - `checkins`: check-in/check-out coordinates in the SAME window —
++ *    displayed as a distinct layer so «موقعیت آخر، تاریخچه مسیر و مختصات
++ *    ثبت ویزیت باید از یکدیگر متمایز باشند»
++ *  - `lastPing`: the newest ping overall (the "live" marker), also when it
++ *    falls OUTSIDE the window — the panel must always be able to show the
++ *    last known position clearly separated from the route on screen
++ *
++ * Unknown employee → 404 with a Persian error; bad dates → 400.
++ */
++const MAX_POINTS = 2000
++const MAX_SPAN_MS = 31 * 24 * 3600 * 1000
++
++export async function GET(req: Request) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const url = new URL(req.url)
++  const employeeId = url.searchParams.get('employeeId') || ''
++  if (!employeeId) {
++    return NextResponse.json({ ok: false, error: 'شناسهٔ کارمند لازم است' }, { status: 400 })
++  }
++  const emp = await db.employee.findUnique({
++    where: { id: employeeId },
++    select: { id: true, name: true, username: true, active: true },
++  })
++  if (!emp) {
++    return NextResponse.json({ ok: false, error: 'کارمند یافت نشد' }, { status: 404 })
++  }
++  const now = Date.now()
++  let fromMs = now - 24 * 3600 * 1000
++  let toMs = now
++  const from = url.searchParams.get('from')
++  const to = url.searchParams.get('to')
++  if (from) {
++    const t = new Date(from).getTime()
++    if (isNaN(t)) return NextResponse.json({ ok: false, error: 'زمان شروع نامعتبر است' }, { status: 400 })
++    fromMs = t
++  }
++  if (to) {
++    const t = new Date(to).getTime()
++    if (isNaN(t)) return NextResponse.json({ ok: false, error: 'زمان پایان نامعتبر است' }, { status: 400 })
++    toMs = t
++  }
++  if (toMs <= fromMs) {
++    return NextResponse.json({ ok: false, error: 'بازهٔ زمانی نامعتبر است' }, { status: 400 })
++  }
++  if (toMs - fromMs > MAX_SPAN_MS) {
++    return NextResponse.json({ ok: false, error: 'بازهٔ حداکثر ۳۱ روز است' }, { status: 400 })
++  }
++  const from_ = new Date(fromMs)
++  const to_ = new Date(toMs)
++
++  // newest MAX_POINTS in the window, then reversed -> oldest first for the polyline
++  const windowPoints = await db.locationPing.findMany({
++    where: { employeeId, recordedAt: { gte: from_, lte: to_ } },
++    orderBy: { recordedAt: 'desc' },
++    take: MAX_POINTS,
++    select: { lat: true, lng: true, accuracy: true, recordedAt: true },
++  })
++  const points = windowPoints.reverse()
++  const capped = windowPoints.length === MAX_POINTS
++
++  const checkins = await db.checkin.findMany({
++    where: { employeeId, createdAt: { gte: from_, lte: to_ }, lat: { not: null }, lng: { not: null } },
++    orderBy: { createdAt: 'asc' },
++    take: 500,
++    select: {
++      id: true, kind: true, lat: true, lng: true, createdAt: true, note: true,
++      customer: { select: { name: true } },
++    },
++  })
++
++  const lastPing = await db.locationPing.findFirst({
++    where: { employeeId },
++    orderBy: { recordedAt: 'desc' },
++    select: { lat: true, lng: true, accuracy: true, recordedAt: true, receivedAt: true },
++  })
++
++  return NextResponse.json({
++    ok: true,
++    employee: emp,
++    window: { from: from_.toISOString(), to: to_.toISOString() },
++    points,
++    capped,
++    checkins,
++    lastPing,
++  })
++}
+diff -ruN a/src/app/api/panel/tracking/route.ts b/src/app/api/panel/tracking/route.ts
+--- a/src/app/api/panel/tracking/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/panel/tracking/route.ts	2026-10-29 17:50:09.024526122 +0000
+@@ -0,0 +1,80 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { isAdmin } from '@/lib/auth'
++import { getAdminSettings } from '@/lib/settings'
++
++/**
++ * phase 3 — live tracking status for the panel (admin session).
++ *
++ * GET /api/panel/tracking
++ *
++ * Per marketer (every employee, active ones first):
++ *  - last VALID coordinates + their record time («آخرین مختصات معتبر»)
++ *  - fresh/stale verdict — a location older than trackMaxAgeSec is NEVER
++ *    presented as live («مختصات قدیمی نباید به‌عنوان موقعیت زنده معرفی شود»)
++ *  - connection/receipt status — derived from the app's last health report
++ *    (TrackStatus.lastReportAt), NOT from the location age, and taking the
++ *    enabled/disabled policy into account (a disabled tracker has no duty
++ *    to report; the panel says so instead of showing a false "قطع")
++ *  - the app's self-reported permission/service/battery snapshot
++ *  - ping counts (last 24h + total retained)
++ *
++ * Deliberately a plain JSON snapshot the UI polls (30s) — no websocket
++ * push for pings (the realtime layer stays reserved for check-in events).
++ */
++export async function GET() {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const settings = await getAdminSettings()
++  const maxAgeMs = settings.trackMaxAgeSec * 1000
++  const enabled = settings.trackEnabled === 1
++  const dayAgo = new Date(Date.now() - 24 * 3600 * 1000)
++
++  const employees = await db.employee.findMany({
++    select: { id: true, username: true, name: true, phone: true, active: true },
++    orderBy: [{ active: 'desc' }, { name: 'asc' }],
++  })
++
++  const rows = await Promise.all(employees.map(async (e) => {
++    const [lastPing, status, last24h, total] = await Promise.all([
++      db.locationPing.findFirst({
++        where: { employeeId: e.id },
++        orderBy: { recordedAt: 'desc' },
++        select: { lat: true, lng: true, accuracy: true, recordedAt: true, receivedAt: true },
++      }),
++      db.trackStatus.findUnique({ where: { employeeId: e.id } }),
++      db.locationPing.count({ where: { employeeId: e.id, recordedAt: { gte: dayAgo } } }),
++      db.locationPing.count({ where: { employeeId: e.id } }),
++    ])
++    const now = Date.now()
++    const fresh = lastPing ? (now - lastPing.recordedAt.getTime() <= maxAgeMs) : false
++    let connection: 'disabled' | 'no-report' | 'sending' | 'stale-report' = 'no-report'
++    if (!enabled) connection = 'disabled'
++    else if (status && now - status.lastReportAt.getTime() <= maxAgeMs) connection = 'sending'
++    else if (status) connection = 'stale-report'
++    return {
++      employee: e,
++      lastPing,
++      fresh,
++      connection,
++      status,
++      last24h,
++      total,
++    }
++  }))
++
++  return NextResponse.json({
++    ok: true,
++    rows,
++    policy: {
++      enabled,
++      maxAgeSec: settings.trackMaxAgeSec,
++      moveIntervalSec: settings.trackMoveIntervalSec,
++      stillIntervalSec: settings.trackStillIntervalSec,
++      motionThresholdM: settings.trackMotionThresholdM,
++      retentionDays: settings.trackRetentionDays,
++    },
++    serverTime: new Date().toISOString(),
++  })
++}
+diff -ruN a/src/components/panel/Dashboard.tsx b/src/components/panel/Dashboard.tsx
+--- a/src/components/panel/Dashboard.tsx	2026-10-29 17:54:12.286941499 +0000
++++ b/src/components/panel/Dashboard.tsx	2026-10-29 17:51:35.388032692 +0000
+@@ -20,6 +20,7 @@
+   DoorOpen,
+   Download,
+   LogOut,
++  Navigation,
+   RadioTower,
+   Settings,
+ } from 'lucide-react'
+@@ -28,6 +29,8 @@
+ import CustomersTab from './CustomersTab'
+ import EmployeesTab from './EmployeesTab'
+ import PlansTab from './PlansTab'
++// phase 3 — live tracking status + policy + route history
++import TrackingTab from './TrackingTab'
+ import CityPicker from './CityPicker'
+ // package 5 / phase 5-C — the panel's notification center (persisted bell)
+ import NotificationsBell from './NotificationsBell'
+@@ -39,7 +42,7 @@
+   useRealtimeSocket,
+ } from '@/lib/realtime'
+ 
+-type TabKey = 'overview' | 'plans' | 'checkins' | 'customers' | 'employees'
++type TabKey = 'overview' | 'plans' | 'checkins' | 'customers' | 'employees' | 'tracking'
+ 
+ const TABS: { key: TabKey; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+   { key: 'overview', label: 'نمای کلی', icon: RadioTower },
+@@ -48,6 +51,8 @@
+   { key: 'checkins', label: 'چک‌این‌ها', icon: CalendarCheck },
+   { key: 'customers', label: 'مشتریان', icon: DoorOpen },
+   { key: 'employees', label: 'کارمندان', icon: LogOut },
++  // phase 3 — background location + live panel status
++  { key: 'tracking', label: 'وضعیت زنده', icon: Navigation },
+ ]
+ 
+ export default function Dashboard({ cfg, onLogout }: { cfg: PanelConfigInfo; onLogout: () => void }) {
+@@ -230,6 +235,7 @@
+         {tab === 'checkins' && <CheckinsTab refreshKey={refreshKey} />}
+         {tab === 'customers' && <CustomersTab refreshKey={refreshKey} />}
+         {tab === 'employees' && <EmployeesTab refreshKey={refreshKey} />}
++        {tab === 'tracking' && <TrackingTab refreshKey={refreshKey} />}
+       </main>
+ 
+       <footer className="mt-auto border-t bg-background/60 py-3 text-center text-xs text-muted-foreground">
+diff -ruN a/src/components/panel/RouteMap.tsx b/src/components/panel/RouteMap.tsx
+--- a/src/components/panel/RouteMap.tsx	1970-01-01 00:00:00.000000000 +0000
++++ b/src/components/panel/RouteMap.tsx	2026-10-29 18:34:11.040230505 +0000
+@@ -0,0 +1,85 @@
++'use client'
++
++import { MapContainer, TileLayer, Polyline, CircleMarker, Popup } from 'react-leaflet'
++import 'leaflet/dist/leaflet.css'
++
++/**
++ * phase 3 — route history map (client-only; mounted through
++ * RouteMapClient because Leaflet touches `window` at import time).
++ *
++ * THREE visually distinct layers, by design («موقعیت آخر، تاریخچهٔ مسیر و
++ * مختصات ثبت ویزیت باید از یکدیگر متمایز باشند»):
++ *   - teal polyline      = the tracked route
++ *   - amber/purple dots  = check-in / check-out coordinates
++ *   - red dot            = last known position (never labelled "live"
++ *                          when stale — the dialog header carries the age)
++ */
++export default function RouteMap({ points, checkins, lastPing }: {
++  points: { lat: number; lng: number; recordedAt: string }[]
++  checkins: { id: string; kind: string; lat: number | null; lng: number | null; createdAt: string; customer?: { name: string } | null }[]
++  lastPing: { lat: number; lng: number; recordedAt: string } | null
++}) {
++  const all = points.map((p) => [p.lat, p.lng] as [number, number])
++  if (lastPing) all.push([lastPing.lat, lastPing.lng])
++  const center: [number, number] = lastPing
++    ? [lastPing.lat, lastPing.lng]
++    : all.length > 0
++      ? all[Math.floor(all.length / 2)]
++      : [35.6892, 51.389]
++  return (
++    <div className="space-y-2">
++      {/* plain wrapper carries the testid — react-leaflet 5's MapContainer
++          only forwards className/id/style to the DOM div, so a data-testid
++          prop on it would silently vanish (verified against the shipped
++          react-leaflet 5.0.0 source) */}
++      <div data-testid="route-map">
++        <MapContainer center={center} zoom={13} className="h-[360px] w-full rounded-lg border">
++          <TileLayer
++            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
++            url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
++          />
++          {points.length > 1 && (
++            <Polyline positions={points.map((p) => [p.lat, p.lng] as [number, number])} pathOptions={{ color: '#0d9488', weight: 3, opacity: 0.8 }} />
++          )}
++          {checkins.map((c) => (
++            <CircleMarker
++              key={c.id}
++              center={[c.lat as number, c.lng as number]}
++              radius={7}
++              pathOptions={{ color: '#ffffff', weight: 2, fillColor: c.kind === 'checkout' ? '#9333ea' : '#b45309', fillOpacity: 1 }}
++            >
++              <Popup>
++                <div className="text-xs" dir="rtl">
++                  <b>{c.kind === 'checkout' ? 'پایان ویزیت' : 'شروع ویزیت'}</b>
++                  {c.customer?.name ? ` — ${c.customer.name}` : ''}
++                  <br />
++                  {new Date(c.createdAt).toLocaleString('fa-IR')}
++                </div>
++              </Popup>
++            </CircleMarker>
++          ))}
++          {lastPing && (
++            <CircleMarker
++              center={[lastPing.lat, lastPing.lng]}
++              radius={9}
++              pathOptions={{ color: '#ffffff', weight: 2, fillColor: '#dc2626', fillOpacity: 1 }}
++            >
++              <Popup>
++                <div className="text-xs" dir="rtl">
++                  <b>آخرین موقعیت ثبت‌شده</b>
++                  <br />
++                  {new Date(lastPing.recordedAt).toLocaleString('fa-IR')}
++                </div>
++              </Popup>
++            </CircleMarker>
++          )}
++        </MapContainer>
++      </div>
++      <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
++        <span className="flex items-center gap-1"><span className="inline-block h-1 w-4 rounded bg-teal-600" /> مسیر ثبت‌شده</span>
++        <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-full border-2 border-white bg-amber-700" /> چک‌این / پایان</span>
++        <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded-full border-2 border-white bg-red-600" /> آخرین موقعیت</span>
++      </div>
++    </div>
++  )
++}
+diff -ruN a/src/components/panel/RouteMapClient.tsx b/src/components/panel/RouteMapClient.tsx
+--- a/src/components/panel/RouteMapClient.tsx	1970-01-01 00:00:00.000000000 +0000
++++ b/src/components/panel/RouteMapClient.tsx	2026-10-29 18:16:53.115012717 +0000
+@@ -0,0 +1,18 @@
++'use client'
++
++/**
++ * Client-only wrapper — Leaflet touches `window` at import time,
++ * so it must never be evaluated during SSR (same pattern as MapViewClient).
++ */
++import dynamic from 'next/dynamic'
++
++const RouteMap = dynamic(() => import('./RouteMap'), {
++  ssr: false,
++  loading: () => (
++    <div className="flex h-[360px] w-full items-center justify-center rounded-lg border bg-muted/40 text-sm text-muted-foreground">
++      در حال بارگذاری نقشه…
++    </div>
++  ),
++})
++
++export default RouteMap
+diff -ruN a/src/components/panel/TrackingTab.tsx b/src/components/panel/TrackingTab.tsx
+--- a/src/components/panel/TrackingTab.tsx	1970-01-01 00:00:00.000000000 +0000
++++ b/src/components/panel/TrackingTab.tsx	2026-10-29 18:16:58.794051889 +0000
+@@ -0,0 +1,470 @@
++'use client'
++
++import { useCallback, useEffect, useRef, useState } from 'react'
++import { Badge } from '@/components/ui/badge'
++import { Button } from '@/components/ui/button'
++import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
++import { Input } from '@/components/ui/input'
++import { Label } from '@/components/ui/label'
++import { Switch } from '@/components/ui/switch'
++import {
++  Dialog,
++  DialogContent,
++  DialogDescription,
++  DialogHeader,
++  DialogTitle,
++} from '@/components/ui/dialog'
++import {
++  Select,
++  SelectContent,
++  SelectItem,
++  SelectTrigger,
++  SelectValue,
++} from '@/components/ui/select'
++import { BatteryCharging, MapPin, Navigation, RefreshCw, Route, ShieldCheck, Signal } from 'lucide-react'
++import { useToast } from '@/hooks/use-toast'
++import { faDateTime } from '@/lib/realtime'
++// Leaflet must stay client-only (window at import time) — RouteMapClient
++// is the dynamic ssr:false wrapper, same pattern as MapViewClient
++import RouteMap from './RouteMapClient'
++
++/**
++ * phase 3 — «وضعیت زندهٔ» tracking tab.
++ *
++ * Three panels:
++ *  1. LIVE STATUS (per marketer): last valid coordinates + record time,
++ *     fresh/stale badge (a location older than trackMaxAgeSec is NEVER
++ *     shown as live), connection/receipt status, the app's self-reported
++ *     permission/service/battery snapshot, ping counts. Polled every 30s.
++ *  2. ROUTE HISTORY dialog: tracked route (polyline) + check-in markers
++ *     (distinct layer) + last-known marker (distinct) + legend — the three
++ *     coordinate kinds stay visually separated by design.
++ *  3. TRACKING POLICY form: the six admin settings (enabled, move/still
++ *     intervals, motion threshold, stale age, retention) — saved through
++ *     the SAME /api/admin/settings route (range-validated server side and
++ *     written to the audit log there).
++ *
++ * Honest-display rules baked into this file:
++ *  - intervals are TARGETS: the header says so; the badge column shows
++ *    actual receipt times, never promised rates.
++ *  - tracking disabled → connection column says «خاموش (سیاست)» instead
++ *    of pretending the device is offline.
++ */
++
++interface Ping {
++  lat: number
++  lng: number
++  accuracy: number | null
++  recordedAt: string
++  receivedAt?: string
++}
++
++interface TrackStatusRow {
++  employeeId: string
++  locationPermission: string
++  backgroundLocation: string
++  serviceRunning: boolean
++  batteryUnrestricted: boolean
++  appVersion: string | null
++  lastReportAt: string
++}
++
++interface LiveRow {
++  employee: { id: string; username: string; name: string; phone: string | null; active: boolean }
++  lastPing: Ping | null
++  fresh: boolean
++  connection: 'disabled' | 'no-report' | 'sending' | 'stale-report'
++  status: TrackStatusRow | null
++  last24h: number
++  total: number
++}
++
++interface Policy {
++  enabled: boolean
++  maxAgeSec: number
++  moveIntervalSec: number
++  stillIntervalSec: number
++  motionThresholdM: number
++  retentionDays: number
++}
++
++const PERM_LABEL: Record<string, string> = {
++  fine: 'دقیق',
++  coarse: 'تقریبی',
++  denied: 'ردشده',
++  unknown: 'نامشخص',
++}
++const BG_LABEL: Record<string, string> = {
++  granted: 'داده‌شده',
++  denied: 'ردشده',
++  unavailable: 'ناموجود',
++  unknown: 'نامشخص',
++}
++
++
++export default function TrackingTab({ refreshKey }: { refreshKey: number }) {
++  const { toast } = useToast()
++  const [rows, setRows] = useState<LiveRow[] | null>(null)
++  const [policy, setPolicy] = useState<Policy | null>(null)
++  const [serverTime, setServerTime] = useState<string>('')
++  // policy form state
++  const [form, setForm] = useState({
++    trackEnabled: '1',
++    trackMoveIntervalSec: '45',
++    trackStillIntervalSec: '240',
++    trackMotionThresholdM: '40',
++    trackMaxAgeSec: '900',
++    trackRetentionDays: '30',
++  })
++  const [saving, setSaving] = useState(false)
++  const [policyOpen, setPolicyOpen] = useState(false)
++  // route dialog state
++  const [routeFor, setRouteFor] = useState<LiveRow | null>(null)
++  const [routeHours, setRouteHours] = useState('24')
++  const [routeData, setRouteData] = useState<{
++    points: { lat: number; lng: number; recordedAt: string }[]
++    capped: boolean
++    checkins: { id: string; kind: string; lat: number | null; lng: number | null; createdAt: string; customer?: { name: string } | null }[]
++    lastPing: Ping | null
++  } | null>(null)
++  const [routeLoading, setRouteLoading] = useState(false)
++  const timer = useRef<ReturnType<typeof setInterval> | null>(null)
++
++  const loadStatus = useCallback(() => {
++    fetch('/api/panel/tracking', { cache: 'no-store' })
++      .then((r) => r.json())
++      .then((d) => {
++        if (d.ok) {
++          setRows(d.rows)
++          setPolicy(d.policy)
++          setServerTime(d.serverTime)
++        }
++      })
++      .catch(() => {})
++  }, [])
++
++  // initial + on refresh + 30s poll («وضعیت اتصال و دریافت داده»)
++  useEffect(() => {
++    loadStatus()
++    if (timer.current) clearInterval(timer.current)
++    timer.current = setInterval(loadStatus, 30_000)
++    return () => {
++      if (timer.current) clearInterval(timer.current)
++    }
++  }, [refreshKey, loadStatus])
++
++  // open policy form with the CURRENT values (from /api/admin/settings —
++  // the same source the save writes to)
++  useEffect(() => {
++    if (!policyOpen) return
++    fetch('/api/admin/settings', { cache: 'no-store' })
++      .then((r) => r.json())
++      .then((d) => {
++        if (d.ok) {
++          setForm({
++            trackEnabled: String(d.settings.trackEnabled ?? 1),
++            trackMoveIntervalSec: String(d.settings.trackMoveIntervalSec ?? 45),
++            trackStillIntervalSec: String(d.settings.trackStillIntervalSec ?? 240),
++            trackMotionThresholdM: String(d.settings.trackMotionThresholdM ?? 40),
++            trackMaxAgeSec: String(d.settings.trackMaxAgeSec ?? 900),
++            trackRetentionDays: String(d.settings.trackRetentionDays ?? 30),
++          })
++        }
++      })
++      .catch(() => {})
++  }, [policyOpen])
++
++  const savePolicy = async () => {
++    setSaving(true)
++    try {
++      const res = await fetch('/api/admin/settings', {
++        method: 'PUT',
++        headers: { 'content-type': 'application/json' },
++        body: JSON.stringify({
++          trackEnabled: Number(form.trackEnabled),
++          trackMoveIntervalSec: Number(form.trackMoveIntervalSec),
++          trackStillIntervalSec: Number(form.trackStillIntervalSec),
++          trackMotionThresholdM: Number(form.trackMotionThresholdM),
++          trackMaxAgeSec: Number(form.trackMaxAgeSec),
++          trackRetentionDays: Number(form.trackRetentionDays),
++        }),
++      })
++      const d = await res.json()
++      if (!res.ok || !d.ok) throw new Error(d.error || 'خطا در ذخیرهٔ تنظیمات')
++      toast({ title: 'تنظیمات ردیابی ذخیره شد', description: 'تغییرات با به‌روزرسانی بعدی اپ اعمال می‌شود.' })
++      setPolicyOpen(false)
++      loadStatus()
++    } catch (e) {
++      toast({ title: 'ذخیره نشد', description: e instanceof Error ? e.message : 'خطای نامشخص', variant: 'destructive' })
++    } finally {
++      setSaving(false)
++    }
++  }
++
++  // route history fetch (re-runs when the dialog target or range changes)
++  useEffect(() => {
++    if (!routeFor) return
++    setRouteLoading(true)
++    setRouteData(null)
++    const from = new Date(Date.now() - Number(routeHours) * 3600 * 1000).toISOString()
++    fetch(`/api/panel/tracking/history?employeeId=${encodeURIComponent(routeFor.employee.id)}&from=${encodeURIComponent(from)}`, { cache: 'no-store' })
++      .then((r) => r.json())
++      .then((d) => {
++        if (d.ok) setRouteData({ points: d.points, capped: d.capped, checkins: d.checkins, lastPing: d.lastPing })
++      })
++      .catch(() => {})
++      .finally(() => setRouteLoading(false))
++  }, [routeFor, routeHours])
++
++  const connBadge = (c: LiveRow['connection']) => {
++    switch (c) {
++      case 'sending': return <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">در حال ارسال</Badge>
++      case 'stale-report': return <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">گزارش نمی‌رسد</Badge>
++      case 'disabled': return <Badge className="bg-muted text-muted-foreground hover:bg-muted">خاموش (سیاست)</Badge>
++      default: return <Badge className="bg-muted text-muted-foreground hover:bg-muted">بی‌گزارش</Badge>
++    }
++  }
++
++  return (
++    <div className="space-y-4" data-testid="tracking-tab">
++      {/* policy summary strip */}
++      <Card>
++        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
++          <CardTitle className="flex items-center gap-2 text-base">
++            <Navigation className="h-4 w-4 text-teal-600" />
++            وضعیت زندهٔ ردیابی
++          </CardTitle>
++          <div className="flex items-center gap-2">
++            <Button variant="outline" size="sm" onClick={() => setPolicyOpen(true)} data-testid="tracking-policy-btn">
++              <ShieldCheck className="ml-1 h-4 w-4" />
++              تنظیمات ردیابی
++            </Button>
++            <Button variant="outline" size="sm" onClick={loadStatus}>
++              <RefreshCw className="ml-1 h-4 w-4" />
++              به‌روزرسانی
++            </Button>
++          </div>
++        </CardHeader>
++        <CardContent className="space-y-2">
++          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
++            {policy ? (
++              <>
++                <span>وضعیت: {policy.enabled ? <b className="text-emerald-700">فعال</b> : <b className="text-muted-foreground">خاموش</b>}</span>
++                <span>هدف هنگام حرکت: هر {policy.moveIntervalSec.toLocaleString('fa-IR')} ثانیه</span>
++                <span>هدف هنگام سکون: هر {policy.stillIntervalSec.toLocaleString('fa-IR')} ثانیه</span>
++                <span>آستانهٔ تشخیص حرکت: {policy.motionThresholdM.toLocaleString('fa-IR')} متر</span>
++                <span>حداکثر عمر موقعیت: {Math.round(policy.maxAgeSec / 60).toLocaleString('fa-IR')} دقیقه</span>
++                <span>نگهداری داده: {policy.retentionDays.toLocaleString('fa-IR')} روز</span>
++              </>
++            ) : (
++              <span>…</span>
++            )}
++          </div>
++          <p className="text-xs text-muted-foreground">
++            این زمان‌بندی‌ها هدف اپ هستند، نه تضمین نرخ واقعی GPS — محدودیت‌های اندروید (ذخیرهٔ باتری، Doze) ممکن است فاصله‌ها را بیشتر کند؛ ستون زمان‌ها زمان واقعی دریافت است.
++            {serverTime ? ` آخرین به‌روزرسانی: ${faDateTime(serverTime)}` : ''}
++          </p>
++        </CardContent>
++      </Card>
++
++      {/* live table */}
++      <Card>
++        <CardContent className="p-0">
++          <div className="overflow-x-auto">
++            <table className="w-full text-sm" data-testid="tracking-table">
++              <thead>
++                <tr className="border-b bg-muted/50 text-right text-xs text-muted-foreground">
++                  <th className="p-3 font-medium">بازاریاب</th>
++                  <th className="p-3 font-medium">آخرین مختصات معتبر</th>
++                  <th className="p-3 font-medium">زمان ثبت</th>
++                  <th className="p-3 font-medium">وضعیت موقعیت</th>
++                  <th className="p-3 font-medium">وضعیت اتصال</th>
++                  <th className="p-3 font-medium">مجوز / سرویس / باتری</th>
++                  <th className="p-3 font-medium">۲۴ ساعت</th>
++                  <th className="p-3 font-medium">مسیر</th>
++                </tr>
++              </thead>
++              <tbody>
++                {(rows ?? []).map((r) => (
++                  <tr key={r.employee.id} className="border-b last:border-0">
++                    <td className="p-3">
++                      <div className="font-medium">
++                        {r.employee.name}
++                        {!r.employee.active && <Badge className="mr-1 bg-muted text-muted-foreground hover:bg-muted">غیرفعال</Badge>}
++                      </div>
++                      <div className="text-xs text-muted-foreground">@{r.employee.username}</div>
++                    </td>
++                    <td className="p-3 font-mono text-xs" data-testid={`coords-${r.employee.id}`}>
++                      {r.lastPing
++                        ? `${r.lastPing.lat.toFixed(5)}، ${r.lastPing.lng.toFixed(5)}`
++                        : <span className="text-muted-foreground">—</span>}
++                    </td>
++                    <td className="p-3 text-xs">
++                      {r.lastPing ? faDateTime(r.lastPing.recordedAt) : <span className="text-muted-foreground">—</span>}
++                    </td>
++                    <td className="p-3">
++                      {r.lastPing ? (
++                        r.fresh
++                          ? <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">تازه</Badge>
++                          : <Badge className="bg-slate-200 text-slate-700 hover:bg-slate-200">قدیمی</Badge>
++                      ) : (
++                        <Badge className="bg-muted text-muted-foreground hover:bg-muted">بدون موقعیت</Badge>
++                      )}
++                    </td>
++                    <td className="p-3">{connBadge(r.connection)}</td>
++                    <td className="p-3">
++                      <div className="flex flex-wrap gap-1">
++                        <Badge variant="outline" title="مجوز موقعیت اپ">
++                          <MapPin className="ml-1 h-3 w-3" />
++                          {r.status ? PERM_LABEL[r.status.locationPermission] ?? r.status.locationPermission : '—'}
++                        </Badge>
++                        <Badge variant="outline" title="مجوز موقعیت پس‌زمینه">
++                          {r.status ? BG_LABEL[r.status.backgroundLocation] ?? r.status.backgroundLocation : '—'}
++                        </Badge>
++                        <Badge variant="outline" title="سرویس ردیابی روی گوشی">
++                          <Signal className="ml-1 h-3 w-3" />
++                          {r.status ? (r.status.serviceRunning ? 'روشن' : 'خاموش') : '—'}
++                        </Badge>
++                        <Badge variant="outline" title="محدودیت باتری">
++                          <BatteryCharging className="ml-1 h-3 w-3" />
++                          {r.status ? (r.status.batteryUnrestricted ? 'آزاد' : 'محدود') : '—'}
++                        </Badge>
++                      </div>
++                      {r.status?.appVersion && (
++                        <div className="mt-1 text-xs text-muted-foreground">اپ {r.status.appVersion}</div>
++                      )}
++                    </td>
++                    <td className="p-3 text-center">{r.last24h.toLocaleString('fa-IR')}</td>
++                    <td className="p-3">
++                      <Button
++                        variant="outline"
++                        size="sm"
++                        onClick={() => {
++                          setRouteHours('24')
++                          setRouteFor(r)
++                        }}
++                        data-testid={`route-btn-${r.employee.id}`}
++                      >
++                        <Route className="ml-1 h-4 w-4" />
++                        نمایش مسیر
++                      </Button>
++                    </td>
++                  </tr>
++                ))}
++                {rows !== null && rows.length === 0 && (
++                  <tr>
++                    <td colSpan={8} className="p-6 text-center text-muted-foreground">
++                      کارمندی ثبت نشده است.
++                    </td>
++                  </tr>
++                )}
++                {rows === null && (
++                  <tr>
++                    <td colSpan={8} className="p-6 text-center text-muted-foreground">
++                      در حال دریافت…
++                    </td>
++                  </tr>
++                )}
++              </tbody>
++            </table>
++          </div>
++        </CardContent>
++      </Card>
++
++      {/* route history dialog */}
++      <Dialog open={!!routeFor} onOpenChange={(o) => !o && setRouteFor(null)}>
++        <DialogContent className="max-w-3xl" data-testid="route-dialog">
++          <DialogHeader>
++            <DialogTitle>مسیر {routeFor?.employee.name}</DialogTitle>
++            <DialogDescription>
++              مسیر ثبت‌شده، مختصات چک‌این‌ها و آخرین موقعیت — سه لایهٔ مجزا.
++            </DialogDescription>
++          </DialogHeader>
++          <div className="flex items-center gap-2">
++            <Select value={routeHours} onValueChange={setRouteHours}>
++              <SelectTrigger className="w-32">
++                <SelectValue />
++              </SelectTrigger>
++              <SelectContent>
++                <SelectItem value="24">۲۴ ساعت اخیر</SelectItem>
++                <SelectItem value="48">۴۸ ساعت اخیر</SelectItem>
++                <SelectItem value="168">۷ روز اخیر</SelectItem>
++              </SelectContent>
++            </Select>
++            {routeLoading && <span className="text-xs text-muted-foreground">در حال دریافت…</span>}
++            {routeData?.capped && (
++              <span className="text-xs text-amber-700">نمایش به ۲٬۰۰۰ نقطهٔ آخر محدود شد</span>
++            )}
++            {routeData && routeData.points.length === 0 && !routeLoading && (
++              <span className="text-xs text-muted-foreground">در این بازه موقعیتی ثبت نشده است.</span>
++            )}
++          </div>
++          {routeData && <RouteMap points={routeData.points} checkins={routeData.checkins} lastPing={routeData.lastPing} />}
++        </DialogContent>
++      </Dialog>
++
++      {/* policy form dialog */}
++      <Dialog open={policyOpen} onOpenChange={setPolicyOpen}>
++        <DialogContent className="max-w-lg" data-testid="tracking-policy-dialog">
++          <DialogHeader>
++            <DialogTitle>تنظیمات ردیابی</DialogTitle>
++            <DialogDescription>
++              سیاست ردیابی همهٔ اپ‌ها. اپ آخرین تنظیم معتبر را آفلاین نگه می‌دارد و با اتصال دوباره آن را دریافت می‌کند.
++            </DialogDescription>
++          </DialogHeader>
++          <div className="space-y-3">
++            <div className="flex items-center justify-between rounded-lg border p-3">
++              <div>
++                <Label>ردیابی فعال باشد</Label>
++                <p className="text-xs text-muted-foreground">خاموش کردن ردیابی، درخواست موقعیت اپ را متوقف می‌کند (اعلان مجاورت نیز متوقف می‌شود)؛ چک‌این‌ها با موقعیت لحظه‌ای خود کار می‌کنند.</p>
++              </div>
++              <Switch
++                checked={form.trackEnabled === '1'}
++                onCheckedChange={(v) => setForm((f) => ({ ...f, trackEnabled: v ? '1' : '0' }))}
++                data-testid="track-enabled-switch"
++              />
++            </div>
++            <div className="grid grid-cols-2 gap-3">
++              <div className="space-y-1">
++                <Label htmlFor="move">هدف ارسال هنگام حرکت (ثانیه)</Label>
++                <Input id="move" inputMode="numeric" value={form.trackMoveIntervalSec}
++                  onChange={(e) => setForm((f) => ({ ...f, trackMoveIntervalSec: e.target.value }))} data-testid="track-move-input" />
++                <p className="text-xs text-muted-foreground">۱۵ تا ۶۰۰ ثانیه</p>
++              </div>
++              <div className="space-y-1">
++                <Label htmlFor="still">هدف ارسال هنگام سکون (ثانیه)</Label>
++                <Input id="still" inputMode="numeric" value={form.trackStillIntervalSec}
++                  onChange={(e) => setForm((f) => ({ ...f, trackStillIntervalSec: e.target.value }))} data-testid="track-still-input" />
++                <p className="text-xs text-muted-foreground">۶۰ تا ۳۶۰۰ ثانیه</p>
++              </div>
++              <div className="space-y-1">
++                <Label htmlFor="motion">آستانهٔ تشخیص حرکت (متر)</Label>
++                <Input id="motion" inputMode="numeric" value={form.trackMotionThresholdM}
++                  onChange={(e) => setForm((f) => ({ ...f, trackMotionThresholdM: e.target.value }))} data-testid="track-motion-input" />
++                <p className="text-xs text-muted-foreground">۵ تا ۵۰۰ متر</p>
++              </div>
++              <div className="space-y-1">
++                <Label htmlFor="maxage">حداکثر عمر موقعیت (ثانیه)</Label>
++                <Input id="maxage" inputMode="numeric" value={form.trackMaxAgeSec}
++                  onChange={(e) => setForm((f) => ({ ...f, trackMaxAgeSec: e.target.value }))} data-testid="track-maxage-input" />
++                <p className="text-xs text-muted-foreground">۶۰ تا ۲۱٬۶۰۰ ثانیه — قدیمی‌تر از این، موقعیت «قدیمی» نمایش داده می‌شود</p>
++              </div>
++              <div className="space-y-1 col-span-2">
++                <Label htmlFor="retention">مدت نگهداری موقعیت‌های دریافت‌شده (روز)</Label>
++                <Input id="retention" inputMode="numeric" value={form.trackRetentionDays}
++                  onChange={(e) => setForm((f) => ({ ...f, trackRetentionDays: e.target.value }))} data-testid="track-retention-input" />
++                <p className="text-xs text-muted-foreground">۷ تا ۳۶۵ روز — قدیمی‌تر از این، موقعیت‌های دریافت‌شده پاک می‌شوند (دادهٔ ارسال‌نشدهٔ اپ هرگز پاک نمی‌شود)</p>
++              </div>
++            </div>
++          </div>
++          <div className="flex justify-end gap-2">
++            <Button variant="outline" onClick={() => setPolicyOpen(false)}>انصراف</Button>
++            <Button onClick={savePolicy} disabled={saving} data-testid="track-save-btn">
++              {saving ? 'در حال ذخیره…' : 'ذخیره'}
++            </Button>
++          </div>
++        </DialogContent>
++      </Dialog>
++    </div>
++  )
++}
+diff -ruN a/src/instrumentation.ts b/src/instrumentation.ts
+--- a/src/instrumentation.ts	2026-10-29 17:54:12.287941504 +0000
++++ b/src/instrumentation.ts	2026-10-29 18:19:09.627874559 +0000
+@@ -147,12 +147,49 @@
+ const CHECKIN_NOTE_VERSION_INDEX_DDL =
+   'CREATE INDEX IF NOT EXISTS "CheckinNoteVersion_checkinId_idx" ON "CheckinNoteVersion"("checkinId")'
+ 
++// ── phase 3: background location tracking ─────────────────────────
++// Two brand-NEW tables. The DDL below is BYTE-IDENTICAL to the `prisma db
++// push` output for the package-14 schema (verified against a probe database
++// at build time — 4-space indent, `DEFAULT false`, exact constraint text)
++// except for the added IF NOT EXISTS, which SQLite strips when storing the
++// statement in sqlite_master. Result: upgraded installs and fresh installs
++// (template.db) end up with the EXACT same stored table SQL.
++// LocationPing.localId carries a UNIQUE index = the idempotency key for
++// upload replays; the composite (employeeId, recordedAt) index serves the
++// live-status "last ping" and route-history queries.
++const LOCATION_PING_DDL = `CREATE TABLE IF NOT EXISTS "LocationPing" (
++    "id" TEXT NOT NULL PRIMARY KEY,
++    "employeeId" TEXT NOT NULL,
++    "localId" TEXT NOT NULL,
++    "lat" REAL NOT NULL,
++    "lng" REAL NOT NULL,
++    "accuracy" REAL,
++    "recordedAt" DATETIME NOT NULL,
++    "receivedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
++    CONSTRAINT "LocationPing_employeeId_fkey" FOREIGN KEY ("employeeId") REFERENCES "Employee" ("id") ON DELETE CASCADE ON UPDATE CASCADE
++)`
++const LOCATION_PING_LOCALID_INDEX_DDL =
++  'CREATE UNIQUE INDEX IF NOT EXISTS "LocationPing_localId_key" ON "LocationPing"("localId")'
++const LOCATION_PING_ROUTE_INDEX_DDL =
++  'CREATE INDEX IF NOT EXISTS "LocationPing_employeeId_recordedAt_idx" ON "LocationPing"("employeeId", "recordedAt")'
++
++const TRACK_STATUS_DDL = `CREATE TABLE IF NOT EXISTS "TrackStatus" (
++    "employeeId" TEXT NOT NULL PRIMARY KEY,
++    "locationPermission" TEXT NOT NULL DEFAULT 'unknown',
++    "backgroundLocation" TEXT NOT NULL DEFAULT 'unknown',
++    "serviceRunning" BOOLEAN NOT NULL DEFAULT false,
++    "batteryUnrestricted" BOOLEAN NOT NULL DEFAULT false,
++    "appVersion" TEXT,
++    "lastReportAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
++    CONSTRAINT "TrackStatus_employeeId_fkey" FOREIGN KEY ("employeeId") REFERENCES "Employee" ("id") ON DELETE CASCADE ON UPDATE CASCADE
++)`
++
+ export async function register() {
+   if (process.env.NEXT_RUNTIME !== 'nodejs') return
+   const { PrismaClient } = await import('@prisma/client')
+   const db = new PrismaClient()
+   let applied = 0
+-  for (const sql of [...MIGRATIONS, AUDIT_TABLE_DDL, PLANNED_VISIT_DDL, PLANNED_VISIT_INDEX_DDL, NOTIF_EVENTKEY_DDL, NOTIF_EVENTKEY_INDEX_DDL, PANEL_NOTIFICATION_DDL, PANEL_NOTIFICATION_INDEX_DDL, ASSIGNMENT_REQUEST_DDL, ASSIGNMENT_REQUEST_PENDING_INDEX_DDL, ...CUSTOMER_CITY_DDL, CHECKIN_NOTE_VERSION_DDL, CHECKIN_NOTE_VERSION_INDEX_DDL]) {
++  for (const sql of [...MIGRATIONS, AUDIT_TABLE_DDL, PLANNED_VISIT_DDL, PLANNED_VISIT_INDEX_DDL, NOTIF_EVENTKEY_DDL, NOTIF_EVENTKEY_INDEX_DDL, PANEL_NOTIFICATION_DDL, PANEL_NOTIFICATION_INDEX_DDL, ASSIGNMENT_REQUEST_DDL, ASSIGNMENT_REQUEST_PENDING_INDEX_DDL, ...CUSTOMER_CITY_DDL, CHECKIN_NOTE_VERSION_DDL, CHECKIN_NOTE_VERSION_INDEX_DDL, LOCATION_PING_DDL, LOCATION_PING_LOCALID_INDEX_DDL, LOCATION_PING_ROUTE_INDEX_DDL, TRACK_STATUS_DDL]) {
+     try {
+       await db.$executeRawUnsafe(sql)
+       applied++
+@@ -162,6 +199,19 @@
+       console.error(`[medpad][migrate] FAILED: ${sql} -> ${msg}`)
+     }
+   }
++  // phase 3 — retention prune at boot (receivedAt-based, through the client
++  // so the DateTime storage format is never hand-rolled; the 6h gate row is
++  // left stale on purpose: boot prunes unconditionally, uploads re-gate it)
++  try {
++    const row = await db.config.findUnique({ where: { key: 'trackRetentionDays' } })
++    const raw = row ? Number(row.value) : NaN
++    const days = Number.isFinite(raw) && raw >= 7 && raw <= 365 ? Math.trunc(raw) : 30
++    const cutoff = new Date(Date.now() - days * 24 * 3600 * 1000)
++    const res = await db.locationPing.deleteMany({ where: { receivedAt: { lt: cutoff } } })
++    if (res.count > 0) console.log(`[medpad][tracking] pruned ${res.count} ping(s) older than ${days} day(s)`)
++  } catch {
++    // best-effort at boot — never block the server on retention cleanup
++  }
+   await db.$disconnect()
+   if (applied > 0) console.log(`[medpad][migrate] applied ${applied} migration statement(s)`)
+ }
+diff -ruN a/src/lib/settings.ts b/src/lib/settings.ts
+--- a/src/lib/settings.ts	2026-10-29 17:54:12.283941481 +0000
++++ b/src/lib/settings.ts	2026-10-29 17:48:46.687049502 +0000
+@@ -44,12 +44,32 @@
+   appTokenTtlHours: number
+   gpsMaxAccuracyM: number
+   gpsStrictRadius: number
++  // phase 3 — background tracking policy (see TRACKING_DEFS below)
++  trackEnabled: number
++  trackMoveIntervalSec: number
++  trackStillIntervalSec: number
++  trackMotionThresholdM: number
++  trackMaxAgeSec: number
++  trackRetentionDays: number
+ }
+ 
+ export const SETTING_DEFS = {
+   appTokenTtlHours: { def: 720, min: 0, max: 8760 },
+   gpsMaxAccuracyM: { def: 50, min: 0, max: 500 },
+   gpsStrictRadius: { def: 0, min: 0, max: 1 },
++  // ── phase 3: tracking timing policy ─────────────────────────────
++  // These are TARGETS the app honours when the OS lets it — never a
++  // guarantee of the real GPS rate (Android doze / battery savers may
++  // stretch intervals; the panel shows the actual receipt times).
++  // Defaults follow the comprehensive instruction's suggestion band
++  // (30–60 s moving, 2–5 min still → 45 s / 240 s midpoints).
++  trackEnabled:          { def: 1,   min: 0,  max: 1 },     // 0 = tracking off
++  trackMoveIntervalSec:  { def: 45,  min: 15, max: 600 },   // moving target
++  trackStillIntervalSec: { def: 240, min: 60, max: 3600 },  // stationary target
++  trackMotionThresholdM: { def: 40,  min: 5,  max: 500 },   // motion threshold
++  trackMaxAgeSec:        { def: 900, min: 60, max: 21600 }, // stale after (15 min)
++  // received pings older than this are pruned (documented retention)
++  trackRetentionDays:    { def: 30,  min: 7,  max: 365 },
+ } as const
+ 
+ export type SettingKey = keyof typeof SETTING_DEFS
+diff -ruN a/src/lib/tracking.ts b/src/lib/tracking.ts
+--- a/src/lib/tracking.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/lib/tracking.ts	2026-10-29 17:49:17.420227426 +0000
+@@ -0,0 +1,82 @@
++import { db } from '@/lib/db'
++import { getAdminSettings, type AdminSettings } from '@/lib/settings'
++
++/**
++ * phase 3 — tracking domain helpers (server side).
++ *
++ * The tracking POLICY lives in the numeric settings machinery
++ * (SETTING_DEFS in lib/settings.ts: trackEnabled / trackMoveIntervalSec /
++ * trackStillIntervalSec / trackMotionThresholdM / trackMaxAgeSec /
++ * trackRetentionDays) — admin-editable, range-validated both on write and
++ * on read, with a safe fallback so a corrupt stored value never widens
++ * policy. This module exposes:
++ *
++ *   getTrackingConfig()  — the config object the APP consumes (a fresh
++ *                          read per call: the app re-fetches periodically
++ *                          and after reconnects, so a panel change reaches
++ *                          running devices without a restart).
++ *   isFresh(recordedAt)  — freshness test for the panel (a location is
++ *                          "live" only within trackMaxAgeSec; older ones
++ *                          are rendered as stale, never as current).
++ *   pruneOldPings()      — retention: delete RECEIVED pings older than
++ *                          trackRetentionDays. Runs at boot and at most
++ *                          once every 6h (time-gated through a Config row)
++ *                          piggy-backed on uploads. Only rows already
++ *                          accepted by the server are ever pruned — the
++ *                          app keeps UNSENT pings locally until confirmed,
++ *                          so this is a documented retention policy, not
++ *                          silent data loss.
++ */
++
++export interface TrackingConfig {
++  enabled: boolean
++  moveIntervalSec: number
++  stillIntervalSec: number
++  motionThresholdM: number
++  maxAgeSec: number
++  /** upload batch size the app may send in ONE request */
++  batchSize: number
++}
++
++/** Batch-size constant — validated against the same limit in the upload
++ *  route; kept here so the config payload and the validator share it. */
++export const TRACK_BATCH_MAX = 200
++
++export async function getTrackingConfig(): Promise<TrackingConfig> {
++  const s: AdminSettings = await getAdminSettings()
++  return {
++    enabled: s.trackEnabled === 1,
++    moveIntervalSec: s.trackMoveIntervalSec,
++    stillIntervalSec: s.trackStillIntervalSec,
++    motionThresholdM: s.trackMotionThresholdM,
++    maxAgeSec: s.trackMaxAgeSec,
++    batchSize: TRACK_BATCH_MAX,
++  }
++}
++
++export function isFresh(recordedAt: Date, maxAgeSec: number): boolean {
++  return Date.now() - recordedAt.getTime() <= maxAgeSec * 1000
++}
++
++const PRUNE_GATE_KEY = 'trackLastPruneAt'
++const PRUNE_GATE_MS = 6 * 3600 * 1000
++
++/** Retention prune — time-gated. `force` skips the gate (used at boot).
++ *  Returns the number of deleted rows (0 when the gate closed). */
++export async function pruneOldPings(force = false): Promise<number> {
++  const gate = await db.config.findUnique({ where: { key: PRUNE_GATE_KEY } })
++  const last = gate ? Number(gate.value) : 0
++  const now = Date.now()
++  if (!force && Number.isFinite(last) && now - last < PRUNE_GATE_MS) return 0
++  const s: AdminSettings = await getAdminSettings()
++  const cutoff = new Date(now - s.trackRetentionDays * 24 * 3600 * 1000)
++  // NOTE: retention is judged by receivedAt (server clock) — device clocks
++  // are untrusted and must never be able to protect a row from pruning.
++  const deleted = await db.locationPing.deleteMany({ where: { receivedAt: { lt: cutoff } } })
++  await db.config.upsert({
++    where: { key: PRUNE_GATE_KEY },
++    update: { value: String(now) },
++    create: { key: PRUNE_GATE_KEY, value: String(now) },
++  })
++  return deleted.count
++}

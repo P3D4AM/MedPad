@@ -262,6 +262,25 @@ object ApiClient {
             body.toString().toRequestBody("application/json".toMediaType())))
     }
 
+    // ── phase 3 (dev.5) — background location tracking ─────
+
+    /** tracking policy from the panel (targets, not GPS-rate guarantees).
+     *  Called at service start and periodically so panel changes reach a
+     *  running device without a restart. */
+    @Throws(Exception::class)
+    fun trackingConfig(): JSONObject = exec(req("/api/app/tracking-config"))
+
+    /** bulk-upload recorded location fixes. `pings`/`status` are PREBUILT
+     *  JSON by LocationUpload (kept testable without Android types). The
+     *  response carries the current config — the caller feeds it to
+     *  TrackingConfig.updateFrom so every upload doubles as a config
+     *  refresh. localId is the idempotency key: replays are counted as
+     *  `duplicated` server-side, never stored twice. */
+    @Throws(Exception::class)
+    fun uploadLocations(payload: JSONObject): JSONObject =
+        exec(req("/api/app/locations", "POST",
+            payload.toString().toRequestBody("application/json".toMediaType())))
+
     fun mediaUrl(voicePath: String): String =
         "${Session.serverUrl}/api/media/$voicePath?token=${Session.token}"
 

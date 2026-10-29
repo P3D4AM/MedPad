@@ -202,13 +202,27 @@ interface PlannedVisitDao {
 }
 
 /**
- * Location track points (kept locally, flushed best-effort).
+ * Location track points — phase 3.
+ *
+ * v1.9.1..dev.4 kept these purely LOCAL (never uploaded, blindly purged
+ * after 24h). Phase 3 turns them into an upload queue with the same
+ * durability rules as the check-in queue:
+ *  - localId (UUID) is the idempotency key — a replay after a crash
+ *    mid-upload can never create a duplicate server row.
+ *  - rows are deleted ONLY after the server confirmed them (or after a
+ *    PERMANENT 400 rejection — structurally invalid data). Internet cuts
+ *    never lose data silently: there is NO time-based purge any more.
+ *  - legacy rows from pre-dev.5 installs (localId == "") get a UUID
+ *    assigned at upload time (they were never uploaded by old versions,
+ *    so fresh ids are duplicate-safe).
  */
 @Entity(tableName = "pending_locations")
 data class PendingLocation(
     @PrimaryKey(autoGenerate = true) val uid: Long = 0,
+    val localId: String = "",
     val lat: Double,
     val lng: Double,
+    val accuracy: Double? = null,   // GPS accuracy in meters, when known
     val createdAt: Long = System.currentTimeMillis(),
 )
 
@@ -220,6 +234,23 @@ interface PendingLocationDao {
     @Query("SELECT * FROM pending_locations ORDER BY createdAt DESC LIMIT 1")
     suspend fun last(): PendingLocation?
 
-    @Query("DELETE FROM pending_locations WHERE createdAt < :before")
-    suspend fun cleanup(before: Long)
+    /** oldest-first batch for upload (order preserved — route history) */
+    @Query("SELECT * FROM pending_locations ORDER BY createdAt ASC LIMIT :limit")
+    suspend fun oldest(limit: Int): List<PendingLocation>
+
+    /** delete server-confirmed (or permanently rejected) rows by primary key */
+    @Query("DELETE FROM pending_locations WHERE uid IN (:uids)")
+    suspend fun deleteByUids(uids: List<Long>)
+
+    /** assign the idempotency id to a legacy row before its first upload */
+    @Query("UPDATE pending_locations SET localId = :localId WHERE uid = :uid")
+    suspend fun assignLocalId(uid: Long, localId: String)
+
+    @Query("SELECT COUNT(*) FROM pending_locations")
+    suspend fun count(): Int
+
+    /** full wipe — ONLY on logout / server change to a different database
+     *  (the rows belong to the old server's employee) */
+    @Query("DELETE FROM pending_locations")
+    suspend fun clear()
 }

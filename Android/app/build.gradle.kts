@@ -14,14 +14,16 @@ android {
         applicationId = "com.medpad.tracker"
         minSdk = 24
         targetSdk = 34
-        // dev.4 — phase 2 completion (audit §1+§2+§5+§6): notification
-        // tap-through routing, report text edit (own history), panel audio
-        // player, self-service password change, server-address change after
-        // login. versionCode strictly increased from 14 so it upgrades an
+        // dev.5 — phase 3 (background location + live panel status):
+        // location upload queue (idempotent localId, no silent loss),
+        // remote tracking policy (move/still intervals, motion threshold,
+        // max age, on/off) with offline retention, boot restart, permission
+        // state banner + reporting, panel live view + route history.
+        // versionCode strictly increased from 15 so it upgrades an
         // existing same-signature install (this APK is signed with the
         // standard Android DEBUG key).
-        versionCode = 15
-        versionName = "1.9.13-dev.4"
+        versionCode = 16
+        versionName = "1.9.13-dev.5"
     }
 
     // ─── Signing (audit phase 2 hardening) ─────────────────────────────

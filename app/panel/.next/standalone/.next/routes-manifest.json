@@ -228,6 +228,12 @@
       "namedRegex": "^/api/app/customers/create(?:/)?$"
     },
     {
+      "page": "/api/app/locations",
+      "regex": "^/api/app/locations(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/app/locations(?:/)?$"
+    },
+    {
       "page": "/api/app/login",
       "regex": "^/api/app/login(?:/)?$",
       "routeKeys": {},
@@ -268,6 +274,12 @@
       "regex": "^/api/app/reports(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api/app/reports(?:/)?$"
+    },
+    {
+      "page": "/api/app/tracking-config",
+      "regex": "^/api/app/tracking\\-config(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/app/tracking\\-config(?:/)?$"
     },
     {
       "page": "/api/assignment-requests",
@@ -346,6 +358,18 @@
       "regex": "^/api/notifications(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api/notifications(?:/)?$"
+    },
+    {
+      "page": "/api/panel/tracking",
+      "regex": "^/api/panel/tracking(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/panel/tracking(?:/)?$"
+    },
+    {
+      "page": "/api/panel/tracking/history",
+      "regex": "^/api/panel/tracking/history(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/panel/tracking/history(?:/)?$"
     },
     {
       "page": "/api/panel-notifications",

@@ -28,6 +28,7 @@ import com.medpad.tracker.Session
 import com.medpad.tracker.db.Doctor
 import com.medpad.tracker.location.TrackingService
 import com.medpad.tracker.sync.CheckinSync
+import com.medpad.tracker.sync.LocationSync
 import com.medpad.tracker.sync.PlansSync
 import com.medpad.tracker.sync.TrackerContext
 import com.medpad.tracker.util.NotificationPrefs
@@ -81,10 +82,11 @@ class MainActivity : AppCompatActivity() {
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            // connection regained → flush immediately
+            // connection regained → flush immediately (check-ins + locations)
             scope.launch(Dispatchers.IO) {
                 CheckinSync.flush()
                 CheckinSync.syncDoctors()
+                LocationSync.flushOnce(this@MainActivity)
                 // phase 2 / task 2: refresh the plans cache too (read-only,
                 // separate table — a failure here cannot touch the queue)
                 PlansSync.sync()
@@ -179,9 +181,11 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         // v1.9.1: flush on every open + refresh queue + doctors sync
+        // phase 3: location upload rides the same resume path
         scope.launch(Dispatchers.IO) {
             CheckinSync.flush()
             CheckinSync.syncDoctors()
+            LocationSync.flushOnce(this@MainActivity)
             withContext(Dispatchers.Main) { updateQueueStatus() }
         }
         // connectivity callback
@@ -361,6 +365,24 @@ class MainActivity : AppCompatActivity() {
             val old = pv.isNotEmpty() && pv.split('.').firstOrNull()?.toIntOrNull()?.let { it < 1 } == true ||
                 pv.startsWith("1.6") || pv.startsWith("1.7")
             findViewById<TextView>(R.id.tvPanelWarning).visibility = if (old) View.VISIBLE else View.GONE
+            // phase 3: honest tracking-permission state — the banner shows
+            // whenever the location permission is missing; tapping it (re)asks
+            // and starts the service on grant. Permission state also reaches
+            // the panel through every upload's status snapshot.
+            val tvPerm = findViewById<TextView>(R.id.tvTrackingPerm)
+            val permOk = ContextCompat.checkSelfPermission(
+                this@MainActivity, Manifest.permission.ACCESS_FINE_LOCATION,
+            ) == PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(
+                    this@MainActivity, Manifest.permission.ACCESS_COARSE_LOCATION,
+                ) == PackageManager.PERMISSION_GRANTED
+            if (permOk) {
+                tvPerm.visibility = View.GONE
+            } else {
+                tvPerm.text = getString(R.string.tracking_perm_banner)
+                tvPerm.visibility = View.VISIBLE
+                tvPerm.setOnClickListener { askServicePermissions() }
+            }
             // G-2 (phase 1 / task 2): the server rejected our token (expired,
             // revoked or the employee was deactivated) → send the user to the
             // login screen instead of silently staying "logged in" offline.

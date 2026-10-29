@@ -48,5 +48,19 @@
             android:name=".location.TrackingService"
             android:exported="false"
             android:foregroundServiceType="location" />
+
+        <!-- phase 3: restart the tracking service after reboot (24/7
+             continuity). exported=false is NOT allowed for manifest
+             receivers of protected broadcasts, but BOOT_COMPLETED is a
+             protected system broadcast — exported=true is required and
+             safe: only the system can send it. -->
+        <receiver
+            android:name=".location.BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

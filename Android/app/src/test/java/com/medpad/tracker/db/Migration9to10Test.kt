@@ -63,9 +63,14 @@ class Migration9to10Test {
         assertTrue(dbFile().exists())
 
         // 2. downgrade to the v9 shape with plain SQLite (what a pre-package-8
-        //    install physically has: doctors WITHOUT province/city)
+        //    install physically has: doctors WITHOUT province/city — and since
+        //    the schema moved to v11 in phase 3, pending_locations WITHOUT
+        //    localId/accuracy too, otherwise the 10→11 step of the reopen
+        //    would hit "duplicate column name" on a REAL v9 fixture)
         val ddl = SQLiteDatabase.openOrCreateDatabase(dbFile(), null).use { raw ->
             val sql = raw.rawQuery("SELECT sql FROM sqlite_master WHERE type='table' AND name='doctors'", null)
+                .use { c -> c.moveToFirst(); c.getString(0) }
+            val plSql = raw.rawQuery("SELECT sql FROM sqlite_master WHERE type='table' AND name='pending_locations'", null)
                 .use { c -> c.moveToFirst(); c.getString(0) }
             raw.beginTransaction()
             try {
@@ -79,6 +84,20 @@ class Migration9to10Test {
                 )
                 raw.execSQL("DROP TABLE doctors")
                 raw.execSQL("ALTER TABLE doctors_v9 RENAME TO doctors")
+
+                // v9/v10 pending_locations: uid, lat, lng, createdAt only
+                raw.execSQL("DROP TABLE IF EXISTS pl_v9")
+                val plV9 = plSql
+                    .replace(", `localId` TEXT NOT NULL DEFAULT '', ", ", ")
+                    .replace(", `localId` TEXT NOT NULL, ", ", ")
+                    .replace(", `accuracy` REAL", "")
+                raw.execSQL(plV9.replace("CREATE TABLE `pending_locations`", "CREATE TABLE `pl_v9`"))
+                raw.execSQL(
+                    "INSERT INTO pl_v9 (uid,lat,lng,createdAt) SELECT uid,lat,lng,createdAt FROM pending_locations",
+                )
+                raw.execSQL("DROP TABLE pending_locations")
+                raw.execSQL("ALTER TABLE pl_v9 RENAME TO pending_locations")
+
                 raw.execSQL("PRAGMA user_version = 9")
                 raw.setTransactionSuccessful()
             } finally {

@@ -9,12 +9,13 @@
 #   chain:  patches/panel-src-phase1-task1 → phase2-remediation → task1 →
 #           task2 → dev2-fixes → package4 → madrep → package6 → package7 →
 #           package9 (cumulative; supersedes package8) → package5 (bell) →
-#           package13 (phase 2 completion: change-password, report-edit
-#           versions, audio player — last)
+#           package13 (phase 2 completion) → package14 (phase 3 tracking:
+#           LocationPing/TrackStatus, upload+config+live+history APIs,
+#           TrackingTab — last)
 #
 # This script performs the WHOLE reproducible pipeline and verifies it:
 #   1. fresh extraction of the base source (git archive)
-#   2. apply the 12-patch chain (fails hard on ANY .rej)
+#   2. apply the 13-patch chain (fails hard on ANY .rej)
 #   3. npm install --no-audit --no-fund        (tested with npm 11.19.1 / Node 24.x)
 #   4. DATABASE_URL=file:./dev.db  npx prisma generate   (3 query engines)
 #   5. DATABASE_URL=file:./build-time.db  npm run build  (next 16.4.3, standalone)
@@ -46,7 +47,14 @@ set -euo pipefail
 REPO_ROOT="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
 WORK="${2:-$REPO_ROOT/panel-build}"
 BASE_REF="bd9c80b:medpad-full-1.9/inst-stage/panel-src"
-CHAIN="phase1-task1 phase2-remediation phase2-task1 phase2-task2 phase2-dev2-fixes phase2-package4 phase2-madrep phase2-package6 phase2-package7 phase2-package9 phase2-package5 phase2-package13"
+CHAIN="phase1-task1 phase2-remediation phase2-task1 phase2-task2 phase2-dev2-fixes phase2-package4 phase2-madrep phase2-package6 phase2-package7 phase2-package9 phase2-package5 phase2-package13 phase3-package14"
+
+# RESUME mode (sandbox convenience): with MEDPAD_BUILD_RESUME=1 an existing
+# $WORK/src with node_modules (from an interrupted run — e.g. a sandbox that
+# kills long processes) skips steps 1–3 and continues at prisma generate.
+# The bundle comparison (step 8) still verifies the tree is exactly what
+# the chain produces, so resuming cannot silently build the wrong source.
+RESUME="${MEDPAD_BUILD_RESUME:-0}"
 
 [ -d "$REPO_ROOT/.git" ] || { echo "ERROR: $REPO_ROOT is not a git repo"; exit 1; }
 
@@ -54,35 +62,53 @@ say()  { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 die()  { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
 
 # ── 1. fresh base extraction ────────────────────────────────────────────────
-say "1/9 fresh base extraction ($BASE_REF)"
-rm -rf "$WORK"; mkdir -p "$WORK/src"
-git -C "$REPO_ROOT" archive "$BASE_REF" | tar -x -C "$WORK/src"
-[ -f "$WORK/src/package.json" ] || die "base extraction produced no package.json"
+if [ "$RESUME" = "1" ] && [ -d "$WORK/src/node_modules" ] && [ -f "$WORK/src/package.json" ]; then
+  say "1/9 RESUME — reusing $WORK/src (node_modules present)"
+else
+  RESUME=0
+  say "1/9 fresh base extraction ($BASE_REF)"
+  rm -rf "$WORK"; mkdir -p "$WORK/src"
+  git -C "$REPO_ROOT" archive "$BASE_REF" | tar -x -C "$WORK/src"
+  [ -f "$WORK/src/package.json" ] || die "base extraction produced no package.json"
+fi
 
 # ── 2. patch chain ──────────────────────────────────────────────────────────
-say "2/9 applying 12-patch chain"
+if [ "$RESUME" = "1" ]; then
+  say "2/9 RESUME — patch chain already applied (verified by the marker below)"
+else
+  say "2/9 applying 13-patch chain"
+  cd "$WORK/src"
+  for p in $CHAIN; do
+    patchfile="$REPO_ROOT/patches/panel-src-$p.patch"
+    [ -f "$patchfile" ] || die "missing patch: $patchfile"
+    out=$(patch -p1 --no-backup-if-mismatch < "$patchfile" 2>&1) || {
+      echo "$out"; die "patch FAILED: $p"; }
+    rej=$(find . -name '*.rej' | wc -l)
+    [ "$rej" -eq 0 ] || { find . -name '*.rej'; die "rejects after $p"; }
+    printf '   ok  %s\n' "$p"
+  done
+  # the bell component must exist after the chain
+  [ -f src/components/panel/NotificationsBell.tsx ] || die "patch chain did not produce NotificationsBell.tsx"
+fi
+# phase 3 marker (both fresh and resumed trees must have it)
+[ -f "$WORK/src/src/components/panel/TrackingTab.tsx" ] || die "patch chain did not produce TrackingTab.tsx"
 cd "$WORK/src"
-for p in $CHAIN; do
-  patchfile="$REPO_ROOT/patches/panel-src-$p.patch"
-  [ -f "$patchfile" ] || die "missing patch: $patchfile"
-  out=$(patch -p1 --no-backup-if-mismatch < "$patchfile" 2>&1) || {
-    echo "$out"; die "patch FAILED: $p"; }
-  rej=$(find . -name '*.rej' | wc -l)
-  [ "$rej" -eq 0 ] || { find . -name '*.rej'; die "rejects after $p"; }
-  printf '   ok  %s\n' "$p"
-done
-# the bell component must exist after the chain
-[ -f src/components/panel/NotificationsBell.tsx ] || die "patch chain did not produce NotificationsBell.tsx"
 
 # ── 3. npm install ──────────────────────────────────────────────────────────
-say "3/9 npm install (this is the slow part)"
-npm install --no-audit --no-fund > "$WORK/npm-install.log" 2>&1 \
-  || { tail -5 "$WORK/npm-install.log"; die "npm install failed"; }
-echo "   done (log: $WORK/npm-install.log)"
+if [ "$RESUME" = "1" ]; then
+  say "3/9 RESUME — npm install assumed complete (node_modules present)"
+else
+  say "3/9 npm install (this is the slow part)"
+  npm install --no-audit --no-fund > "$WORK/npm-install.log" 2>&1 \
+    || { tail -5 "$WORK/npm-install.log"; die "npm install failed"; }
+  echo "   done (log: $WORK/npm-install.log)"
+fi
 
 # ── 4. prisma generate ──────────────────────────────────────────────────────
 say "4/9 prisma generate"
-DATABASE_URL="file:./dev.db" npx prisma generate > "$WORK/prisma.log" 2>&1 \
+# use the LOCAL binary explicitly — npx may resolve a registry version
+# (seen in the wild: npx picked prisma@8.0.0-rc.28 over the pinned 6.x)
+DATABASE_URL="file:./dev.db" ./node_modules/.bin/prisma generate > "$WORK/prisma.log" 2>&1 \
   || { tail -5 "$WORK/prisma.log"; die "prisma generate failed"; }
 for e in node_modules/.prisma/client/libquery_engine-debian-openssl-3.0.x.so.node \
          node_modules/.prisma/client/query_engine-windows.dll.node \
@@ -132,7 +158,13 @@ chk "bell UI chunks"              "grep -rq 'bell-unread-count' --include='*.js'
 chk "api: app change-password"     "[ -f .next/server/app/api/app/change-password/route.js ]"
 chk "api: app report-edit"         "[ -f .next/server/app/api/app/report-edit/route.js ]"
 chk "api: checkins versions"       "[ -d .next/server/app/api/checkins/versions ]"
-echo "   hardening: PASS=$P FAIL=$F / 18"
+# phase 3 (package 14): tracking API surfaces + tab must ship
+chk "api: app tracking-config"     "[ -f .next/server/app/api/app/tracking-config/route.js ]"
+chk "api: app locations"           "[ -f .next/server/app/api/app/locations/route.js ]"
+chk "api: panel tracking"          "[ -f .next/server/app/api/panel/tracking/route.js ]"
+chk "api: panel tracking history"  "[ -f .next/server/app/api/panel/tracking/history/route.js ]"
+chk "tracking tab UI chunks"       "grep -rq 'route-map' --include='*.js' ."
+echo "   hardening: PASS=$P FAIL=$F / 23"
 [ "$F" -eq 0 ] || die "hardening checks failed"
 
 # ── 8. compare with committed bundle (BUILD_ID + build-dir normalized) ─────
@@ -199,7 +231,7 @@ PYEOF
 # ── 9. honest typecheck report (informational) ─────────────────────────────
 say "9/9 typecheck report (ignoreBuildErrors hides this from next build)"
 cd "$WORK/src"
-if npx tsc --noEmit > "$WORK/tsc.log" 2>&1; then
+if ./node_modules/.bin/tsc --noEmit > "$WORK/tsc.log" 2>&1; then
   echo "   tsc: CLEAN (0 errors)"
 else
   n=$(grep -c 'error TS' "$WORK/tsc.log" || true)
@@ -208,7 +240,7 @@ fi
 
 say "RESULT"
 echo "   bundle:        $WORK/bundle/.next"
-echo "   hardening:     18/18 PASS"
+echo "   hardening:     23/23 PASS"
 if [ $cmp_rc -eq 0 ]; then echo "   equivalence:   YES (BUILD_ID-normalized)";
 else echo "   equivalence:   DIFFERS (see 8/9 above)"; fi
 echo "   promote manually if intended: cp -r $WORK/bundle/.next/* <repo>/app/panel/.next/"

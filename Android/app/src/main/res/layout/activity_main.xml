@@ -70,6 +70,20 @@
             android:textColor="@color/red_600"
             android:visibility="gone" />
 
+        <!-- phase 3: honest tracking-permission state — shown whenever the
+             location permission is missing (tracking + proximity alerts
+             cannot run); tap asks for it -->
+        <TextView
+            android:id="@+id/tvTrackingPerm"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:padding="8dp"
+            android:background="@color/amber_100"
+            android:textSize="12sp"
+            android:textColor="@color/gray_700"
+            android:visibility="gone" />
+
         <!-- Check-in card -->
         <com.google.android.material.card.MaterialCardView
             xmlns:app="http://schemas.android.com/apk/res-auto"

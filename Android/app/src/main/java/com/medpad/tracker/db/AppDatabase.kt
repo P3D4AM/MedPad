@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [Doctor::class, PendingCheckin::class, PendingLocation::class, PlannedVisitEntity::class],
-    version = 10,
+    version = 11,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -28,7 +28,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "medpad.db",
                 )
-                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
                     .build()
                     .also { inst = it }
             }
@@ -111,9 +111,22 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // phase 3 (dev.5): pending_locations becomes an UPLOAD queue —
+        // localId is the idempotency key (UUID; legacy rows get one at
+        // upload time), accuracy the reported GPS accuracy. Additive and
+        // nullable/defaulted: old rows keep their coordinates, get ""
+        // localId and NULL accuracy — exactly what the entity expects
+        // (no @ColumnInfo defaultValue → Room accepts the ALTER default).
+        private val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE pending_locations ADD COLUMN localId TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE pending_locations ADD COLUMN accuracy REAL")
+            }
+        }
+
         /** Test-only accessor (unit tests build a throwaway instance on a
          *  version-9 file and must install the SAME real migrations). */
         fun migrationsForTest(): Array<Migration> =
-            arrayOf(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+            arrayOf(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
     }
 }

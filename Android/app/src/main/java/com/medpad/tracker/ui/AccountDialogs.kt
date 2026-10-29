@@ -16,6 +16,7 @@ import com.medpad.tracker.Session
 import com.medpad.tracker.api.ApiClient
 import com.medpad.tracker.location.TrackingService
 import com.medpad.tracker.sync.CheckinSync
+import com.medpad.tracker.sync.LocationSync
 import com.medpad.tracker.util.NetSecurity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -256,10 +257,15 @@ object AccountDialogs {
                         if (e.code == 401) {
                             // A MedPad panel, but not for this token — the
                             // honest path: stop the old-server service, drop
-                            // the old server's offline queue (just confirmed
-                            // above), clear the session, keep the NEW address
-                            // for the login screen.
-                            withContext(Dispatchers.IO) { CheckinSync.clearQueue() }
+                            // the old server's offline queues (check-ins just
+                            // confirmed above; location pings belong to the
+                            // old server's database and can never be uploaded
+                            // to the new one), clear the session, keep the
+                            // NEW address for the login screen.
+                            withContext(Dispatchers.IO) {
+                                CheckinSync.clearQueue()
+                                LocationSync.clearQueue(activity)
+                            }
                             TrackingService.stop(activity)
                             Session.clear(activity)
                             Session.serverUrl = normalized

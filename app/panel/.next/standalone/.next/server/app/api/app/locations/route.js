@@ -1,0 +1,10 @@
+var R=require("../../../../chunks/[turbopack]_runtime.js")("server/app/api/app/locations/route.js")
+R.c("server/chunks/[root-of-the-server]__03tki9jmmkl50._.js")
+R.c("server/chunks/_1ddq330wsx1qy._.js")
+R.c("server/chunks/src_lib_settings_ts_1mn2j0n3lwh2f._.js")
+R.c("server/chunks/src_lib_iran-cities_ts_1oooijdptramy._.js")
+R.c("server/chunks/[root-of-the-server]__15ywnk3kjwjgv._.js")
+R.c("server/chunks/[root-of-the-server]__1v1-l-83czzsr._.js")
+R.c("server/chunks/_next-internal_server_app_api_app_locations_route_actions_1ywr_910io8bi.js")
+R.m(91111)
+module.exports=R.m(91111).exports
