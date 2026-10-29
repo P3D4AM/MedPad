@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MedPad Offline Installer v1.9.13-dev.3 - Linux bootstrap
+# MedPad Offline Installer v1.9.13-dev.4 - Linux bootstrap
 # 100% offline: extracts the bundled Node.js tarball when no system node exists,
 # then runs the main offline pipeline (no npm, no build, no downloads).
 # v1.9.12: install.mjs shows a MENU - target (this machine / Linux VPS /
@@ -11,7 +11,7 @@ log() { echo "$(date '+%F %T') $*" >> "$LOG"; }
 
 echo ""
 echo "=============================================="
-echo "  MedPad Offline Installer v1.9.13-dev.3 (linux)"
+echo "  MedPad Offline Installer v1.9.13-dev.4 (linux)"
 echo "  A menu follows: install target + interface."
 echo "=============================================="
 echo ""

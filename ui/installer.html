@@ -314,7 +314,7 @@ window.addEventListener('unhandledrejection', (e) => {
 // ── load status, adapt UI ──
 fetch('/api/status').then((r) => r.json()).then((s) => {
   STATUS = s
-  $('#verBadge').textContent = 'v' + (s.installerVer || s.wizardVer || '1.9.13-dev.3')
+  $('#verBadge').textContent = 'v' + (s.installerVer || s.wizardVer || '1.9.13-dev.4')
   if (s.existingInstall) $('#existBox').style.display = 'block'
   if (s.panelPortBusy) $('#portBusyBox').style.display = 'block'
   if (s.config) {
@@ -335,7 +335,7 @@ fetch('/api/status').then((r) => r.json()).then((s) => {
 }).catch(() => {
   // v1.9.12-test.2: a failed /api/status is now LOUD — the page previously
   // kept looking normal with dead buttons when the wizard backend hiccuped.
-  $('#verBadge').textContent = 'v1.9.13-dev.3'
+  $('#verBadge').textContent = 'v1.9.13-dev.4'
   $('#jsErrMsg').innerHTML = 'اطلاعات وضعیت (api/status) دریافت نشد — اگر دکمه‌ها کار نکردند، نصب‌کننده‌ی کنسولی (install.bat گزینه‌ی ۲) را استفاده کنید.'
   $('#jsErr').style.display = 'block'
 })
