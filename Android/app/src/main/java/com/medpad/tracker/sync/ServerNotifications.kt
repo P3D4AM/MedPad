@@ -43,10 +43,15 @@ object ServerNotifications {
      * and must return whether the display SUCCEEDED (TrackingService
      * passes AppNotifier.notify; tests simulate failures). Display
      * exceptions count as failures — they must not abort the round.
+     *
+     * phase 2 / §1: the display callback now also receives the notification
+     * KIND and CUSTOMER ID so the caller can attach the tap-through
+     * contentIntent (NotificationTapRouter) — the tap opens the related
+     * screen per kind.
      */
     suspend fun pollOnce(
         context: Context,
-        display: (notifId: Int, title: String, body: String) -> Boolean,
+        display: (notifId: Int, title: String, body: String, kind: String?, customerId: String?) -> Boolean,
     ): PollResult = withContext(Dispatchers.IO) {
         val resp = ApiClient.notifications()
         val arr: JSONArray = resp.optJSONArray("notifications") ?: JSONArray()
@@ -66,8 +71,11 @@ object ServerNotifications {
             }
             val title = n.optString("title")
             val body = n.optString("body")
+            // phase 2 / §1: kind + customerId feed the tap-through routing
+            val kind = if (n.has("kind") && !n.isNull("kind")) n.optString("kind") else null
+            val customerId = if (n.has("customerId") && !n.isNull("customerId")) n.optString("customerId") else null
             val shown = try {
-                display(id.hashCode(), title, body)
+                display(id.hashCode(), title, body, kind, customerId)
             } catch (_: Exception) {
                 false
             }

@@ -1488,3 +1488,22 @@ Stage Summary:
 - بخش پنل/سرور فاز ۲-تکمیلی کامل شد: تغییر رمز خودخدمت با سیاست ابطال نشست + قفل نرخ + حسابرسی، ویرایش گزارش با تاریخچهٔ append-only (مدل+API+UI پنل+مسیر ارتقا)، پخش‌کنندهٔ صوت پنل با تک‌پخشی/ادامه/سرعت/خطا — با ۵۹ چک جدید + رگرسیون کامل ۴۲۵ چک + اثبات بازتولیدپذیری EQUIVALENT.
 - وضعیت: **DONE_LOCAL** (Push مسدود). باقی‌ماندهٔ فاز ۲: بخش اندروید (§۱ لمس اعلان، §۵ تغییر سرور، UI §۶/§۲) + محیط بیلد اندروید + انتشار dev.4 — همهٔ این‌ها به اعتبارنامهٔ Push برای تکمیل کامل وابسته‌اند.
 - قدم بعدی: (۱) مالک اعتبارنامهٔ Push فراهم کند → push دو کامیت محلی + تأیید SHA؛ (۲) بازسازی محیط اندروید (دستور Task 42) و ادامهٔ بخش اندرویدی فاز ۲.
+
+---
+Task ID: 53
+Agent: main (Z.ai — permanent-protocol session)
+Task: §۱ فاز ۲-تکمیلی — لمس اعلان اندروید → باز شدن صفحه/رکورد مرتبط (اجرای سرد/نشست منقضی/رکورد حذف‌شده ایمن)؛ طبق پروتکل دائمی، ادامهٔ مستقیم پس از بستهٔ ۱۳
+Date: Oct 29, 2026
+
+Work Log:
+- **بازسازی محیط بیلد اندروید (دستور Task 42):** JDK پرتابل Adoptium 21.0.13+9 (با javac — JDK سیستمی فقط JRE بود) در /home/z/android-setup · SDK در /home/z/android-sdk (cmdline-tools 11076708 + platform-tools + platforms;android-34 + build-tools;34.0.0 + لایسنس‌ها) · jar روبولکتریک android-all-instrumented:14-robolectric-10818077-i6 (۱۵۰٬۶۴۶٬۲۶۲ بایت) پیش‌بارگذاری در ~/.m2 (این بار مستقیم از repo1 — HTTP 200، بدون نیاز به آینه) · local.properties (gitignored) با sdk.dir. **Baseline قبل از هر تغییر کد (§۹ پروتکل منابع): ۴۹/۴۹ سبز.** یادآوری جاری‌سازی: فرایندهای detached بین tool callها کشته می‌شوند — اجرای foreground پله‌ای؛ خروجی BUILD گاهی بعد از timeout ابزار در لاگ کامل است (بررسی نتیجه از XML تست‌ها/فایل خروجی).
+- **پیاده‌سازی (کوچک و افزایشی):** `ui/NotificationTapRouter.kt` (جدید) — routeForKind (plan→PLANS؛ assignment/proximity/request→MAP؛ info/ناشناخته/null→HOME)، pendingIntent به MainActivity (هاب محافظت‌شده؛ FLAG_IMMUTABLE+UPDATE_CURRENT؛ requestCode بر اساس kind)، routeFrom (اعتبارسنجی مقدار مسیر — جعل/نامعتبر → null)، savePending/takePending (prefs؛ مصرف یک‌باره؛ آخرین ذخیره برنده) · `AppNotifier.notify` پارامتر contentIntent? (null = رفتار قبلی) · `ServerNotifications.pollOnce`: امضای display به (id, title, body, kind, customerId) + استخراج امن kind/customerId از JSON (null برای ردیف‌های قدیمی) · `TrackingService`: هر دو فراخوانی notify (مجاورتی با doc.id و poll سرور) intent مسیریابی می‌گیرند · `MainActivity`: گارد لاگین قبل از هر چیز (اجراای سرد لمس اعلان بدون نشست → ذخیرهٔ مسیر + پیام + LoginActivity)، مصرف مسیر مستقیم/pending و هدایت (PLANS→PlansActivity؛ MAP→بررسی DoctorDao.byId — غایب → توست صادقانه ولی باز شدن نقشه؛ خطای DB بلاک‌کننده نیست؛ HOME→ماندن) · دو رشتهٔ فارسی جدید (notif_tap_login_needed، notif_tap_customer_gone).
+- **باگ‌های گرفتارشده در همین تسک:** ایندکس اشتباه rateIdx (بستهٔ ۱۳، قبلاً ثبت شد) · `this` داخل withContext(Dispatchers.Main) در Toast (کامپایل نشد → this@MainActivity) · خواندن prefs بعد از clear در takePending (خواندن قبل از پاک‌سازی).
+- **تست‌ها:** ۱۳ جدید (۱۲ روتر + ۱ عبور kind/customerId) — جزئیات در PROGRESS. **۶۲/۶۲ سبز** (XML واقعی: total=62 failed=0).
+- **راستی‌آزمایی بسته:** assembleDebug موفق (۸٬۸۱۴٬۳۱۱ بایت در این محیط — خروجی build است و کامیت نمی‌شود) · apksigner v2 VERIFIED (CN=Android Debug — کلید استاندارد، مسیر ارتقا) · aapt: vCode=14 / vName=1.9.13-dev.3 / minSdk 24 / target 34 · zipalign VERIFIED · رشتهٔ «medpad.extra.ROUTE» در classes4.dex (تازگی خروجی).
+- **تغییرات:** Android: 5M+2 جدید+1 تست؛ + همین دو سند. پنل/باندل/template.db/main دست‌نخورده.
+- **Push:** ❌ مسدود (بدون اعتبارنامه) — این کامیت هم DONE_LOCAL.
+
+Stage Summary:
+- §۱ فاز ۲ کامل شد: لمس هر اعلان حالا مقصد مرتبط را باز می‌کند (نقشه/برنامه‌ها/خانه بر اساس نوع)، با اجرای سرد و نشست منقضی (بقای مسیر در ورود مجدد) و رکورد حذف‌شده (توست صادقانه + باز شدن امن) — ۶۲/۶۲ تست سبز، APK با کلید مسیر-ارتقا VERIFY شده.
+- وضعیت: DONE_LOCAL. باقی‌ماندهٔ فاز ۲: §۵ تغییر سرور پس از ورود + UI اندروید §۶/§۲ + انتشار dev.4 — و همهٔ کامیت‌های محلی نیازمند اعتبارنامهٔ Push مالک برای انتشار روی GitHub.

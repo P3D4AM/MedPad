@@ -25,6 +25,7 @@ import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.ContextCompat
 import com.medpad.tracker.R
 import com.medpad.tracker.Session
+import com.medpad.tracker.db.Doctor
 import com.medpad.tracker.location.TrackingService
 import com.medpad.tracker.sync.CheckinSync
 import com.medpad.tracker.sync.PlansSync
@@ -39,6 +40,13 @@ import kotlinx.coroutines.withContext
  * Main app screen.
  * v1.9.1 fixes: localId idempotency on submit paths, recording timer,
  * live queue status, old-panel warning, flush on resume/network-regain.
+ *
+ * phase 2 / §1 (notification tap-through): MainActivity is the guarded
+ * ROUTING HUB. Every notification tap lands here (NotificationTapRouter);
+ * this screen checks the login state BEFORE anything else — an expired
+ * session or a cold start after logout persists the requested route and
+ * sends the user to LoginActivity, and after a successful re-login the
+ * pending route is consumed here and forwarded to the destination.
  */
 class MainActivity : AppCompatActivity() {
 
@@ -87,8 +95,34 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // phase 2 / §1 — the guarded hub: a notification tap can launch this
+        // activity from COLD with no session. Not logged in? Persist the
+        // requested route (it survives the login detour — consumed after a
+        // successful re-login) and land on the login screen instead of a
+        // broken home.
+        if (!Session.isLoggedIn) {
+            NotificationTapRouter.routeFrom(intent)?.let {
+                NotificationTapRouter.savePending(this, it)
+            }
+            Toast.makeText(this, R.string.notif_tap_login_needed, Toast.LENGTH_LONG).show()
+            startActivity(Intent(this, LoginActivity::class.java))
+            finish()
+            return
+        }
+
         setContentView(R.layout.activity_main)
         TrackerContext.init(this)
+
+        // phase 2 / §1 — consume the tap route: either the one THIS launch
+        // carries, or a pending one saved before a login detour (cold start
+        // / expired session). Direct routes take precedence; a consumed
+        // pending never fires twice.
+        val tapRoute = NotificationTapRouter.routeFrom(intent)
+        val pendingRoute = NotificationTapRouter.takePending(this)
+        (tapRoute ?: pendingRoute)?.let { route ->
+            scope.launch { forwardTapRoute(route) }
+        }
 
         findViewById<TextView>(R.id.tvHello).text =
             getString(R.string.hello, Session.employeeName.ifEmpty { "" })
@@ -192,6 +226,41 @@ class MainActivity : AppCompatActivity() {
         }
         pendingMicAction = action
         micPermission.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    /** phase 2 / §1 — forward a consumed notification-tap route to the
+     *  related screen. Runs after the main UI is up so the back stack
+     *  always has the home screen below the destination.
+     *  MAP routes check the referenced customer against the local cache:
+     *  deleted/unassigned → the map still opens, with an honest toast
+     *  (understandable + safe, never a crash). */
+    private suspend fun forwardTapRoute(route: NotificationTapRouter.Route) {
+        when (route.route) {
+            NotificationTapRouter.ROUTE_PLANS -> {
+                startActivity(Intent(this, PlansActivity::class.java))
+            }
+            NotificationTapRouter.ROUTE_MAP -> {
+                var known = true
+                if (route.customerId != null) {
+                    known = withContext(Dispatchers.IO) {
+                        try {
+                            com.medpad.tracker.db.AppDatabase.get(this@MainActivity)
+                                .doctorDao().byId(route.customerId) != null
+                        } catch (_: Exception) {
+                            true // DB hiccup — do not block the navigation
+                        }
+                    }
+                }
+                if (!known) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(this@MainActivity, R.string.notif_tap_customer_gone, Toast.LENGTH_LONG).show()
+                    }
+                }
+                startActivity(Intent(this, DoctorsMapActivity::class.java))
+            }
+            // ROUTE_HOME (and anything else): no forwarding — the user is
+            // already home. The route is simply consumed.
+        }
     }
 
     /** package 11 — notification settings: LOCAL proximity alerts and

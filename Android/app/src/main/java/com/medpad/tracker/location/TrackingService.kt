@@ -142,10 +142,14 @@ class TrackingService : LifecycleService() {
                     }
                     // package 11 — local proximity alert honours the user's toggle
                     if (NotificationPrefs.proximityEnabled) {
+                        // phase 2 / §1: tap-through — opens the map for this customer
                         AppNotifier.notify(
                             this@TrackingService, doc.id.hashCode(),
                             getString(R.string.notif_nearby, doc.name),
                             "فاصله حدود ${dist.roundToInt()} متر",
+                            com.medpad.tracker.ui.NotificationTapRouter.pendingIntent(
+                                this@TrackingService, "proximity", doc.id,
+                            ),
                         )
                     }
                 }
@@ -175,8 +179,14 @@ class TrackingService : LifecycleService() {
             lastNotifPollAt = now
             try {
                 if (Session.isLoggedIn) {
-                    ServerNotifications.pollOnce(applicationContext) { id, title, body ->
-                        AppNotifier.notify(this@TrackingService, id, title, body)
+                    ServerNotifications.pollOnce(applicationContext) { id, title, body, kind, customerId ->
+                        // phase 2 / §1: tap-through per kind (map / plans / home)
+                        AppNotifier.notify(
+                            this@TrackingService, id, title, body,
+                            com.medpad.tracker.ui.NotificationTapRouter.pendingIntent(
+                                this@TrackingService, kind, customerId,
+                            ),
+                        )
                     }
                 }
             } catch (_: Exception) { /* offline */ }

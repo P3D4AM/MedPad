@@ -136,6 +136,10 @@
     <string name="session_expired">نشست شما در سرور منقضی یا باطل شده است. برای ادامه باید دوباره وارد شوید.</string>
     <string name="login_again">ورود مجدد</string>
 
+    <!-- phase 2 / §1: notification tap-through -->
+    <string name="notif_tap_login_needed">برای مشاهدهٔ اعلان ابتدا وارد حساب خود شوید</string>
+    <string name="notif_tap_customer_gone">مشتریِ مرتبط با این اعلان دیگر در دسترس شما نیست (حذف شده یا تخصیص آن لغو شده است)</string>
+
     <!-- Planned visits (phase 2 / task 2) -->
     <string name="plans_title">برنامهٔ بازدیدها</string>
     <string name="plan_prev_day">روز قبل</string>

@@ -91,6 +91,7 @@ class ServerNotificationsTest {
         }
         Session.serverUrl = "http://127.0.0.1:${server.localPort}"
         Session.token = "unit-test-token-p07"
+        displayedMeta.clear()
     }
 
     @After
@@ -100,22 +101,36 @@ class ServerNotificationsTest {
         NotificationPrefs.clearShown(app)
     }
 
-    private fun addServerRow(id: String, title: String, readAt: String? = null) {
+    private fun addServerRow(
+        id: String,
+        title: String,
+        readAt: String? = null,
+        kind: String? = null,
+        customerId: String? = null,
+    ) {
         serverRows[id] = JSONObject()
             .put("id", id)
             .put("title", title)
             .put("body", "متن $title")
+            .put("kind", kind ?: JSONObject.NULL)
+            .put("customerId", customerId ?: JSONObject.NULL)
             .put("readAt", readAt ?: JSONObject.NULL)
     }
 
-    /** The injected display: fails for titles registered in [failingTitles]. */
-    private fun testDisplay(): (Int, String, String) -> Boolean = { _, title, _ ->
-        if (failingTitles.contains(title)) {
-            false // simulate a system display failure
-        } else {
-            true
+    /** The injected display: fails for titles registered in [failingTitles].
+     *  phase 2 / §1: also RECORDS (title → kind, customerId) so tests can
+     *  assert the tap-through metadata is passed through to the display. */
+    private val displayedMeta = CopyOnWriteArrayList<Pair<String, Pair<String?, String?>>>()
+
+    private fun testDisplay(): (Int, String, String, String?, String?) -> Boolean =
+        { _, title, _, kind, customerId ->
+            displayedMeta.add(title to (kind to customerId))
+            if (failingTitles.contains(title)) {
+                false // simulate a system display failure
+            } else {
+                true
+            }
         }
-    }
 
     private fun lastReadIds(): JSONArray? {
         if (readRequests.isEmpty()) return null
@@ -227,7 +242,7 @@ class ServerNotificationsTest {
         NotificationPrefs.markShown(app, "notif-c")
 
         var displayCalls = 0
-        val r = ServerNotifications.pollOnce(app) { _, _, _ -> displayCalls++; true }
+        val r = ServerNotifications.pollOnce(app) { _, _, _, _, _ -> displayCalls++; true }
 
         // NOT re-displayed (no duplicate) …
         assertEquals(0, displayCalls)
@@ -245,7 +260,7 @@ class ServerNotificationsTest {
         addServerRow("notif-old", "اعلان خوانده‌شده", readAt = "2026-10-29T00:00:00.000Z")
 
         var displayCalls = 0
-        val r = ServerNotifications.pollOnce(app) { _, _, _ -> displayCalls++; true }
+        val r = ServerNotifications.pollOnce(app) { _, _, _, _, _ -> displayCalls++; true }
 
         assertEquals(0, displayCalls)
         assertEquals(0, r.displayed)
@@ -258,7 +273,7 @@ class ServerNotificationsTest {
         addServerRow("notif-x", "استثنا")
         addServerRow("notif-y", "عادی")
 
-        val r = ServerNotifications.pollOnce(app) { _, title, _ ->
+        val r = ServerNotifications.pollOnce(app) { _, title, _, _, _ ->
             if (title == "استثنا") throw IllegalStateException("notification manager exploded")
             true
         }
@@ -269,5 +284,26 @@ class ServerNotificationsTest {
         assertTrue(NotificationPrefs.wasShown(app, "notif-y"))
         assertFalse(NotificationPrefs.wasShown(app, "notif-x"))
         assertTrue(serverRows.containsKey("notif-x")) // kept for retry
+    }
+
+    @Test
+    fun `phase2-s1 kind and customerId are passed through to the display for tap-routing`() = runBlocking {
+        // every kind the server emits for employees + a customer-carrying one
+        addServerRow("n-asg", "تخصیص", kind = "assignment", customerId = "cus-1")
+        addServerRow("n-plan", "برنامه", kind = "plan")
+        addServerRow("n-info", "اطلاع", kind = "info")
+        addServerRow("n-noKind", "بدون نوع") // legacy row without kind/customerId
+
+        val r = ServerNotifications.pollOnce(app, testDisplay())
+
+        assertEquals(4, r.displayed)
+        fun meta(title: String) = displayedMeta.first { it.first == title }.second
+        // assignment carries BOTH kind and customerId → the caller can route
+        // the tap to the customer's screen
+        assertEquals("assignment" to "cus-1", meta("تخصیص"))
+        assertEquals("plan" to null, meta("برنامه"))
+        assertEquals("info" to null, meta("اطلاع"))
+        // legacy/no metadata → nulls (router defaults to the safe HOME route)
+        assertEquals(null to null, meta("بدون نوع"))
     }
 }
