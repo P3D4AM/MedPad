@@ -137,6 +137,12 @@ interface PendingCheckinDao {
     @Query("DELETE FROM pending_checkins WHERE uid = :uid")
     suspend fun deleteById(uid: Long)
 
+    /** phase 2 / §5 (dev.4) — drop the whole offline queue (a server
+     *  switch to a DIFFERENT database makes every queued item not the new
+     *  server's business; the user confirms with the exact count first). */
+    @Query("DELETE FROM pending_checkins")
+    suspend fun clearAll()
+
     @Query("SELECT COUNT(*) FROM pending_checkins WHERE kind = 'checkin' AND customerId = :customerId AND createdAt > :since")
     suspend fun recentCount(customerId: String, since: Long): Int
 }

@@ -198,4 +198,38 @@
     <string name="arq_customer_label">مشتری درخواستی</string>
     <string name="arq_admin_reply">پاسخ مدیر: %s</string>
     <string name="arq_note_sent">یادداشت شما: %s</string>
+
+    <!-- Account sheets (phase 2 / dev.4 — §5 change server + §6 change password) -->
+    <string name="account_title">حساب کاربری</string>
+    <string name="account_change_password">تغییر رمز عبور</string>
+    <string name="account_change_server">تغییر آدرس سرور</string>
+    <string name="account_current_password">رمز عبور فعلی</string>
+    <string name="account_new_password">رمز عبور جدید</string>
+    <string name="account_confirm_password">تکرار رمز عبور جدید</string>
+    <string name="account_password_hint">رمز جدید باید حداقل ۸ نویسه باشد و با رمز فعلی متفاوت باشد. پس از تغییر، در دستگاه‌های دیگر باید دوباره وارد شوید.</string>
+    <string name="account_password_changed">رمز عبور تغییر کرد — %1$d نشست دیگر ابطال شد و باید دوباره وارد شوند</string>
+    <string name="account_password_change_failed">تغییر رمز ناموفق بود</string>
+    <string name="err_field_required">همهٔ فیلدها الزامی است</string>
+    <string name="err_confirm_mismatch">تکرار رمز عبور جدید مطابقت ندارد</string>
+    <string name="err_password_short">رمز جدید باید حداقل ۸ نویسه باشد</string>
+    <string name="err_password_same">رمز جدید نباید با رمز فعلی یکسان باشد</string>
+    <string name="account_server_current">آدرس فعلی: %1$s</string>
+    <string name="account_server_new">آدرس جدید سرور</string>
+    <string name="account_server_note">پیش از ذخیره، آدرس جدید با نشست فعلی آزموده می‌شود. اگر پایگاه داده همراه سرور منتقل شده باشد (پشتیبان‌گیری/بازیابی)، نشست شما معتبر می‌ماند؛ در غیر این صورت باید در آدرس جدید دوباره وارد شوید.</string>
+    <string name="err_server_url_invalid">آدرس سرور باید با http:// یا https:// شروع شود</string>
+    <string name="account_server_same">این همان آدرس فعلی است</string>
+    <string name="account_server_changed">آدرس سرور تغییر کرد — نشست شما معتبر ماند</string>
+    <string name="account_server_relogin">آدرس سرور تغییر کرد، اما نشست شما در سرور جدید معتبر نیست — دوباره وارد شوید</string>
+    <string name="account_server_queue_title">گزارش‌های ارسال‌نشده</string>
+    <string name="account_server_queue_warning">در صف آفلاین این دستگاه %1$d گزارش ارسال‌نشده دارید. اگر سرور جدید همان پایگاه دادهٔ منتقل‌شده (پشتیبان بازیابی‌شده) باشد، صف حفظ می‌شود و همان‌جا ارسال می‌شود؛ اما اگر سرور جدید پایگاه دادهٔ دیگری باشد، این صف برای همیشه پاک می‌شود تا دادهٔ سرور قبلی به سرور جدید نرود. ادامه می‌دهید؟</string>
+
+    <!-- Report edit (phase 2 / dev.4 — §2) -->
+    <string name="edit_report">ویرایش</string>
+    <string name="edit_report_title">ویرایش متن گزارش</string>
+    <string name="edit_report_hint">متن گزارش را اصلاح کنید — نسخه‌های قبلی در تاریخچهٔ پنل مدیریت حفظ می‌شود و پاک نمی‌شود.</string>
+    <string name="report_edited">گزارش ویرایش شد</string>
+    <string name="report_edit_no_change">متنی تغییر نکرد</string>
+    <string name="report_edit_failed">ویرایش گزارش ناموفق بود — اتصال به سرور لازم است</string>
+    <string name="err_report_not_found">گزارش روی سرور پیدا نشد (ممکن است حذف شده باشد) — صفحه را تازه‌سازی کنید</string>
+    <string name="err_report_note_too_long">متن گزارش خیلی طولانی است (حداکثر ۵۰۰۰ نویسه)</string>
 </resources>

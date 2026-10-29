@@ -29,6 +29,17 @@
                 android:textColor="@color/teal_700" />
 
             <Button
+                android:id="@+id/btnItemEdit"
+                style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:layout_marginEnd="6dp"
+                android:text="@string/edit_report"
+                android:textSize="12sp" />
+
+            <Button
                 android:id="@+id/btnItemPlay"
                 style="?attr/materialButtonOutlinedStyle"
                 android:layout_width="wrap_content"

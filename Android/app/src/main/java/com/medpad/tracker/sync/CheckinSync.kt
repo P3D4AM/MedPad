@@ -119,6 +119,20 @@ object CheckinSync {
 
     private enum class FlushOutcome { SENT, FAILED, RETRY }
 
+    /** phase 2 / §5 (dev.4) — drop the ENTIRE offline queue, including the
+     *  local voice files of unsent items. Called ONLY from the change-server
+     *  sheet's forced-relogin path (new address = a DIFFERENT database —
+     *  queued items belong to the old server and must never be replayed
+     *  against the new one). The user confirmed the loss with the exact
+     *  count BEFORE the switch was saved; returns the dropped item count. */
+    suspend fun clearQueue(): Int = withContext(Dispatchers.IO) {
+        val db = AppDatabase.get(TrackerContext.app)
+        val items = db.pendingCheckinDao().all()
+        items.forEach { it.voicePath?.let { p -> File(p).delete() } }
+        db.pendingCheckinDao().clearAll()
+        items.size
+    }
+
     /** Package 1: counts of items still waiting (local + in-flight). */
     suspend fun pendingCount(): Int = withContext(Dispatchers.IO) {
         AppDatabase.get(TrackerContext.app).pendingCheckinDao().pendingCount()

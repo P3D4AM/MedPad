@@ -14,13 +14,14 @@ android {
         applicationId = "com.medpad.tracker"
         minSdk = 24
         targetSdk = 34
-        // develop test release: v1.9.13-dev.2 — owner-test fixes (wizard
-        // forEach, firewall auto-exception, panel mobile UI, app login
-        // diagnostics). versionCode strictly increased from 12 so it can
-        // upgrade an existing same-signature install (this APK is signed
-        // with the standard Android DEBUG key).
-        versionCode = 14
-        versionName = "1.9.13-dev.3"
+        // dev.4 — phase 2 completion (audit §1+§2+§5+§6): notification
+        // tap-through routing, report text edit (own history), panel audio
+        // player, self-service password change, server-address change after
+        // login. versionCode strictly increased from 14 so it upgrades an
+        // existing same-signature install (this APK is signed with the
+        // standard Android DEBUG key).
+        versionCode = 15
+        versionName = "1.9.13-dev.4"
     }
 
     // ─── Signing (audit phase 2 hardening) ─────────────────────────────

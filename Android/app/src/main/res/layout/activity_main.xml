@@ -26,6 +26,16 @@
                 android:textColor="@color/teal_700" />
 
             <ImageButton
+                android:id="@+id/btnAccount"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginEnd="8dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@drawable/ic_account"
+                android:scaleType="centerInside"
+                android:contentDescription="@string/account_title" />
+
+            <ImageButton
                 android:id="@+id/btnNotifSettings"
                 android:layout_width="40dp"
                 android:layout_height="40dp"

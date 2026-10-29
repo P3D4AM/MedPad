@@ -208,6 +208,51 @@ object ApiClient {
     fun plannedVisits(from: String, to: String): JSONObject =
         exec(req("/api/app/planned-visits?from=$from&to=$to"))
 
+    // ── phase 2 / dev.4 — account & report editing ──────────
+
+    /** §6 — self-service password change. The server re-validates
+     *  everything, re-hashes with bcrypt and revokes every OTHER app
+     *  token; THIS request's token stays valid, so the device that
+     *  changed the password is not logged out mid-flow. */
+    @Throws(Exception::class)
+    fun changePassword(currentPassword: String, newPassword: String, confirmPassword: String): JSONObject {
+        val body = JSONObject()
+            .put("currentPassword", currentPassword)
+            .put("newPassword", newPassword)
+            .put("confirmPassword", confirmPassword)
+        return exec(req("/api/app/change-password", "POST",
+            body.toString().toRequestBody("application/json".toMediaType())))
+    }
+
+    /** §2 — edit the text of an own check-in/checkout report. Every real
+     *  change is appended to the server-side version history (oldNote →
+     *  newNote, editor, time); submitting the current text unchanged is an
+     *  idempotent no-op (changed:false, no version row). */
+    @Throws(Exception::class)
+    fun reportEdit(checkinId: String, note: String): JSONObject {
+        val body = JSONObject().put("checkinId", checkinId).put("note", note)
+        return exec(req("/api/app/report-edit", "POST",
+            body.toString().toRequestBody("application/json".toMediaType())))
+    }
+
+    /** §5 — probe ANOTHER base URL with the CURRENT token, without
+     *  touching the stored session. Used by the change-server sheet:
+     *  a 200 means the token is valid there as well (server migration
+     *  with a restored database — the session survives), a 401 means the
+     *  address hosts a MedPad panel but does not know this token (a
+     *  fresh login on the new address is required). Network errors mean
+     *  the address is unreachable or not a MedPad panel. */
+    @Throws(Exception::class)
+    fun configAt(baseUrl: String): JSONObject {
+        val call = Request.Builder().url(baseUrl.trimEnd('/') + "/api/app/config")
+            .header(HEADER_TOKEN, Session.token).build()
+        http.newCall(call).execute().use { resp ->
+            val json = JSONObject(resp.body?.string() ?: "{}")
+            if (!resp.isSuccessful) throw HttpException(resp.code, json.optString("error", "HTTP ${resp.code}"))
+            return json
+        }
+    }
+
     @Throws(Exception::class)
     fun proximity(customerId: String, lat: Double?, lng: Double?): JSONObject {
         val body = JSONObject().put("customerId", customerId)

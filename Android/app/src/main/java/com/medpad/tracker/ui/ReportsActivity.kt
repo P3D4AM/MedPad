@@ -3,11 +3,15 @@ package com.medpad.tracker.ui
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.os.Bundle
+import android.text.InputType
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.EditText
 import android.widget.ImageButton
+import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -188,6 +192,7 @@ class ReportsActivity : AppCompatActivity() {
             val tvNote: TextView = v.findViewById(R.id.tvItemNote)
             val tvTime: TextView = v.findViewById(R.id.tvItemTime)
             val btnPlay: Button = v.findViewById(R.id.btnItemPlay)
+            val btnEdit: Button = v.findViewById(R.id.btnItemEdit)
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH =
@@ -209,6 +214,10 @@ class ReportsActivity : AppCompatActivity() {
                 playingId = id
                 playVoice(id, r.optString("voiceUrl")) { playingId = null }
             }
+            // phase 2 / §2 (dev.4) — every row is the rep's OWN report
+            // (the API returns own history only), so the edit affordance is
+            // unconditional; the server still enforces ownership on save.
+            h.btnEdit.setOnClickListener { showEditReport(r) }
         }
     }
 
@@ -237,6 +246,92 @@ class ReportsActivity : AppCompatActivity() {
                 applyFilter()
             }
         }
+    }
+
+    /** phase 2 / §2 (dev.4) — edit the text of an own report. Client
+     *  validation mirrors the server route (cap 5000 after trim; a blank
+     *  text is legal and clears the note — the previous text is preserved
+     *  in the server's append-only version history). The server is the
+     *  source of truth: an edited-away report answers 404, a dead session
+     *  401 — both get an honest Persian message, never a crash. */
+    private fun showEditReport(r: JSONObject) {
+        val pad = (16 * resources.displayMetrics.density).toInt()
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad / 2, pad, 0)
+        }
+        val input = EditText(this).apply {
+            setText(r.optString("note", ""))
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            minLines = 3
+            maxLines = 8
+            gravity = android.view.Gravity.TOP
+        }
+        val hint = TextView(this).apply {
+            text = getString(R.string.edit_report_hint)
+            textSize = 12f
+            setPadding(0, pad, 0, 0)
+        }
+        val errBox = TextView(this).apply {
+            textSize = 13f
+            setPadding(0, pad, 0, 0)
+            setTextColor(0xFFB91C1C.toInt())
+            visibility = View.GONE
+        }
+        val progress = ProgressBar(this).apply { visibility = View.GONE }
+        box.addView(input); box.addView(hint); box.addView(errBox); box.addView(progress)
+
+        val dlg = androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(R.string.edit_report_title)
+            .setView(box)
+            .setPositiveButton(R.string.save, null)
+            .setNegativeButton(R.string.cancel, null)
+            .create()
+        dlg.setOnShowListener {
+            val saveBtn = dlg.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE)
+            saveBtn.setOnClickListener {
+                errBox.visibility = View.GONE
+                val note = input.text.toString()
+                if (Validators.reportNoteTooLong(note)) {
+                    errBox.text = getString(R.string.err_report_note_too_long)
+                    errBox.visibility = View.VISIBLE
+                    return@setOnClickListener
+                }
+                saveBtn.isEnabled = false
+                progress.visibility = View.VISIBLE
+                scope.launch {
+                    try {
+                        val resp = withContext(Dispatchers.IO) {
+                            ApiClient.reportEdit(r.optString("id"), note)
+                        }
+                        if (resp.optBoolean("changed")) {
+                            // mirror the server: stored value is trimmed
+                            // (a blank text clears the note server-side)
+                            r.put("note", note.trim())
+                            applyFilter()
+                            Toast.makeText(this@ReportsActivity, R.string.report_edited, Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(this@ReportsActivity, R.string.report_edit_no_change, Toast.LENGTH_SHORT).show()
+                        }
+                        dlg.dismiss()
+                    } catch (e: Exception) {
+                        saveBtn.isEnabled = true
+                        progress.visibility = View.GONE
+                        errBox.text = when {
+                            e is ApiClient.HttpException && e.code == 401 ->
+                                getString(R.string.session_expired)
+                            e is ApiClient.HttpException && e.code == 404 ->
+                                getString(R.string.err_report_not_found)
+                            e is ApiClient.HttpException ->
+                                e.message ?: getString(R.string.report_edit_failed)
+                            else -> getString(R.string.report_edit_failed)
+                        }
+                        errBox.visibility = View.VISIBLE
+                    }
+                }
+            }
+        }
+        dlg.show()
     }
 
     private fun faTime(iso: String): String = try {

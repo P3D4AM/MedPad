@@ -130,6 +130,10 @@ class MainActivity : AppCompatActivity() {
         // package 11 — in-app notification settings (local + server toggles)
         findViewById<ImageButton>(R.id.btnNotifSettings).setOnClickListener { showNotifSettings() }
 
+        // phase 2 / dev.4 (§5+§6) — account sheets: change password + change
+        // server address after login (the migration path)
+        findViewById<ImageButton>(R.id.btnAccount).setOnClickListener { AccountDialogs.show(this) }
+
         findViewById<Button>(R.id.btnLogout).setOnClickListener {
             AlertDialog.Builder(this)
                 .setMessage(R.string.logout_confirm)

@@ -1,4 +1,4 @@
-# MedPad Offline Installer v1.9.13-dev.3 - PowerShell bootstrap (alternative entry)
+# MedPad Offline Installer v1.9.13-dev.4 - PowerShell bootstrap (alternative entry)
 # install.bat is the primary entry (self-elevation + bundled Node.js MSI install);
 # this script runs the same node pipeline when invoked directly.
 # v1.9.12: install.mjs shows a MENU (target: this PC / Linux VPS / Cloudflare,
@@ -9,7 +9,7 @@ $ErrorActionPreference = 'Stop'
 
 Write-Host ''
 Write-Host '==============================================' -ForegroundColor Cyan
-Write-Host '  MedPad Offline Installer v1.9.13-dev.3' -ForegroundColor Cyan
+Write-Host '  MedPad Offline Installer v1.9.13-dev.4' -ForegroundColor Cyan
 Write-Host '  Node.js and all prerequisites are bundled.' -ForegroundColor Cyan
 Write-Host '==============================================' -ForegroundColor Cyan
 
