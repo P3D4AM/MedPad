@@ -8,11 +8,13 @@
 #   base:   git blob bd9c80b:medpad-full-1.9/inst-stage/panel-src
 #   chain:  patches/panel-src-phase1-task1 → phase2-remediation → task1 →
 #           task2 → dev2-fixes → package4 → madrep → package6 → package7 →
-#           package9 (cumulative; supersedes package8) → package5 (bell, last)
+#           package9 (cumulative; supersedes package8) → package5 (bell) →
+#           package13 (phase 2 completion: change-password, report-edit
+#           versions, audio player — last)
 #
 # This script performs the WHOLE reproducible pipeline and verifies it:
 #   1. fresh extraction of the base source (git archive)
-#   2. apply the 11-patch chain (fails hard on ANY .rej)
+#   2. apply the 12-patch chain (fails hard on ANY .rej)
 #   3. npm install --no-audit --no-fund        (tested with npm 11.19.1 / Node 24.x)
 #   4. DATABASE_URL=file:./dev.db  npx prisma generate   (3 query engines)
 #   5. DATABASE_URL=file:./build-time.db  npm run build  (next 16.4.3, standalone)
@@ -20,7 +22,7 @@
 #      with `cp -rL` — dereferencing symlinks is REQUIRED (committed bundle has
 #      zero symlinks; raw Next output has @prisma/bcryptjs symlinks in
 #      .next/node_modules — lesson from 5-C)
-#   7. run 15 hardening checks against the assembled bundle
+#   7. run 18 hardening checks against the assembled bundle
 #   8. compare the result with the committed bundle (app/panel/.next),
 #      BUILD_ID-normalized, and report equivalence
 #   9. honest typecheck report (next.config sets ignoreBuildErrors=true, so
@@ -44,7 +46,7 @@ set -euo pipefail
 REPO_ROOT="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
 WORK="${2:-$REPO_ROOT/panel-build}"
 BASE_REF="bd9c80b:medpad-full-1.9/inst-stage/panel-src"
-CHAIN="phase1-task1 phase2-remediation phase2-task1 phase2-task2 phase2-dev2-fixes phase2-package4 phase2-madrep phase2-package6 phase2-package7 phase2-package9 phase2-package5"
+CHAIN="phase1-task1 phase2-remediation phase2-task1 phase2-task2 phase2-dev2-fixes phase2-package4 phase2-madrep phase2-package6 phase2-package7 phase2-package9 phase2-package5 phase2-package13"
 
 [ -d "$REPO_ROOT/.git" ] || { echo "ERROR: $REPO_ROOT is not a git repo"; exit 1; }
 
@@ -58,7 +60,7 @@ git -C "$REPO_ROOT" archive "$BASE_REF" | tar -x -C "$WORK/src"
 [ -f "$WORK/src/package.json" ] || die "base extraction produced no package.json"
 
 # ── 2. patch chain ──────────────────────────────────────────────────────────
-say "2/9 applying 11-patch chain"
+say "2/9 applying 12-patch chain"
 cd "$WORK/src"
 for p in $CHAIN; do
   patchfile="$REPO_ROOT/patches/panel-src-$p.patch"
@@ -126,7 +128,11 @@ chk "api: panel-notifications"    "[ -f .next/server/app/api/panel-notifications
 chk "api: panel-notifications/read" "[ -f .next/server/app/api/panel-notifications/read/route.js ]"
 chk "api: planned-visits"         "[ -d .next/server/app/api/planned-visits ]"
 chk "bell UI chunks"              "grep -rq 'bell-unread-count' --include='*.js' ."
-echo "   hardening: PASS=$P FAIL=$F / 15"
+# phase 2 completion (package 13): the three new API surfaces must ship
+chk "api: app change-password"     "[ -f .next/server/app/api/app/change-password/route.js ]"
+chk "api: app report-edit"         "[ -f .next/server/app/api/app/report-edit/route.js ]"
+chk "api: checkins versions"       "[ -d .next/server/app/api/checkins/versions ]"
+echo "   hardening: PASS=$P FAIL=$F / 18"
 [ "$F" -eq 0 ] || die "hardening checks failed"
 
 # ── 8. compare with committed bundle (BUILD_ID + build-dir normalized) ─────
@@ -202,7 +208,7 @@ fi
 
 say "RESULT"
 echo "   bundle:        $WORK/bundle/.next"
-echo "   hardening:     15/15 PASS"
+echo "   hardening:     18/18 PASS"
 if [ $cmp_rc -eq 0 ]; then echo "   equivalence:   YES (BUILD_ID-normalized)";
 else echo "   equivalence:   DIFFERS (see 8/9 above)"; fi
 echo "   promote manually if intended: cp -r $WORK/bundle/.next/* <repo>/app/panel/.next/"

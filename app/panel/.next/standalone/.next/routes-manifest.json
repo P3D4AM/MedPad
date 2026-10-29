@@ -192,6 +192,12 @@
       "namedRegex": "^/api/app/assignment\\-requests(?:/)?$"
     },
     {
+      "page": "/api/app/change-password",
+      "regex": "^/api/app/change\\-password(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/app/change\\-password(?:/)?$"
+    },
+    {
       "page": "/api/app/checkin",
       "regex": "^/api/app/checkin(?:/)?$",
       "routeKeys": {},
@@ -252,6 +258,12 @@
       "namedRegex": "^/api/app/proximity(?:/)?$"
     },
     {
+      "page": "/api/app/report-edit",
+      "regex": "^/api/app/report\\-edit(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/app/report\\-edit(?:/)?$"
+    },
+    {
       "page": "/api/app/reports",
       "regex": "^/api/app/reports(?:/)?$",
       "routeKeys": {},
@@ -286,6 +298,12 @@
       "regex": "^/api/checkins(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api/checkins(?:/)?$"
+    },
+    {
+      "page": "/api/checkins/versions",
+      "regex": "^/api/checkins/versions(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/checkins/versions(?:/)?$"
     },
     {
       "page": "/api/config",

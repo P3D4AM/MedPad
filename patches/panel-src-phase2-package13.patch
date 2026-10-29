@@ -1,0 +1,812 @@
+diff -ruN -x node_modules -x .next -x 'dev.db*' -x 'build-time.db*' orig/prisma/schema.prisma b/prisma/schema.prisma
+--- orig/prisma/schema.prisma	2026-10-29 14:09:01.676888964 +0000
++++ b/prisma/schema.prisma	2026-10-29 14:16:31.910469442 +0000
+@@ -31,6 +31,7 @@
+   assignments  Assignment[]
+   notifications AppNotification[]
+   plannedVisits PlannedVisit[]
++  noteEdits    CheckinNoteVersion[] @relation("NoteEdits")
+ }
+ 
+ model AppToken {
+@@ -111,6 +112,31 @@
+ 
+   visitStart Visit?  @relation("VisitCheckin")
+   visitEnd   Visit?  @relation("VisitCheckout")
++
++  // phase 2 / §2 — append-only edit history of the report text
++  noteVersions CheckinNoteVersion[]
++}
++
++// phase 2 / §2 (daily app capabilities): report text version history.
++// Every real edit of a report's note creates ONE new row with the previous
++// text (oldNote), the new text (newNote), the acting employee (editorId)
++// and the timestamp. APPEND-ONLY by design — rows are never updated or
++// rewritten, so "ویرایش عادی تاریخچه را بازنویسی نمی‌کند". A brand-new
++// report has zero rows; an edited report has >= 1 — that count is how a
++// new note stays distinguishable from an edited one (panel badge).
++// Deleting a check-in row (admin duplicate cleanup) cascades its history;
++// the editor FK is RESTRICT (employees are deactivated, not deleted).
++model CheckinNoteVersion {
++  id        String   @id @default(cuid())
++  checkinId String
++  checkin   Checkin  @relation(fields: [checkinId], references: [id], onDelete: Cascade)
++  oldNote   String?
++  newNote   String?
++  editorId  String
++  editor    Employee @relation("NoteEdits", fields: [editorId], references: [id])
++  createdAt DateTime @default(now())
++
++  @@index([checkinId])
+ }
+ 
+ model Visit {
+diff -ruN -x node_modules -x .next -x 'dev.db*' -x 'build-time.db*' orig/src/app/api/app/change-password/route.ts b/src/app/api/app/change-password/route.ts
+--- orig/src/app/api/app/change-password/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/app/change-password/route.ts	2026-10-29 14:16:31.923469542 +0000
+@@ -0,0 +1,114 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { APP_TOKEN_HEADER, appEmployee, hashPassword, verifyPassword } from '@/lib/auth'
++import { writeAudit } from '@/lib/audit'
++import { clientIp, lockoutRemaining, recordFailure, recordSuccess, sweep } from '@/lib/rate-limit'
++
++export const dynamic = 'force-dynamic'
++
++/**
++ * phase 2 / §6 (daily app capabilities) — self-service password change
++ * from the Android app.
++ *
++ * POST /api/app/change-password   body: { currentPassword, newPassword,
++ *                                        confirmPassword }
++ *
++ * Validation is SERVER-SIDE (the app UI repeats it for UX only):
++ *   - all three fields present, non-empty strings
++ *   - newPassword === confirmPassword
++ *   - newPassword length >= 8
++ *   - newPassword !== currentPassword
++ *   - currentPassword verifies against the stored hash (bcrypt, with the
++ *     transparent legacy-SHA-256 path — after this call the stored hash is
++ *     ALWAYS bcrypt)
++ *
++ * Rate limiting: wrong CURRENT passwords are brute-forceable exactly like
++ * the login route, so the same policy applies — 5 failures per
++ * IP+username per 15 min locks the pair out for 15 min. Keys and counters
++ * never contain passwords.
++ *
++ * SESSION-INVALIDATION POLICY (documented, per the §6 requirement):
++ * a successful change revokes EVERY OTHER app token of this employee
++ * (revokedAt=now, effective immediately on the next request — G-2 checks
++ * revocation per request) but keeps the token used for THIS request alive,
++ * so the device that just changed the password is not logged out mid-flow.
++ * All other devices must log in again with the new password.
++ *
++ * The password itself is NEVER written to the audit log, the console or
++ * any response (audit `detail` only records the fact and the count of
++ * revoked sessions).
++ */
++export async function POST(req: Request) {
++  sweep()
++  const emp = await appEmployee(req)
++  if (!emp) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++
++  const rlKey = `appcp|${clientIp(req)}|${emp.username.toLowerCase()}`
++  const waitMs = lockoutRemaining(rlKey)
++  if (waitMs > 0) {
++    return NextResponse.json(
++      { ok: false, error: 'تلاش‌های ناموفق زیاد — بعداً دوباره امتحان کنید' },
++      { status: 429, headers: { 'retry-after': String(Math.ceil(waitMs / 1000)) } },
++    )
++  }
++
++  const body = await req.json().catch(() => ({ currentPassword: '', newPassword: '', confirmPassword: '' }))
++  const { currentPassword, newPassword, confirmPassword } = body as Record<string, unknown>
++  if (
++    typeof currentPassword !== 'string' || !currentPassword ||
++    typeof newPassword !== 'string' || !newPassword ||
++    typeof confirmPassword !== 'string' || !confirmPassword
++  ) {
++    return NextResponse.json({ ok: false, error: 'فرم نامعتبر است' }, { status: 400 })
++  }
++  if (newPassword !== confirmPassword) {
++    return NextResponse.json({ ok: false, error: 'تکرار رمز جدید مطابقت ندارد' }, { status: 400 })
++  }
++  if (newPassword.length < 8) {
++    return NextResponse.json({ ok: false, error: 'رمز جدید باید حداقل ۸ نویسه باشد' }, { status: 400 })
++  }
++  if (newPassword === currentPassword) {
++    return NextResponse.json({ ok: false, error: 'رمز جدید نباید با رمز فعلی یکسان باشد' }, { status: 400 })
++  }
++
++  const v = await verifyPassword(currentPassword, emp.password)
++  if (!v.ok) {
++    recordFailure(rlKey)
++    await writeAudit({
++      action: 'employee.password-change',
++      actorType: 'employee',
++      actorId: emp.id,
++      targetType: 'employee',
++      targetId: emp.id,
++      outcome: 'failure',
++      detail: 'wrong current password (self-service change from the app)',
++    })
++    return NextResponse.json({ ok: false, error: 'رمز فعلی نادرست است' }, { status: 403 })
++  }
++  recordSuccess(rlKey)
++
++  // the token of THIS request stays valid; every other session is revoked
++  const url = new URL(req.url)
++  let currentToken = req.headers.get(APP_TOKEN_HEADER) || ''
++  if (!currentToken) currentToken = url.searchParams.get('token') || ''
++
++  const [, revoked] = await db.$transaction([
++    db.employee.update({ where: { id: emp.id }, data: { password: hashPassword(newPassword) } }),
++    db.appToken.updateMany({
++      where: { employeeId: emp.id, token: { not: currentToken }, revokedAt: null },
++      data: { revokedAt: new Date() },
++    }),
++  ])
++
++  await writeAudit({
++    action: 'employee.password-change',
++    actorType: 'employee',
++    actorId: emp.id,
++    targetType: 'employee',
++    targetId: emp.id,
++    outcome: 'success',
++    detail: `self-service password change from the app; ${revoked.count} other session(s) revoked`,
++  })
++
++  return NextResponse.json({ ok: true, revokedSessions: revoked.count })
++}
+diff -ruN -x node_modules -x .next -x 'dev.db*' -x 'build-time.db*' orig/src/app/api/app/report-edit/route.ts b/src/app/api/app/report-edit/route.ts
+--- orig/src/app/api/app/report-edit/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/app/report-edit/route.ts	2026-10-29 14:16:31.924469550 +0000
+@@ -0,0 +1,78 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { appEmployee } from '@/lib/auth'
++
++export const dynamic = 'force-dynamic'
++
++/**
++ * phase 2 / §2 (daily app capabilities) — report text edit + append-only
++ * version history.
++ *
++ * POST /api/app/report-edit   body: { checkinId, note }
++ *
++ * The marketer can correct the TEXT of their own check-in/checkout report.
++ * Every real change is recorded as a NEW CheckinNoteVersion row containing
++ * the PREVIOUS text (oldNote), the NEW text (newNote), the timestamp and
++ * the acting employee (editorId) — history is APPEND-ONLY: a normal edit
++ * never rewrites or deletes earlier versions, and adding a brand-new
++ * report (a fresh check-in) creates a Checkin row with NO versions, which
++ * is exactly how "new note" stays distinguishable from "edited note"
++ * (versionCount 0 vs >= 1).
++ *
++ * Rules:
++ *   - only the report's OWN author may edit it (other employees get a
++ *     plain 404 — no existence leak, consistent with the media route)
++ *   - note is trimmed; empty string clears the note (oldNote keeps what
++ *     was there); hard cap 5000 characters (the check-in route stores the
++ *     note as free TEXT — this cap protects the history table)
++ *   - submitting the CURRENT text unchanged is an idempotent no-op:
++ *     200 { changed:false } and NO version row is written
++ *   - check-in and check-out rows are both editable (both are "reports"
++ *     in the app's گزارش‌های من screen)
++ */
++export async function POST(req: Request) {
++  const emp = await appEmployee(req)
++  if (!emp) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++
++  const body = await req.json().catch(() => ({ checkinId: '', note: '' }))
++  const { checkinId, note } = body as Record<string, unknown>
++  if (typeof checkinId !== 'string' || !checkinId || typeof note !== 'string') {
++    return NextResponse.json({ ok: false, error: 'فرم نامعتبر است' }, { status: 400 })
++  }
++  const trimmed = note.trim()
++  if (trimmed.length > 5000) {
++    return NextResponse.json(
++      { ok: false, error: 'متن گزارش خیلی طولانی است (حداکثر ۵۰۰۰ نویسه)' },
++      { status: 400 },
++    )
++  }
++
++  const row = await db.checkin.findUnique({ where: { id: checkinId } })
++  if (!row || row.employeeId !== emp.id) {
++    // same answer for "missing" and "someone else's" — no existence leak
++    return NextResponse.json({ ok: false, error: 'گزارش پیدا نشد' }, { status: 404 })
++  }
++
++  const newNote = trimmed === '' ? null : trimmed
++  if ((row.note ?? '') === (newNote ?? '')) {
++    return NextResponse.json({ ok: true, changed: false, versionCount: await countVersions(checkinId) })
++  }
++
++  const [, version] = await db.$transaction([
++    db.checkin.update({ where: { id: checkinId }, data: { note: newNote } }),
++    db.checkinNoteVersion.create({
++      data: { checkinId, oldNote: row.note, newNote, editorId: emp.id },
++    }),
++  ])
++
++  return NextResponse.json({
++    ok: true,
++    changed: true,
++    versionCount: await countVersions(checkinId),
++    version: { id: version.id, createdAt: version.createdAt },
++  })
++}
++
++async function countVersions(checkinId: string): Promise<number> {
++  return db.checkinNoteVersion.count({ where: { checkinId } })
++}
+diff -ruN -x node_modules -x .next -x 'dev.db*' -x 'build-time.db*' orig/src/app/api/checkins/route.ts b/src/app/api/checkins/route.ts
+--- orig/src/app/api/checkins/route.ts	2026-10-29 14:09:01.000000000 +0000
++++ b/src/app/api/checkins/route.ts	2026-10-29 14:16:31.926469565 +0000
+@@ -20,9 +20,16 @@
+     include: {
+       employee: { select: { id: true, name: true, username: true } },
+       customer: { select: { id: true, name: true } },
++      // phase 2 / §2 — edit badge + history button in the panel list
++      _count: { select: { noteVersions: true } },
+     },
+     orderBy: { createdAt: 'desc' },
+     take: limit,
+   })
+-  return NextResponse.json({ ok: true, checkins: rows })
++  // flatten _count into noteVersionCount (the client type expects it)
++  const checkins = rows.map(({ _count, ...r }) => ({
++    ...r,
++    noteVersionCount: _count?.noteVersions ?? 0,
++  }))
++  return NextResponse.json({ ok: true, checkins })
+ }
+diff -ruN -x node_modules -x .next -x 'dev.db*' -x 'build-time.db*' orig/src/app/api/checkins/versions/route.ts b/src/app/api/checkins/versions/route.ts
+--- orig/src/app/api/checkins/versions/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/checkins/versions/route.ts	2026-10-29 14:16:31.926469565 +0000
+@@ -0,0 +1,46 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { isAdmin } from '@/lib/auth'
++
++export const dynamic = 'force-dynamic'
++
++/**
++ * phase 2 / §2 (daily app capabilities) — report version history (PANEL).
++ *
++ * GET /api/checkins/versions?id=<checkinId>
++ *
++ * ADMIN-ONLY (the panel's check-in list is admin-facing; the employee app
++ * never calls this). Returns the append-only edit history of one report:
++ * every row carries the previous text (oldNote), the new text (newNote),
++ * the acting employee and the timestamp, newest first.
++ */
++export async function GET(req: Request) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const url = new URL(req.url)
++  const id = url.searchParams.get('id') || ''
++  if (!id) {
++    return NextResponse.json({ ok: false, error: 'شناسه گزارش لازم است' }, { status: 400 })
++  }
++  const row = await db.checkin.findUnique({ where: { id } })
++  if (!row) {
++    return NextResponse.json({ ok: false, error: 'گزارش پیدا نشد' }, { status: 404 })
++  }
++  const versions = await db.checkinNoteVersion.findMany({
++    where: { checkinId: id },
++    include: { editor: { select: { id: true, name: true, username: true } } },
++    orderBy: { createdAt: 'desc' },
++    take: 200,
++  })
++  return NextResponse.json({
++    ok: true,
++    versions: versions.map((v) => ({
++      id: v.id,
++      oldNote: v.oldNote,
++      newNote: v.newNote,
++      editor: v.editor,
++      createdAt: v.createdAt,
++    })),
++  })
++}
+diff -ruN -x node_modules -x .next -x 'dev.db*' -x 'build-time.db*' orig/src/components/panel/AudioPlayer.tsx b/src/components/panel/AudioPlayer.tsx
+--- orig/src/components/panel/AudioPlayer.tsx	1970-01-01 00:00:00.000000000 +0000
++++ b/src/components/panel/AudioPlayer.tsx	2026-10-29 14:16:31.940469673 +0000
+@@ -0,0 +1,266 @@
++'use client'
++
++import { useCallback, useEffect, useRef, useState } from 'react'
++import { Play, Pause, Square, Gauge, AlertTriangle, RotateCw } from 'lucide-react'
++
++/**
++ * phase 2 / §3 (daily app capabilities) — panel voice-note player.
++ *
++ * Replaces the bare <audio controls> element in CheckinsTab. Requirements
++ * it implements (دستورالعمل جامع، فاز دو، §۳):
++ *   - play / pause / RESUME-from-pause-position / stop
++ *   - NO unintended simultaneous playback: a module-level registry keeps
++ *     exactly ONE active HTMLAudioElement — starting player B pauses
++ *     player A (and vice versa), on any number of rows
++ *   - duration + current-time display (fa-IR digits, m:ss)
++ *   - playback SPEED control (0.75× / 1× / 1.25× / 1.5× / 2× cycle)
++ *   - clear error state for missing/unplayable files (the media route
++ *     404s orphans and authorization misses — the player surfaces the
++ *     failure instead of failing silently) + retry
++ *   - seek bar
++ *
++ * All interactive elements carry stable data-testid hooks (the H2 lesson
++ * from 5-A): Persian strings are visual labels only.
++ */
++
++// module-level single-flight registry (surives re-renders; one tab = one
++// audible player at a time)
++const g = globalThis as unknown as { __medpadActiveAudio?: HTMLAudioElement | null }
++function stopActiveAudio(except?: HTMLAudioElement) {
++  const cur = g.__medpadActiveAudio
++  if (cur && cur !== except) {
++    try {
++      cur.pause()
++    } catch {
++      /* ignore */
++    }
++  }
++}
++
++const RATES = [1, 1.25, 1.5, 2, 0.75] as const
++const RATE_LABELS = ['×۱', '×۱٫۲۵', '×۱٫۵', '×۲', '×۰٫۷۵'] as const
++
++const FA_DIGITS = '۰۱۲۳۴۵۶۷۸۹'
++function faClock(sec: number): string {
++  if (!isFinite(sec) || sec < 0) sec = 0
++  const m = Math.floor(sec / 60)
++  const s = Math.floor(sec % 60)
++  const two = String(s).padStart(2, '0').replace(/\d/g, (d) => FA_DIGITS[+d])
++  return `${FA_DIGITS[m]}:${two}`
++}
++
++type Status = 'idle' | 'loading' | 'playing' | 'paused' | 'ended' | 'error'
++const STATUS_LABEL: Record<Status, string> = {
++  idle: '',
++  loading: 'در حال بارگذاری',
++  playing: 'در حال پخش',
++  paused: 'مکث',
++  ended: 'پایان',
++  error: 'خطا',
++}
++
++export default function AudioPlayer({ src, tid }: { src: string; tid: string }) {
++  const audioRef = useRef<HTMLAudioElement | null>(null)
++  const loadedSrcRef = useRef<string>('')
++  const [status, setStatus] = useState<Status>('idle')
++  const [time, setTime] = useState(0)
++  const [duration, setDuration] = useState(0)
++  const [rateIdx, setRateIdx] = useState(0) // RATES[0] = 1× default
++
++  const ensureAudio = useCallback(() => {
++    if (audioRef.current) return audioRef.current
++    const a = new Audio()
++    a.preload = 'none'
++    a.addEventListener('loadedmetadata', () => setDuration(a.duration || 0))
++    a.addEventListener('timeupdate', () => setTime(a.currentTime))
++    a.addEventListener('play', () => setStatus('playing'))
++    a.addEventListener('pause', () => {
++      // programmatic stop() also fires 'pause' — keep its explicit state
++      setStatus((s) => (s === 'playing' || s === 'loading' ? 'paused' : s))
++    })
++    a.addEventListener('ended', () => {
++      try {
++        a.currentTime = 0
++      } catch {
++        /* ignore */
++      }
++      setTime(0)
++      setStatus('ended')
++    })
++    a.addEventListener('error', () => {
++      setStatus('error')
++    })
++    audioRef.current = a
++    return a
++  }, [])
++
++  // unmount: pause + release
++  useEffect(() => {
++    return () => {
++      const a = audioRef.current
++      if (a) {
++        try {
++          a.pause()
++          a.removeAttribute('src')
++        } catch {
++          /* ignore */
++        }
++      }
++      if (g.__medpadActiveAudio === a) g.__medpadActiveAudio = null
++    }
++  }, [])
++
++  const play = useCallback(() => {
++    const a = ensureAudio()
++    if (loadedSrcRef.current !== src) {
++      a.src = src
++      loadedSrcRef.current = src
++      setDuration(0)
++      setTime(0)
++    }
++    // single-flight: stop whatever else is playing first
++    stopActiveAudio(a)
++    g.__medpadActiveAudio = a
++    a.playbackRate = RATES[rateIdx]
++    setStatus('loading')
++    a.play().catch(() => setStatus('error'))
++  }, [ensureAudio, rateIdx, src])
++
++  const pause = useCallback(() => {
++    audioRef.current?.pause()
++  }, [])
++
++  const stop = useCallback(() => {
++    const a = audioRef.current
++    if (!a) return
++    a.pause()
++    try {
++      a.currentTime = 0
++    } catch {
++      /* ignore */
++    }
++    setTime(0)
++    setStatus('idle')
++    if (g.__medpadActiveAudio === a) g.__medpadActiveAudio = null
++  }, [])
++
++  const retry = useCallback(() => {
++    const a = audioRef.current
++    if (a) {
++      try {
++        a.pause()
++        a.removeAttribute('src')
++      } catch {
++        /* ignore */
++      }
++    }
++    loadedSrcRef.current = ''
++    setStatus('idle')
++    // next tick: play() re-sets the src from scratch
++    setTimeout(() => play(), 0)
++  }, [play])
++
++  const cycleRate = useCallback(() => {
++    const next = (rateIdx + 1) % RATES.length
++    setRateIdx(next)
++    if (audioRef.current) audioRef.current.playbackRate = RATES[next]
++  }, [rateIdx])
++
++  const seek = useCallback((v: number) => {
++    const a = audioRef.current
++    if (!a || !isFinite(v)) return
++    try {
++      a.currentTime = v
++      setTime(v)
++    } catch {
++      /* ignore */
++    }
++  }, [])
++
++  const playing = status === 'playing' || status === 'loading'
++
++  return (
++    <div
++      className="flex flex-wrap items-center gap-1.5 rounded-lg border bg-muted/40 px-2 py-1"
++      data-testid={`audio-player-${tid}`}
++    >
++      {playing ? (
++        <button
++          onClick={pause}
++          title="مکث"
++          data-testid={`audio-pause-${tid}`}
++          className="rounded p-1 hover:bg-muted"
++        >
++          <Pause className="h-4 w-4 text-teal-700" />
++        </button>
++      ) : (
++        <button
++          onClick={play}
++          title={status === 'paused' ? 'ادامه از محل مکث' : 'پخش'}
++          data-testid={`audio-play-${tid}`}
++          className="rounded p-1 hover:bg-muted"
++        >
++          <Play className="h-4 w-4 text-teal-700" />
++        </button>
++      )}
++      <button
++        onClick={stop}
++        title="توقف"
++        data-testid={`audio-stop-${tid}`}
++        className="rounded p-1 hover:bg-muted"
++      >
++        <Square className="h-3.5 w-3.5 text-muted-foreground" />
++      </button>
++      <button
++        onClick={cycleRate}
++        title="سرعت پخش"
++        data-testid={`audio-speed-${tid}`}
++        className="rounded px-1 py-0.5 text-xs font-medium text-teal-700 hover:bg-muted"
++      >
++        {RATE_LABELS[rateIdx]}
++      </button>
++      <input
++        type="range"
++        min={0}
++        max={duration || 0}
++        step={0.1}
++        value={time}
++        onChange={(e) => seek(parseFloat(e.target.value))}
++        title="جابه‌جایی"
++        data-testid={`audio-seek-${tid}`}
++        className="h-1 w-20 accent-teal-600"
++        disabled={!duration}
++      />
++      <span
++        className="text-xs tabular-nums text-muted-foreground"
++        data-testid={`audio-time-${tid}`}
++      >
++        {faClock(time)} / {duration ? faClock(duration) : '−:−−'}
++      </span>
++      <span
++        className="text-xs text-muted-foreground"
++        data-testid={`audio-status-${tid}`}
++        data-state={status}
++      >
++        {STATUS_LABEL[status]}
++      </span>
++      {status === 'error' && (
++        <span
++          className="flex items-center gap-1 text-xs text-destructive"
++          data-testid={`audio-error-${tid}`}
++        >
++          <AlertTriangle className="h-3.5 w-3.5" />
++          فایل صوتی موجود نیست یا قابل پخش نیست
++          <button
++            onClick={retry}
++            title="تلاش مجدد"
++            data-testid={`audio-retry-${tid}`}
++            className="rounded p-0.5 hover:bg-muted"
++          >
++            <RotateCw className="h-3.5 w-3.5" />
++          </button>
++        </span>
++      )}
++    </div>
++  )
++}
+diff -ruN -x node_modules -x .next -x 'dev.db*' -x 'build-time.db*' orig/src/components/panel/CheckinsTab.tsx b/src/components/panel/CheckinsTab.tsx
+--- orig/src/components/panel/CheckinsTab.tsx	2026-10-29 14:09:01.665888883 +0000
++++ b/src/components/panel/CheckinsTab.tsx	2026-10-29 14:16:31.939469665 +0000
+@@ -5,8 +5,16 @@
+ import { Input } from '@/components/ui/input'
+ import { Badge } from '@/components/ui/badge'
+ import { ScrollArea } from '@/components/ui/scroll-area'
+-import { Mic, Trash2, MapPin, LogIn, LogOut, RefreshCw } from 'lucide-react'
+-import type { Checkin } from '@/lib/types'
++import {
++  Dialog,
++  DialogContent,
++  DialogDescription,
++  DialogHeader,
++  DialogTitle,
++} from '@/components/ui/dialog'
++import { Mic, Trash2, MapPin, LogIn, LogOut, RefreshCw, History, PencilLine } from 'lucide-react'
++import AudioPlayer from '@/components/panel/AudioPlayer'
++import type { Checkin, CheckinNoteVersion } from '@/lib/types'
+ import { faDateTime } from '@/lib/realtime'
+ 
+ export default function CheckinsTab({ refreshKey }: { refreshKey: number }) {
+@@ -14,6 +22,11 @@
+   const [loading, setLoading] = useState(true)
+   const [q, setQ] = useState('')
+   const [kind, setKind] = useState<'all' | 'checkin' | 'checkout'>('all')
++  // phase 2 / §2 — version-history dialog state
++  const [histFor, setHistFor] = useState<Checkin | null>(null)
++  const [histRows, setHistRows] = useState<CheckinNoteVersion[]>([])
++  const [histLoading, setHistLoading] = useState(false)
++  const [histError, setHistError] = useState('')
+ 
+   const load = useCallback(async () => {
+     setLoading(true)
+@@ -43,6 +56,26 @@
+     if (res.ok) setRows((rs) => rs.filter((r) => r.id !== id))
+   }
+ 
++  // phase 2 / §2 — open the append-only edit history of one report
++  async function openHistory(r: Checkin) {
++    setHistFor(r)
++    setHistRows([])
++    setHistError('')
++    setHistLoading(true)
++    try {
++      const res = await fetch(`/api/checkins/versions?id=${encodeURIComponent(r.id)}`, {
++        cache: 'no-store',
++      })
++      const data = await res.json()
++      if (data.ok) setHistRows(data.versions)
++      else setHistError(data.error || 'خطا در دریافت تاریخچه')
++    } catch {
++      setHistError('خطا در دریافت تاریخچه')
++    } finally {
++      setHistLoading(false)
++    }
++  }
++
+   return (
+     <div className="space-y-4">
+       <div className="flex flex-wrap items-center gap-2">
+@@ -124,18 +157,45 @@
+                 </Badge>
+               )}
+               <div className="flex-1 text-sm">
+-                {r.note ? (
+-                  <p className="line-clamp-2">{r.note}</p>
+-                ) : (
+-                  <p className="text-muted-foreground">بدون متن</p>
+-                )}
++                <div className="flex items-center gap-1.5">
++                  {/* phase 2 / §2 — edited badge: versionCount >= 1 */}
++                  {(r.noteVersionCount ?? 0) > 0 && (
++                    <Badge
++                      variant="outline"
++                      className="bg-sky-50 text-sky-700 gap-1 shrink-0"
++                      title="متن این گزارش ویرایش شده است"
++                      data-testid={`note-edited-badge-${r.id}`}
++                    >
++                      <PencilLine className="h-3 w-3" /> ویرایش‌شده
++                    </Badge>
++                  )}
++                  {r.note ? (
++                    <p className="line-clamp-2">{r.note}</p>
++                  ) : (
++                    <p className="text-muted-foreground">بدون متن</p>
++                  )}
++                </div>
+                 <span className="text-xs text-muted-foreground">{faDateTime(r.createdAt)}</span>
+               </div>
+               <div className="flex items-center gap-2">
++                {/* phase 2 / §3 — dedicated player (no simultaneous playback,
++                    speed, resume, error states) */}
+                 {r.voicePath && (
+-                  <audio controls preload="none" src={`/api/media/${r.voicePath}`} className="h-8 max-w-[180px]" />
++                  <AudioPlayer src={`/api/media/${r.voicePath}`} tid={r.id} />
+                 )}
+                 {r.voicePath && <Mic className="h-4 w-4 text-teal-600 shrink-0" />}
++                {/* phase 2 / §2 — version history */}
++                {(r.noteVersionCount ?? 0) > 0 && (
++                  <Button
++                    variant="ghost"
++                    size="icon"
++                    onClick={() => openHistory(r)}
++                    title="تاریخچه ویرایش گزارش"
++                    data-testid={`note-history-${r.id}`}
++                  >
++                    <History className="h-4 w-4 text-sky-600" />
++                  </Button>
++                )}
+                 <Button variant="ghost" size="icon" onClick={() => remove(r.id)} title="حذف رکورد">
+                   <Trash2 className="h-4 w-4 text-destructive" />
+                 </Button>
+@@ -144,6 +204,56 @@
+           ))}
+         </div>
+       </ScrollArea>
++
++      {/* phase 2 / §2 — version-history dialog */}
++      <Dialog open={!!histFor} onOpenChange={(o) => !o && setHistFor(null)}>
++        <DialogContent className="max-w-lg" data-testid="note-history-dialog">
++          <DialogHeader>
++            <DialogTitle>تاریخچه ویرایش گزارش</DialogTitle>
++            <DialogDescription>
++              {histFor?.employee?.name} · {histFor?.customer?.name || '—'} ·{' '}
++              {histFor ? faDateTime(histFor.createdAt) : ''}
++            </DialogDescription>
++          </DialogHeader>
++          {histLoading && (
++            <p className="text-sm text-muted-foreground" data-testid="note-history-loading">
++              در حال بارگذاری…
++            </p>
++          )}
++          {histError && (
++            <p className="text-sm text-destructive" data-testid="note-history-error">
++              {histError}
++            </p>
++          )}
++          {!histLoading && !histError && histRows.length === 0 && (
++            <p className="text-sm text-muted-foreground" data-testid="note-history-empty">
++              هیچ ویرایشی ثبت نشده است
++            </p>
++          )}
++          <div className="max-h-[50vh] space-y-3 overflow-y-auto mp-scroll">
++            {histRows.map((v, i) => (
++              <div
++                key={v.id}
++                className="rounded-lg border p-3 space-y-1.5"
++                data-testid={`note-history-row-${i}`}
++              >
++                <div className="flex items-center justify-between text-xs text-muted-foreground">
++                  <span data-testid={`note-history-editor-${i}`}>{v.editor?.name}</span>
++                  <span data-testid={`note-history-time-${i}`}>{faDateTime(v.createdAt)}</span>
++                </div>
++                <div className="text-sm">
++                  <span className="text-muted-foreground">متن قبلی: </span>
++                  <span data-testid={`note-history-old-${i}`}>{v.oldNote || '—'}</span>
++                </div>
++                <div className="text-sm">
++                  <span className="text-muted-foreground">متن جدید: </span>
++                  <span data-testid={`note-history-new-${i}`}>{v.newNote || '—'}</span>
++                </div>
++              </div>
++            ))}
++          </div>
++        </DialogContent>
++      </Dialog>
+     </div>
+   )
+ }
+diff -ruN -x node_modules -x .next -x 'dev.db*' -x 'build-time.db*' orig/src/instrumentation.ts b/src/instrumentation.ts
+--- orig/src/instrumentation.ts	2026-10-29 14:09:01.677888972 +0000
++++ b/src/instrumentation.ts	2026-10-29 14:16:31.946469719 +0000
+@@ -128,12 +128,31 @@
+   'ALTER TABLE "Customer" ADD COLUMN "city" TEXT',
+ ]
+ 
++// phase 2 / §2 (daily app capabilities) — report note version history.
++// A brand-NEW table (layout = prisma db push output, verified against a
++// probe database at build time) so upgraded installs and fresh installs
++// (template.db) end up with the exact same structure. APPEND-ONLY rows;
++// deleting a check-in cascades its history (ON DELETE CASCADE), the editor
++// FK is RESTRICT like every other Employee reference in the schema.
++const CHECKIN_NOTE_VERSION_DDL = `CREATE TABLE IF NOT EXISTS "CheckinNoteVersion" (
++  "id" TEXT NOT NULL PRIMARY KEY,
++  "checkinId" TEXT NOT NULL,
++  "oldNote" TEXT,
++  "newNote" TEXT,
++  "editorId" TEXT NOT NULL,
++  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
++  CONSTRAINT "CheckinNoteVersion_checkinId_fkey" FOREIGN KEY ("checkinId") REFERENCES "Checkin" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
++  CONSTRAINT "CheckinNoteVersion_editorId_fkey" FOREIGN KEY ("editorId") REFERENCES "Employee" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
++)`
++const CHECKIN_NOTE_VERSION_INDEX_DDL =
++  'CREATE INDEX IF NOT EXISTS "CheckinNoteVersion_checkinId_idx" ON "CheckinNoteVersion"("checkinId")'
++
+ export async function register() {
+   if (process.env.NEXT_RUNTIME !== 'nodejs') return
+   const { PrismaClient } = await import('@prisma/client')
+   const db = new PrismaClient()
+   let applied = 0
+-  for (const sql of [...MIGRATIONS, AUDIT_TABLE_DDL, PLANNED_VISIT_DDL, PLANNED_VISIT_INDEX_DDL, NOTIF_EVENTKEY_DDL, NOTIF_EVENTKEY_INDEX_DDL, PANEL_NOTIFICATION_DDL, PANEL_NOTIFICATION_INDEX_DDL, ASSIGNMENT_REQUEST_DDL, ASSIGNMENT_REQUEST_PENDING_INDEX_DDL, ...CUSTOMER_CITY_DDL]) {
++  for (const sql of [...MIGRATIONS, AUDIT_TABLE_DDL, PLANNED_VISIT_DDL, PLANNED_VISIT_INDEX_DDL, NOTIF_EVENTKEY_DDL, NOTIF_EVENTKEY_INDEX_DDL, PANEL_NOTIFICATION_DDL, PANEL_NOTIFICATION_INDEX_DDL, ASSIGNMENT_REQUEST_DDL, ASSIGNMENT_REQUEST_PENDING_INDEX_DDL, ...CUSTOMER_CITY_DDL, CHECKIN_NOTE_VERSION_DDL, CHECKIN_NOTE_VERSION_INDEX_DDL]) {
+     try {
+       await db.$executeRawUnsafe(sql)
+       applied++
+diff -ruN -x node_modules -x .next -x 'dev.db*' -x 'build-time.db*' orig/src/lib/types.ts b/src/lib/types.ts
+--- orig/src/lib/types.ts	2026-10-29 14:09:01.677888972 +0000
++++ b/src/lib/types.ts	2026-10-29 14:16:31.948469735 +0000
+@@ -44,6 +44,18 @@
+   distanceM?: number | null
+   outOfRadius?: boolean
+   locationMissing?: boolean
++  // phase 2 / §2 — report edit history (0 = never edited; >= 1 shows the
++  // «ویرایش‌شده» badge + history button in the panel list)
++  noteVersionCount?: number
++}
++
++// phase 2 / §2 — one append-only entry of a report's edit history
++export interface CheckinNoteVersion {
++  id: string
++  oldNote?: string | null
++  newNote?: string | null
++  editor: { id: string; name: string; username: string }
++  createdAt: string
+ }
+ 
+ export interface Assignment {

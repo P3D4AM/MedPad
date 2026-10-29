@@ -31,6 +31,7 @@ model Employee {
   assignments  Assignment[]
   notifications AppNotification[]
   plannedVisits PlannedVisit[]
+  noteEdits    CheckinNoteVersion[] @relation("NoteEdits")
 }
 
 model AppToken {
@@ -111,6 +112,31 @@ model Checkin {
 
   visitStart Visit?  @relation("VisitCheckin")
   visitEnd   Visit?  @relation("VisitCheckout")
+
+  // phase 2 / §2 — append-only edit history of the report text
+  noteVersions CheckinNoteVersion[]
+}
+
+// phase 2 / §2 (daily app capabilities): report text version history.
+// Every real edit of a report's note creates ONE new row with the previous
+// text (oldNote), the new text (newNote), the acting employee (editorId)
+// and the timestamp. APPEND-ONLY by design — rows are never updated or
+// rewritten, so "ویرایش عادی تاریخچه را بازنویسی نمی‌کند". A brand-new
+// report has zero rows; an edited report has >= 1 — that count is how a
+// new note stays distinguishable from an edited one (panel badge).
+// Deleting a check-in row (admin duplicate cleanup) cascades its history;
+// the editor FK is RESTRICT (employees are deactivated, not deleted).
+model CheckinNoteVersion {
+  id        String   @id @default(cuid())
+  checkinId String
+  checkin   Checkin  @relation(fields: [checkinId], references: [id], onDelete: Cascade)
+  oldNote   String?
+  newNote   String?
+  editorId  String
+  editor    Employee @relation("NoteEdits", fields: [editorId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@index([checkinId])
 }
 
 model Visit {
