@@ -21,6 +21,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.medpad.tracker.R
 import com.medpad.tracker.api.ApiClient
 import com.medpad.tracker.ui.JalaliDate.J
+import com.medpad.tracker.util.JsonSafe
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -203,16 +204,27 @@ class ReportsActivity : AppCompatActivity() {
         override fun onBindViewHolder(h: VH, pos: Int) {
             val r = items[pos]
             val kind = r.optString("kind", "checkin")
-            val cus = r.optJSONObject("customer")?.optString("name") ?: ""
+            val cus = if (r.has("customer") && !r.isNull("customer"))
+                r.optJSONObject("customer")?.optString("name") ?: "" else ""
             h.tvTitle.text = if (kind == "checkin") "چک‌این — $cus" else "چک‌اوت — $cus"
-            h.tvNote.text = r.optString("note", "")
+            // mission item 1: a missing/JSON-null note (or the legacy "null"
+            // artifact) renders as NO note section — never the raw text
+            // "null" (JsonSafe). The stored value is untouched server-side.
+            val note = JsonSafe.text(r, "note")
+            h.tvNote.text = note
+            h.tvNote.visibility = if (note.isEmpty()) View.GONE else View.VISIBLE
             h.tvTime.text = faTime(r.optString("createdAt"))
-            val hasVoice = r.optString("voiceUrl", "").isNotEmpty()
-            h.btnPlay.visibility = if (hasVoice) View.VISIBLE else View.GONE
+            // mission item 1: the play button appears ONLY for a valid,
+            // playable voice URL. An absent recording (JSON null), an empty
+            // string or the legacy "null" artifact hides the button; a file
+            // that vanished server-side still shows the button and the
+            // existing honest failure toast (never a crash).
+            val voiceUrl = JsonSafe.playableUrl(r, "voiceUrl")
+            h.btnPlay.visibility = if (voiceUrl != null) View.VISIBLE else View.GONE
             h.btnPlay.setOnClickListener {
                 val id = r.optString("id")
                 playingId = id
-                playVoice(id, r.optString("voiceUrl")) { playingId = null }
+                playVoice(id, voiceUrl ?: "") { playingId = null }
             }
             // phase 2 / §2 (dev.4) — every row is the rep's OWN report
             // (the API returns own history only), so the edit affordance is
@@ -261,7 +273,9 @@ class ReportsActivity : AppCompatActivity() {
             setPadding(pad, pad / 2, pad, 0)
         }
         val input = EditText(this).apply {
-            setText(r.optString("note", ""))
+            // raw server value — an edit dialog must never mask or mutate
+            // what is actually stored (JsonSafe.text is for DISPLAY only)
+            setText(JsonSafe.rawText(r, "note"))
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
             minLines = 3
             maxLines = 8
