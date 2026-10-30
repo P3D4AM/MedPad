@@ -71,6 +71,14 @@ object Session {
         get() = prefs()?.getString(KEY_EMP_NAME, "") ?: ""
         set(v) = prefs()?.edit()?.putString(KEY_EMP_NAME, v)?.apply() ?: Unit
 
+    /** mission item 2 — the FIRST name only (for the greeting). Empty when
+     *  the panel has no split yet (legacy employees) or an old panel that
+     *  does not return the field; the app then greets without a name and
+     *  NEVER falls back to the full name (product decision per mission). */
+    var employeeFirstName: String
+        get() = prefs()?.getString(KEY_EMP_FIRST, "") ?: ""
+        set(v) = prefs()?.edit()?.putString(KEY_EMP_FIRST, v)?.apply() ?: Unit
+
     var panelVersion: String
         get() = prefs()?.getString(KEY_PANEL_VER, "") ?: ""
         set(v) = prefs()?.edit()?.putString(KEY_PANEL_VER, v)?.apply() ?: Unit
@@ -110,6 +118,7 @@ object Session {
     private const val KEY_TOKEN = "token"
     private const val KEY_EMP_ID = "employee_id"
     private const val KEY_EMP_NAME = "employee_name"
+    private const val KEY_EMP_FIRST = "employee_first_name"
     private const val KEY_PANEL_VER = "panel_version"
     private const val KEY_REMEMBER_USER = "remembered_username"
     private const val KEY_REMEMBER_FLAG = "remember_username_flag"

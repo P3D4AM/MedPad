@@ -30,6 +30,7 @@
 
     <!-- Main -->
     <string name="hello">سلام، %s</string>
+    <string name="hello_no_name">سلام</string>
     <string name="checkin">چک‌این</string>
     <string name="checkout">چک‌اوت</string>
     <string name="my_reports">گزارش‌های من</string>

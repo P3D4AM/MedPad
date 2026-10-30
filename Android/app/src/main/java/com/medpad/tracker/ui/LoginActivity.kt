@@ -113,6 +113,13 @@ class LoginActivity : AppCompatActivity() {
                         val emp = resp.getJSONObject("employee")
                         Session.employeeId = emp.optString("id")
                         Session.employeeName = emp.optString("name")
+                        // mission item 2: first name for the greeting. JsonSafe
+                        // keeps an old panel's ABSENT field (and the JSON-null
+                        // answer of a legacy employee) from leaking the literal
+                        // string "null" into the UI — it becomes "" and the
+                        // greeting simply drops the name.
+                        Session.employeeFirstName =
+                            com.medpad.tracker.util.JsonSafe.text(emp, "firstName")
                         // best-effort: fetch panel version for old-panel warning
                         try {
                             val cfg = withContext(Dispatchers.IO) { ApiClient.config() }

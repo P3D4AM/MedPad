@@ -126,8 +126,13 @@ class MainActivity : AppCompatActivity() {
             scope.launch { forwardTapRoute(route) }
         }
 
+        // mission item 2 — the profile greeting shows ONLY the first name
+        // («سلام، علی»). A legacy employee (no split yet) or an old panel
+        // greets WITHOUT a name — never with the full name as a substitute.
+        val greetingFirst = com.medpad.tracker.util.Greeting.firstNameFor(Session.employeeFirstName)
         findViewById<TextView>(R.id.tvHello).text =
-            getString(R.string.hello, Session.employeeName.ifEmpty { "" })
+            if (greetingFirst != null) getString(R.string.hello, greetingFirst)
+            else getString(R.string.hello_no_name)
 
         // package 11 — in-app notification settings (local + server toggles)
         findViewById<ImageButton>(R.id.btnNotifSettings).setOnClickListener { showNotifSettings() }
