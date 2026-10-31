@@ -1,0 +1,430 @@
+--- a/prisma/schema.prisma	2026-11-01 00:00:00.000000000 +0000
++++ b/prisma/schema.prisma	2026-11-01 00:00:00.000000000 +0000
+@@ -133,10 +133,29 @@
+   visitStart Visit?  @relation("VisitCheckin")
+   visitEnd   Visit?  @relation("VisitCheckout")
+ 
++  // mission 12 / item 9 (Nov 2026) — MULTIPLE voice files per event. The
++  // legacy single `voicePath` stays (first file; every existing consumer
++  // keeps working) and new multi-file uploads also create VoiceFile rows.
++  voiceFiles VoiceFile[]
++
+   // phase 2 / §2 — append-only edit history of the report text
+   noteVersions CheckinNoteVersion[]
+ }
+ 
++// mission 12 / item 9 — one row per uploaded voice recording. Each file
++// keeps its OWN id and creation time; deleting one row never touches the
++// others (cascade only with the parent event). `path` is the relative
++// path under uploads/ (same namespace as Checkin.voicePath — old files are
++// backfilled into rows by instrumentation.ts, never moved on disk).
++model VoiceFile {
++  id        String   @id @default(cuid())
++  checkinId String
++  checkin   Checkin  @relation(fields: [checkinId], references: [id], onDelete: Cascade)
++  path      String   @unique
++  seq       Int      @default(0) // order within the event (0 = first/legacy)
++  createdAt DateTime @default(now())
++}
++
+ // phase 2 / §2 (daily app capabilities): report text version history.
+ // Every real edit of a report's note creates ONE new row with the previous
+ // text (oldNote), the new text (newNote), the acting employee (editorId)
+--- a/src/app/api/app/checkin/route.ts	2026-11-01 00:00:00.000000000 +0000
++++ b/src/app/api/app/checkin/route.ts	2026-11-01 00:00:00.000000000 +0000
+@@ -1,5 +1,5 @@
+ import { NextResponse } from 'next/server'
+-import { writeFile } from 'fs/promises'
++import { writeFile, unlink } from 'fs/promises'
+ import path from 'path'
+ import { db } from '@/lib/db'
+ import { appEmployee } from '@/lib/auth'
+@@ -101,17 +101,23 @@
+     return NextResponse.json({ ok: true, checkin: recent, duplicate: true, dedupWindow: true })
+   }
+ 
+-  // ── Save voice (optional on checkin) ────────────────────
+-  let voicePath: string | null = null
+-  const voice = form.get('voice')
+-  if (voice instanceof File && voice.size > 0) {
++  // ── Save voices (mission 12 / item 9 — ZERO OR MORE files) ────
++  // Runs AFTER both idempotency layers, so a replayed localId or a
++  // 90s-window duplicate NEVER writes files again (no duplicates, ever).
++  // Every take becomes its own uploads/voice file; `voicePath` keeps
++  // pointing at the FIRST file so every legacy single-file consumer
++  // (dashboard, CheckinsTab, reports API, media route) still works.
++  const voicePaths: string[] = []
++  for (const v of form.getAll('voice')) {
++    if (!(v instanceof File) || v.size <= 0) continue // item 10: a 0-byte part is never stored
+     await ensureDirs()
+-    const ext = (voice.name.split('.').pop() || 'm4a').toLowerCase().replace(/[^a-z0-9]/g, '')
+-    const fname = `${emp.id}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext || 'm4a'}`
+-    const buf = Buffer.from(await voice.arrayBuffer())
++    const ext = (v.name.split('.').pop() || 'm4a').toLowerCase().replace(/[^a-z0-9]/g, '')
++    const fname = `${emp.id}_${Date.now()}_${voicePaths.length}_${Math.random().toString(36).slice(2, 8)}.${ext || 'm4a'}`
++    const buf = Buffer.from(await v.arrayBuffer())
+     await writeFile(path.join(VOICE_DIR, fname), buf)
+-    voicePath = `voice/${fname}`
++    voicePaths.push(`voice/${fname}`)
+   }
++  const voicePath = voicePaths[0] ?? null
+ 
+   // ── G-6 + mission item 6: resolve the device location + the INDEPENDENT
+   // check-in geofence policy. The radius is the admin's check-in override
+@@ -202,6 +208,8 @@
+           kind: 'checkin',
+           note: note || null,
+           voicePath,
++          // mission 12 / item 9 — one row per uploaded file, in order
++          voiceFiles: { create: voicePaths.map((p, i) => ({ path: p, seq: i })) },
+           lat: loc.lat,
+           lng: loc.lng,
+           accuracy: loc.accuracy,
+@@ -231,6 +239,12 @@
+     const racedOpen = (e as { openVisit?: boolean }).openVisit === true
+     const uniqueHit = (e as { code?: string })?.code === 'P2002'
+     if (racedOpen || uniqueHit) {
++      // the transaction rolled back — the voice files written above are
++      // referenced by NOTHING: clean them up honestly (mission 12 / item
++      // 10 — no silent orphans on this path)
++      for (const p of voicePaths) {
++        try { await unlink(path.join(VOICE_DIR, path.basename(p))) } catch { /* best effort */ }
++      }
+       // either the transaction's own re-check caught the race, or the
+       // partial unique index did — both are the same business answer, and
+       // the transaction rolled the orphan check-in row back with it
+--- a/src/app/api/app/checkout/route.ts	2026-11-01 00:00:00.000000000 +0000
++++ b/src/app/api/app/checkout/route.ts	2026-11-01 00:00:00.000000000 +0000
+@@ -63,17 +63,21 @@
+     return NextResponse.json({ ok: false, error: 'ویزیت بازی وجود ندارد' }, { status: 409 })
+   }
+ 
+-  // ── Voice REQUIRED on checkout (per spec) ───────────────
+-  let voicePath: string | null = null
+-  const voice = form.get('voice')
+-  if (voice instanceof File && voice.size > 0) {
++  // ── Voices REQUIRED on checkout (≥ 1 file) — mission 12 / item 9 ──
++  // Runs AFTER the localId idempotency layer, so a replay never writes
++  // files again. Every take gets its own uploads/voice file and its own
++  // VoiceFile row; `voicePath` keeps the FIRST file for legacy consumers.
++  const voicePaths: string[] = []
++  for (const v of form.getAll('voice')) {
++    if (!(v instanceof File) || v.size <= 0) continue // item 10: a 0-byte part is never stored
+     await ensureDirs()
+-    const ext = (voice.name.split('.').pop() || 'm4a').toLowerCase().replace(/[^a-z0-9]/g, '')
+-    const fname = `${emp.id}_out_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext || 'm4a'}`
+-    const buf = Buffer.from(await voice.arrayBuffer())
++    const ext = (v.name.split('.').pop() || 'm4a').toLowerCase().replace(/[^a-z0-9]/g, '')
++    const fname = `${emp.id}_out_${Date.now()}_${voicePaths.length}_${Math.random().toString(36).slice(2, 8)}.${ext || 'm4a'}`
++    const buf = Buffer.from(await v.arrayBuffer())
+     await writeFile(path.join(VOICE_DIR, fname), buf)
+-    voicePath = `voice/${fname}`
++    voicePaths.push(`voice/${fname}`)
+   }
++  const voicePath = voicePaths[0] ?? null
+   if (!voicePath) {
+     return NextResponse.json(
+       { ok: false, error: 'برای چک‌اوت، ضبط صدا الزامی است' },
+@@ -125,6 +129,8 @@
+       kind: 'checkout',
+       note,
+       voicePath,
++      // mission 12 / item 9 — one row per uploaded file, in order
++      voiceFiles: { create: voicePaths.map((p, i) => ({ path: p, seq: i })) },
+       lat: loc.lat,
+       lng: loc.lng,
+       accuracy: loc.accuracy,
+--- a/src/app/api/app/customers/create/route.ts	2026-11-01 00:00:00.000000000 +0000
++++ b/src/app/api/app/customers/create/route.ts	2026-11-01 00:00:00.000000000 +0000
+@@ -34,8 +34,17 @@
+       radius: Number(b.radius) || 150,
+     },
+   })
+-  // creator automatically assigned
+-  await db.assignment.create({ data: { employeeId: emp.id, customerId: row.id } }).catch(() => {})
++  // mission 12 / item 1 (Nov 2026): NO automatic assignment for the creator.
++  // A customer registered by a sales rep lands in the UNASSIGNED state —
++  // the creator and the responsible rep are deliberately INDEPENDENT
++  // concepts. The admin (panel) decides the assignment; only then does the
++  // customer appear in a rep's list and become check-in-able (the existing
++  // server-side G-1 enforcement on /api/app/checkin answers 403 for
++  // unassigned customers, and /api/app/customers only ever returns
++  // assigned customers, so nothing leaks to the app in the meantime).
++  // If the rep who created it wants it for themselves, the existing
++  // assignment-request flow (/api/app/assignment-requests) is the honest
++  // path — the admin still decides.
+ 
+   await emitEvent('customer-added', {
+     id: row.id,
+@@ -44,5 +53,5 @@
+     lat: row.lat,
+     lng: row.lng,
+   })
+-  return NextResponse.json({ ok: true, customer: row })
++  return NextResponse.json({ ok: true, customer: row, assigned: false })
+ }
+--- a/src/app/api/app/reports/route.ts	2026-11-01 00:00:00.000000000 +0000
++++ b/src/app/api/app/reports/route.ts	2026-11-01 00:00:00.000000000 +0000
+@@ -22,13 +22,24 @@
+   }
+   const rows = await db.checkin.findMany({
+     where,
+-    include: { customer: { select: { id: true, name: true } } },
++    include: {
++      customer: { select: { id: true, name: true } },
++      // mission 12 / item 9 — ALL voice files of the event (ordered), so
++      // the app's mini player can play every recording, not just the first
++      voiceFiles: { orderBy: [{ seq: 'asc' }, { createdAt: 'asc' }], select: { id: true, path: true, createdAt: true } },
++    },
+     orderBy: { createdAt: 'desc' },
+     take: 300,
+   })
+   const withVoice = rows.map((r) => ({
+     ...r,
+-    voiceUrl: r.voicePath ? `/api/media/${r.voicePath}` : null,
++    voiceUrl: r.voicePath ? `/api/media/${r.voicePath}` : null, // legacy single file (first)
++    // mission 12 / item 9 — every recording with its own id + creation time
++    voiceFiles: r.voiceFiles.map((f) => ({
++      id: f.id,
++      url: `/api/media/${f.path}`,
++      createdAt: f.createdAt,
++    })),
+   }))
+   return NextResponse.json({ ok: true, reports: withVoice })
+ }
+--- a/src/app/api/checkins/route.ts	2026-11-01 00:00:00.000000000 +0000
++++ b/src/app/api/checkins/route.ts	2026-11-01 00:00:00.000000000 +0000
+@@ -22,6 +22,9 @@
+       customer: { select: { id: true, name: true } },
+       // phase 2 / §2 — edit badge + history button in the panel list
+       _count: { select: { noteVersions: true } },
++      // mission 12 / item 9 — every recording of the event (ordered), so the
++      // panel can play them ALL, each with its own player
++      voiceFiles: { orderBy: [{ seq: 'asc' }, { createdAt: 'asc' }], select: { id: true, path: true } },
+     },
+     orderBy: { createdAt: 'desc' },
+     take: limit,
+--- a/src/app/api/media/[...path]/route.ts	2026-11-01 00:00:00.000000000 +0000
++++ b/src/app/api/media/[...path]/route.ts	2026-11-01 00:00:00.000000000 +0000
+@@ -36,10 +36,21 @@
+     if (!emp) {
+       return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
+     }
+-    const row = await db.checkin.findFirst({
+-      where: { voicePath: `voice/${safe}` },
+-      select: { employeeId: true, customerId: true },
++    // mission 12 / item 9 — resolve the referencing event. NEW events carry
++    // a VoiceFile row per recording (own id, own creation time); LEGACY
++    // events are backfilled at boot, but a database restored from an old
++    // backup may still be without rows — the Checkin.voicePath fallback
++    // below keeps those files playable. Both paths end at the SAME event.
++    const vfRow = await db.voiceFile.findUnique({
++      where: { path: `voice/${safe}` },
++      select: { checkin: { select: { employeeId: true, customerId: true } } },
+     })
++    const row: { employeeId: string; customerId: string | null } | null =
++      vfRow?.checkin ??
++      (await db.checkin.findFirst({
++        where: { voicePath: `voice/${safe}` },
++        select: { employeeId: true, customerId: true },
++      }))
+     // orphaned file (no referencing record) -> employees never get it
+     if (!row) {
+       return NextResponse.json({ ok: false, error: 'not found' }, { status: 404 })
+--- a/src/components/panel/CheckinsTab.tsx	2026-11-01 00:00:00.000000000 +0000
++++ b/src/components/panel/CheckinsTab.tsx	2026-11-01 00:00:00.000000000 +0000
+@@ -180,11 +180,33 @@
+               </div>
+               <div className="flex items-center gap-2">
+                 {/* phase 2 / §3 — dedicated player (no simultaneous playback,
+-                    speed, resume, error states) */}
+-                {r.voicePath && (
+-                  <AudioPlayer src={`/api/media/${r.voicePath}`} tid={r.id} />
++                    speed, resume, error states).
++                    mission 12 / item 9 — one player PER RECORDING (ordered);
++                    the single-flight registry keeps exactly one of them
++                    audible. Legacy rows without voiceFiles rows fall back
++                    to the old single voicePath player. */}
++                {(r.voiceFiles?.length ?? 0) > 0 ? (
++                  <div className="flex flex-col items-end gap-1" dir="rtl">
++                    {(r.voiceFiles ?? []).map((f: { id: string; path: string }, i: number) => {
++                      // single-file events keep the LEGACY testid (the
++                      // checkin id) so every existing consumer/script finds
++                      // the player exactly as before; multi-file rows use
++                      // the per-file id — unique per player row.
++                      const tid = (r.voiceFiles?.length ?? 0) === 1 ? r.id : f.id
++                      return (
++                        <div key={f.id} className="flex items-center gap-1">
++                          <span className="text-[11px] text-muted-foreground">صوت {(i + 1).toLocaleString('fa-IR')}</span>
++                          <AudioPlayer src={`/api/media/${f.path}`} tid={tid} />
++                        </div>
++                      )
++                    })}
++                  </div>
++                ) : (
++                  r.voicePath && <AudioPlayer src={`/api/media/${r.voicePath}`} tid={r.id} />
+                 )}
+-                {r.voicePath && <Mic className="h-4 w-4 text-teal-600 shrink-0" />}
++                {(r.voiceFiles?.length ?? 0) > 0 || r.voicePath ? (
++                  <Mic className="h-4 w-4 text-teal-600 shrink-0" />
++                ) : null}
+                 {/* phase 2 / §2 — version history */}
+                 {(r.noteVersionCount ?? 0) > 0 && (
+                   <Button
+--- a/src/components/panel/CustomersTab.tsx	2026-11-01 00:00:00.000000000 +0000
++++ b/src/components/panel/CustomersTab.tsx	2026-11-01 00:00:00.000000000 +0000
+@@ -85,12 +85,18 @@
+     load()
+   }, [load, refreshKey])
+ 
++  // mission 12 / item 1 — unassigned customers get a DISTINCT slate marker
++  // (assigned stay teal): the admin sees at a glance which customers still
++  // need an assignment decision. The popup also names the state.
++  const unassignedCount = rows.filter((c) => !c.assignments || c.assignments.length === 0).length
+   const points: MapPoint[] = rows.map((c) => ({
+     id: c.id,
+     name: c.name,
+     lat: c.lat,
+     lng: c.lng,
+     radius: c.radius,
++    color: !c.assignments || c.assignments.length === 0 ? '#64748b' : undefined,
++    unassigned: !c.assignments || c.assignments.length === 0,
+   }))
+ 
+   function openEdit(c: Customer) {
+@@ -230,7 +236,17 @@
+   return (
+     <div className="grid gap-4 lg:grid-cols-[1fr_420px]">
+       {/* Map + pick hint */}
+-      <div className="space-y-2">
++      {/* mission 12 / item 11 — `isolate` (isolation: isolate) turns this
++          wrapper into its own stacking context: Leaflet's panes carry
++          z-index 200–1000, which (without an isolating ancestor) compete
++          at the ROOT level and used to paint ABOVE the shadcn Dialog
++          (z-50 in its body-level portal) — the customer dialog appeared
++          pressed UNDER the map. With the wrapper isolated, the whole map
++          (panes included) stacks at 0 and every modal — register/edit
++          customer, bulk assign — floats ABOVE it with its overlay working;
++          no global z-index is touched and the map is unchanged after
++          close. */}
++      <div className="isolate space-y-2">
+         {pickMode && (
+           <div className="rounded-lg bg-amber-100 text-amber-900 px-3 py-2 text-sm">
+             روی نقشه کلیک کنید تا موقعیت «{pickMode.name}» جابه‌جا شود
+@@ -239,6 +255,21 @@
+             </Button>
+           </div>
+         )}
++        {/* mission 12 / item 1 — map legend: the unassigned state is visible
++            and explained, never just a different colour the admin must guess */}
++        <div className="flex items-center gap-3 text-xs text-muted-foreground">
++          <span className="flex items-center gap-1">
++            <span className="inline-block h-2.5 w-2.5 rounded-full bg-teal-700" /> تخصیص‌یافته
++          </span>
++          <span className="flex items-center gap-1">
++            <span className="inline-block h-2.5 w-2.5 rounded-full bg-slate-500" /> بدون تخصیص
++          </span>
++          {unassignedCount > 0 && (
++            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-900">
++              {unassignedCount.toLocaleString('fa-IR')} مشتری در انتظار تخصیص
++            </span>
++          )}
++        </div>
+         <MapViewClient
+           points={points}
+           pickMode={pickMode}
+@@ -363,6 +394,10 @@
+                   <Badge variant="secondary" className="shrink-0">
+                     {c.type === 'doctor' ? 'پزشک' : c.type === 'pharmacy' ? 'داروخانه' : c.type === 'clinic' ? 'کلینیک' : 'سایر'}
+                   </Badge>
++                  {/* mission 12 / item 1 — explicit unassigned state on the row */}
++                  {(!c.assignments || c.assignments.length === 0) && (
++                    <Badge className="shrink-0 bg-amber-100 text-amber-900 hover:bg-amber-100">بدون تخصیص</Badge>
++                  )}
+                   <span className="font-medium flex-1">{c.name}</span>
+                   {c.city && (
+                     <span className="hidden shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground sm:inline" title={c.province || undefined}>
+--- a/src/components/panel/MapView.tsx	2026-11-01 00:00:00.000000000 +0000
++++ b/src/components/panel/MapView.tsx	2026-11-01 00:00:00.000000000 +0000
+@@ -11,6 +11,9 @@
+   lng: number
+   radius: number
+   color?: string
++  /** mission 12 / item 1 — unassigned customers are marked in the popup
++   *  too (not only by colour): the admin sees the exact state. */
++  unassigned?: boolean
+ }
+ 
+ interface MapViewProps {
+@@ -123,6 +126,12 @@
+                   <b>{p.name}</b>
+                   <br />
+                   شعاع: {p.radius} متر
++                  {p.unassigned && (
++                    <>
++                      <br />
++                      <span style={{ color: '#b45309', fontWeight: 600 }}>بدون تخصیص — در انتظار تصمیم مدیر</span>
++                    </>
++                  )}
+                 </div>
+               </Popup>
+             </CircleMarker>
+--- a/src/instrumentation.ts	2026-11-01 00:00:00.000000000 +0000
++++ b/src/instrumentation.ts	2026-11-01 00:00:00.000000000 +0000
+@@ -248,6 +248,35 @@
+     CONSTRAINT "TrackStatus_employeeId_fkey" FOREIGN KEY ("employeeId") REFERENCES "Employee" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+ )`
+ 
++// ── mission 12 / item 9 (Nov 2026): MULTIPLE voice files per event ──
++// A brand-NEW table (layout = prisma db push output for the package-16
++// schema). Every uploaded recording gets its OWN row (id + createdAt),
++// `path` stays the relative path under uploads/ — the same namespace the
++// legacy single Checkin.voicePath used, so old files are NOT moved on
++// disk; the backfill below just registers them as VoiceFile rows.
++const VOICE_FILE_DDL = `CREATE TABLE IF NOT EXISTS "VoiceFile" (
++  "id" TEXT NOT NULL PRIMARY KEY,
++  "checkinId" TEXT NOT NULL,
++  "path" TEXT NOT NULL,
++  "seq" INTEGER NOT NULL DEFAULT 0,
++  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
++  CONSTRAINT "VoiceFile_checkinId_fkey" FOREIGN KEY ("checkinId") REFERENCES "Checkin" ("id") ON DELETE CASCADE ON UPDATE CASCADE
++)`
++const VOICE_FILE_PATH_INDEX_DDL =
++  'CREATE UNIQUE INDEX IF NOT EXISTS "VoiceFile_path_key" ON "VoiceFile"("path")'
++const VOICE_FILE_CHECKIN_INDEX_DDL =
++  'CREATE INDEX IF NOT EXISTS "VoiceFile_checkinId_idx" ON "VoiceFile"("checkinId")'
++// ONE-TIME backfill of legacy single-file events (idempotent: NOT EXISTS +
++// the unique path index; deterministic id 'vfb_<checkinId>' makes a replay
++// a no-op even without them). The createdAt COPIES the event's own value —
++// whatever storage format it already has, the row lands in the same one.
++const VOICE_FILE_BACKFILL_SQL =
++  'INSERT INTO "VoiceFile" ("id", "checkinId", "path", "seq", "createdAt") ' +
++  "SELECT 'vfb_' || c.\"id\", c.\"id\", c.\"voicePath\", 0, c.\"createdAt\" " +
++  'FROM "Checkin" c ' +
++  'WHERE c."voicePath" IS NOT NULL ' +
++  'AND NOT EXISTS (SELECT 1 FROM "VoiceFile" vf WHERE vf."path" = c."voicePath")'
++
+ export async function register() {
+   if (process.env.NEXT_RUNTIME !== 'nodejs') return
+   const { PrismaClient } = await import('@prisma/client')
+@@ -257,7 +286,7 @@
+   // index is created (a violating legacy row would otherwise fail the
+   // index creation loudly); both are idempotent, so every boot just
+   // re-applies them as no-ops.
+-  for (const sql of [...MIGRATIONS, AUDIT_TABLE_DDL, PLANNED_VISIT_DDL, PLANNED_VISIT_INDEX_DDL, NOTIF_EVENTKEY_DDL, NOTIF_EVENTKEY_INDEX_DDL, PANEL_NOTIFICATION_DDL, PANEL_NOTIFICATION_INDEX_DDL, ASSIGNMENT_REQUEST_DDL, ASSIGNMENT_REQUEST_PENDING_INDEX_DDL, ...CUSTOMER_CITY_DDL, CHECKIN_NOTE_VERSION_DDL, CHECKIN_NOTE_VERSION_INDEX_DDL, LOCATION_PING_DDL, LOCATION_PING_LOCALID_INDEX_DDL, LOCATION_PING_ROUTE_INDEX_DDL, TRACK_STATUS_DDL, VISIT_ONE_OPEN_RECONCILE_DDL, VISIT_ONE_OPEN_INDEX_DDL, OP_EVENT_DDL, OP_EVENT_EMP_IDX_DDL, OP_EVENT_TYPE_IDX_DDL, OP_EVENT_TIME_IDX_DDL, OP_EVENT_REQUEST_ID_INDEX_DDL]) {
++  for (const sql of [...MIGRATIONS, AUDIT_TABLE_DDL, PLANNED_VISIT_DDL, PLANNED_VISIT_INDEX_DDL, NOTIF_EVENTKEY_DDL, NOTIF_EVENTKEY_INDEX_DDL, PANEL_NOTIFICATION_DDL, PANEL_NOTIFICATION_INDEX_DDL, ASSIGNMENT_REQUEST_DDL, ASSIGNMENT_REQUEST_PENDING_INDEX_DDL, ...CUSTOMER_CITY_DDL, CHECKIN_NOTE_VERSION_DDL, CHECKIN_NOTE_VERSION_INDEX_DDL, LOCATION_PING_DDL, LOCATION_PING_LOCALID_INDEX_DDL, LOCATION_PING_ROUTE_INDEX_DDL, TRACK_STATUS_DDL, VISIT_ONE_OPEN_RECONCILE_DDL, VISIT_ONE_OPEN_INDEX_DDL, OP_EVENT_DDL, OP_EVENT_EMP_IDX_DDL, OP_EVENT_TYPE_IDX_DDL, OP_EVENT_TIME_IDX_DDL, OP_EVENT_REQUEST_ID_INDEX_DDL, VOICE_FILE_DDL, VOICE_FILE_PATH_INDEX_DDL, VOICE_FILE_CHECKIN_INDEX_DDL, VOICE_FILE_BACKFILL_SQL]) {
+     try {
+       await db.$executeRawUnsafe(sql)
+       applied++
+--- a/src/lib/types.ts	2026-11-01 00:00:00.000000000 +0000
++++ b/src/lib/types.ts	2026-11-01 00:00:00.000000000 +0000
+@@ -49,6 +49,9 @@
+   // phase 2 / §2 — report edit history (0 = never edited; >= 1 shows the
+   // «ویرایش‌شده» badge + history button in the panel list)
+   noteVersionCount?: number
++  // mission 12 / item 9 — every recording of the event (ordered); the panel
++  // renders one AudioPlayer per file. Legacy events fall back to voicePath.
++  voiceFiles?: { id: string; path: string }[]
+ }
+ 
+ // phase 2 / §2 — one append-only entry of a report's edit history

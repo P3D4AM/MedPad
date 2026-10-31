@@ -22,8 +22,8 @@ android {
         // versionCode strictly increased from 15 so it upgrades an
         // existing same-signature install (this APK is signed with the
         // standard Android DEBUG key).
-        versionCode = 17
-        versionName = "1.9.13-dev.6"
+        versionCode = 18
+        versionName = "1.9.13-dev.7"
     }
 
     // ─── Signing (audit phase 2 hardening) ─────────────────────────────

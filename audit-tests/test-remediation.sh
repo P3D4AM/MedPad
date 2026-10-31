@@ -216,12 +216,16 @@ curl -s -X POST "$BASE/api/app/customers/create" -H "X-Medpad-Token: $TOK_B" \
 chk "G1 app-create customer ok" "grep -q '\"ok\":true' $W/bc.json"
 CUS_N=$(python3 -c "import json;print(json.load(open('$W/bc.json'))['customer']['id'])")
 curl -s -H "X-Medpad-Token: $TOK_B" "$BASE/api/app/customers" -o $W/bc2.json
-chk "G1 creator auto-assigned (sees own new customer)" "grep -q '$CUS_N' $W/bc2.json"
+# mission 12 / item 1 (Nov 2026) — the creator is NO LONGER auto-assigned:
+# a rep-registered customer lands UNASSIGNED (creator and responsible rep
+# are independent concepts; the admin decides). The full new contract is
+# covered by test-mission12.sh MI1; here the old auto-assign assertions
+# became the inverse:
+chk "G1 creator NOT auto-assigned (unregistered until admin decides)" "! grep -q '$CUS_N' $W/bc2.json"
 CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST $BASE/api/app/checkin \
   -H "X-Medpad-Token: $TOK_B" -F "customerId=$CUS_N" -F "note=bob new customer" \
   -F "localId=g1-bn-$RANDOM" -F "lat=35.73" -F "lng=51.43")
-chk "G1 checkin to own created customer -> ok" "[ \"$CODE\" = 200 ]"
-closevisit $TOK_B
+chk "G1 checkin to own unassigned created customer -> 403 (policy enforced)" "[ \"$CODE\" = 403 ]"
 curl -s -H "X-Medpad-Token: $TOK_A" "$BASE/api/app/customers" -o $W/ac3.json
 chk "G1 other employee cannot see the new customer" "! grep -q '$CUS_N' $W/ac3.json"
 
