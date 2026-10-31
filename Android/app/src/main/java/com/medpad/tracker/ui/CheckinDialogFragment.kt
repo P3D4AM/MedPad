@@ -22,6 +22,7 @@ import com.medpad.tracker.db.AppDatabase
 import com.medpad.tracker.db.Doctor
 import com.medpad.tracker.location.DeviceGps
 import com.medpad.tracker.sync.CheckinSync
+import com.medpad.tracker.sync.PlansSync
 import com.medpad.tracker.sync.TrackerContext
 import com.medpad.tracker.voice.VoiceRecorder
 import kotlinx.coroutines.CoroutineScope
@@ -64,12 +65,124 @@ class CheckinDialogFragment(
     private var btnPlay: ImageButton? = null
     private var doctors: List<Doctor> = emptyList()
 
+    // mission item 8 — live device clock + plan-window comparison state
+    private var tvClock: TextView? = null
+    private var tvPlan: TextView? = null
+    private val clockTicker = object : Runnable {
+        override fun run() {
+            renderClock()
+            handler.postDelayed(this, 1_000)
+        }
+    }
+
+    /** renders the CURRENT device time (the time the check-in will carry —
+     *  distinct from the server's final record time, which may differ on
+     *  clock skew; the server stores both) */
+    private fun renderClock() {
+        val cal = java.util.Calendar.getInstance().apply {
+            timeZone = java.util.TimeZone.getTimeZone("Asia/Tehran")
+        }
+        val time = "%02d:%02d:%02d".format(
+            cal.get(java.util.Calendar.HOUR_OF_DAY),
+            cal.get(java.util.Calendar.MINUTE),
+            cal.get(java.util.Calendar.SECOND),
+        )
+        val j = JalaliDate.fromGregorian(
+            cal.get(java.util.Calendar.YEAR),
+            cal.get(java.util.Calendar.MONTH) + 1,
+            cal.get(java.util.Calendar.DAY_OF_MONTH),
+        )
+        tvClock?.text = getString(R.string.checkin_now_time, time, JalaliDate.formatFa(j))
+    }
+
+    /** mission item 8 — compare NOW with TODAY's plan for the SELECTED
+     *  customer: the window, the status (early / on-time / late with the
+     *  exact minutes) or an explicit «بدون برنامه» (no deviation is ever
+     *  computed for a plan that does not exist). */
+    private fun refreshPlanStatus(spCustomer: android.widget.Spinner) {
+        val cus = doctors.getOrNull(spCustomer.selectedItemPosition)
+        val tv = tvPlan ?: return
+        if (cus == null) {
+            tv.text = ""
+            tv.visibility = android.view.View.GONE
+            return
+        }
+        scope.launch {
+            val today = PlansSync.serverToday().ifEmpty { PlansSync.deviceDayKey(0) }
+            val plans = withContext(Dispatchers.IO) {
+                try {
+                    AppDatabase.get(TrackerContext.app).plannedVisitDao().byDay(today)
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            }
+            val plan = PlanWindow.findPlan(plans, cus.id, today)
+            withContext(Dispatchers.Main) {
+                if (plan == null) {
+                    tv.text = getString(R.string.checkin_planless)
+                    tv.setTextColor(0xFF57534E.toInt())
+                    tv.visibility = android.view.View.VISIBLE
+                    return@withContext
+                }
+                val a = PlanWindow.assess(System.currentTimeMillis(), plan.scheduledAtMs, plan.durationMin)
+                val startCal = java.util.Calendar.getInstance().apply {
+                    timeZone = java.util.TimeZone.getTimeZone("Asia/Tehran")
+                    timeInMillis = plan.scheduledAtMs
+                }
+                val endCal = java.util.Calendar.getInstance().apply {
+                    timeZone = java.util.TimeZone.getTimeZone("Asia/Tehran")
+                    timeInMillis = a.planEndMs
+                }
+                val windowLabel = "%02d:%02d تا %02d:%02d".format(
+                    startCal.get(java.util.Calendar.HOUR_OF_DAY), startCal.get(java.util.Calendar.MINUTE),
+                    endCal.get(java.util.Calendar.HOUR_OF_DAY), endCal.get(java.util.Calendar.MINUTE),
+                )
+                val statusLabel = when (a.status) {
+                    PlanWindow.Status.EARLY -> getString(R.string.checkin_plan_early, a.diffMinutes.toString())
+                    PlanWindow.Status.ON_TIME -> getString(R.string.checkin_plan_ontime)
+                    PlanWindow.Status.LATE -> getString(R.string.checkin_plan_late, a.diffMinutes.toString())
+                }
+                tv.text = getString(R.string.checkin_plan_window, windowLabel, statusLabel)
+                tv.setTextColor(
+                    when (a.status) {
+                        PlanWindow.Status.ON_TIME -> 0xFF166534.toInt()
+                        PlanWindow.Status.EARLY -> 0xFF92400E.toInt()
+                        PlanWindow.Status.LATE -> 0xFFB91C1C.toInt()
+                    },
+                )
+                tv.visibility = android.view.View.VISIBLE
+            }
+        }
+    }
+
     @SuppressLint("InflateParams")
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
         val view = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_checkin, null)
         tvRecState = view.findViewById(R.id.tvRecState)
         btnRec = view.findViewById(R.id.btnRec)
         btnPlay = view.findViewById(R.id.btnPlay)
+
+        // mission item 8 — a live device clock + the plan-window comparison
+        // sit at the TOP of the form (before the customer spinner): the rep
+        // sees the exact time the check-in will carry and the plan status
+        // BEFORE confirming. The views are added programmatically to keep
+        // the committed layout untouched for older-translations compat.
+        (view as? android.view.ViewGroup)?.let { vg ->
+            val pad = (6 * resources.displayMetrics.density).toInt()
+            tvClock = TextView(requireContext()).apply {
+                textSize = 14f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                setPadding(0, 0, 0, pad)
+            }
+            tvPlan = TextView(requireContext()).apply {
+                textSize = 13f
+                setPadding(0, 0, 0, pad)
+            }
+            vg.addView(tvClock, 1) // right under the dialog title
+            vg.addView(tvPlan, 2)
+        }
+        renderClock()
+        handler.postDelayed(clockTicker, 1_000)
 
         val spCustomer = view.findViewById<Spinner>(R.id.spCustomer)
         val edNote = view.findViewById<TextInputEditText>(R.id.edNote)
@@ -93,6 +206,15 @@ class CheckinDialogFragment(
                     val idx = doctors.indexOfFirst { it.id == pid }
                     if (idx >= 0) spCustomer.setSelection(idx)
                     else tvRecState?.text = getString(R.string.plan_customer_not_in_list)
+                }
+                // mission item 8 — re-assess the plan window whenever the
+                // customer selection changes (and once at open)
+                refreshPlanStatus(spCustomer)
+                spCustomer.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+                    override fun onItemSelected(p: android.widget.AdapterView<*>?, v: android.view.View?, pos: Int, id: Long) {
+                        refreshPlanStatus(spCustomer)
+                    }
+                    override fun onNothingSelected(p: android.widget.AdapterView<*>?) {}
                 }
             }
         }
@@ -193,5 +315,12 @@ class CheckinDialogFragment(
         handler.removeCallbacksAndMessages(null)
         recorder.release()
         super.onDestroy()
+    }
+
+    override fun onStop() {
+        // mission item 8 — stop the 1s clock ticker when the dialog is not
+        // visible (battery honesty)
+        handler.removeCallbacks(clockTicker)
+        super.onStop()
     }
 }

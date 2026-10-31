@@ -145,6 +145,13 @@
     <!-- phase 2 / §1: notification tap-through -->
     <string name="notif_tap_login_needed">برای مشاهدهٔ اعلان ابتدا وارد حساب خود شوید</string>
     <string name="notif_tap_customer_gone">مشتریِ مرتبط با این اعلان دیگر در دسترس شما نیست (حذف شده یا تخصیص آن لغو شده است)</string>
+    <!-- mission item 8 — check-in form: live clock + plan-window comparison -->
+    <string name="checkin_now_time">زمان ثبت: %1$s — %2$s</string>
+    <string name="checkin_planless">این چک‌این بدون برنامهٔ قبلی ثبت می‌شود</string>
+    <string name="checkin_plan_window">بازهٔ برنامه: %1$s\n%2$s</string>
+    <string name="checkin_plan_early">%1$s دقیقه زودتر از بازهٔ برنامه</string>
+    <string name="checkin_plan_ontime">در بازهٔ برنامه (به‌موقع)</string>
+    <string name="checkin_plan_late">%1$s دقیقه دیرتر از بازهٔ برنامه</string>
     <!-- mission item 7 — one-open-check-in gate + open-visit dialogs -->
     <string name="checkin_block_title">شروع چک‌این جدید ممکن نیست</string>
     <string name="checkin_block_queued">%1$s چک‌این ارسال‌نشده در صف آفلاین وجود دارد. تا تأیید شدن آن توسط سرور نمی‌توانید ویزیت جدیدی شروع کنید (وضعیت صف در صفحهٔ اصلی قابل مشاهده است).</string>
