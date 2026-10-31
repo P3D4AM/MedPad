@@ -3,10 +3,13 @@ package com.medpad.tracker.location
 import android.Manifest
 import android.app.Notification
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.location.Location
+import android.os.Build
 import android.os.Looper
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
@@ -71,6 +74,11 @@ class TrackingService : LifecycleService() {
     private var requestingLocation = false
     private var moving = true // start on the faster cadence until proven still
 
+    /** mission item 4 — single-flight guard for tick(): the unlock receiver
+     *  can fire a tick between heartbeats; two concurrent ticks would race
+     *  the lastNotifPollAt reset and double-poll. */
+    @Volatile private var ticking = false
+
     companion object {
         const val NOTIF_ID = 1001
         private const val TICK_MS = 45_000L
@@ -91,6 +99,25 @@ class TrackingService : LifecycleService() {
         }
     }
 
+    /** mission item 4 — poll the server the moment the user unlocks the
+     *  screen. While the phone is locked, Doze / OEM battery savers may
+     *  stretch the 45s heartbeat; the notifications that accumulated
+     *  server-side then appear the instant the user is actually LOOKING at
+     *  the phone instead of on the next (possibly stretched) tick.
+     *  USER_PRESENT is a protected system broadcast — only the system can
+     *  send it, so NOT_EXPORTED is safe. */
+    private val unlockReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (!Session.isLoggedIn || !NotificationPrefs.serverEnabled) return
+            lastNotifPollAt = 0 // force the notification branch on this tick
+            if (ticking) return
+            ticking = true
+            lifecycleScope.launch(Dispatchers.IO) {
+                try { tick() } catch (_: Exception) { /* next heartbeat */ } finally { ticking = false }
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         running = true
@@ -98,11 +125,21 @@ class TrackingService : LifecycleService() {
         fused = com.google.android.gms.location.LocationServices.getFusedLocationProviderClient(this)
         applyTrackingState()
 
+        // mission item 4 — immediate poll when the user unlocks the screen
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(unlockReceiver, IntentFilter(Intent.ACTION_USER_PRESENT), ContextCompat.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(unlockReceiver, IntentFilter(Intent.ACTION_USER_PRESENT))
+        }
+
         // heartbeat: flush queues + poll notifications + upload locations
         // + refresh the remote policy
         lifecycleScope.launch(Dispatchers.IO) {
             while (true) {
-                tick()
+                if (!ticking) {
+                    ticking = true
+                    try { tick() } catch (_: Exception) { /* next round */ } finally { ticking = false }
+                }
                 kotlinx.coroutines.delay(TICK_MS)
             }
         }
@@ -301,6 +338,7 @@ class TrackingService : LifecycleService() {
 
     override fun onDestroy() {
         running = false
+        try { unregisterReceiver(unlockReceiver) } catch (_: Exception) { /* not registered */ }
         try {
             fused.removeLocationUpdates(locationCallback)
         } catch (_: Exception) { /* ignore */ }

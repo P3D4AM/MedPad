@@ -11,6 +11,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- mission item 4: lets the app open the system's "ignore battery
+         optimizations" dialog (an explicit user action) so notifications
+         keep flowing while the screen is locked. Sideloaded enterprise
+         tool — the Play-Store policy concerns do not apply. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- P10 backup policy: allowBackup stays true (device-to-device transfer
          of the offline queue + UX prefs must keep working on upgrades), but

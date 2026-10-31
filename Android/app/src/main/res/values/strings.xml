@@ -145,6 +145,18 @@
     <!-- phase 2 / §1: notification tap-through -->
     <string name="notif_tap_login_needed">برای مشاهدهٔ اعلان ابتدا وارد حساب خود شوید</string>
     <string name="notif_tap_customer_gone">مشتریِ مرتبط با این اعلان دیگر در دسترس شما نیست (حذف شده یا تخصیص آن لغو شده است)</string>
+    <!-- mission item 4 — notification delivery diagnostics -->
+    <string name="notif_diag_title">وضعیت دریافت اعلان‌ها</string>
+    <string name="notif_diag_fix">اصلاح</string>
+    <string name="notif_diag_on">فعال</string>
+    <string name="notif_diag_perm">مجوز اعلان‌های اپ</string>
+    <string name="notif_diag_perm_off">غیرفعال — اعلان‌ها نمایش داده نمی‌شوند</string>
+    <string name="notif_diag_battery">بهینه‌سازی باتری</string>
+    <string name="notif_diag_battery_ok">معاف — دریافت اعلان در حالت قفل بهینه است</string>
+    <string name="notif_diag_battery_off">محدود — اندروید ممکن است دریافت اعلان را در حالت قفل به تأخیر بیندازد</string>
+    <string name="notif_diag_service">سرویس اپ</string>
+    <string name="notif_diag_service_off">در حال اجرا نیست</string>
+    <string name="notif_locked_note">اعلان‌ها با پایش مستقیم سرور (بدون سرویس Push گوگل) دریافت می‌شوند. در حالت قفل صفحه، سیستم ممکن است زمان‌بندی را محدود کند؛ با فعال‌بودن مجوز، معافیت باتری و سرویس در حال اجرا، اعلان‌ها در نخستین فرصت — حداکثر چند دقیقه — نمایش داده می‌شوند و هیچ اعلانی گم نمی‌شود.</string>
     <string name="notif_tap_plan_gone">این برنامه در حافظهٔ دستگاه نیست؛ ممکن است مربوط به روز دیگری باشد یا همگام‌سازی نشده باشد.</string>
 
     <!-- Planned visits (phase 2 / task 2) -->

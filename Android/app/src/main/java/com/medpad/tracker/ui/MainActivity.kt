@@ -323,9 +323,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** package 11 — notification settings: LOCAL proximity alerts and
-     *  SERVER notifications toggles, with an HONEST note about delivery
-     *  semantics (no background push is claimed — no FCM infrastructure). */
+    /** package 11 + mission item 4 — notification settings: LOCAL proximity
+     *  alerts, SERVER notifications toggles, AND a live delivery-diagnostics
+     *  block: the exact system states that decide whether a locked-phone
+     *  notification reaches the user (app permission, channel, battery
+     *  exemption, running service), each with a direct fix action and an
+     *  honest explanation — nothing is silently "fine". */
     private fun showNotifSettings() {
         val pad = (16 * resources.displayMetrics.density).toInt()
         val box = LinearLayout(this).apply {
@@ -348,7 +351,25 @@ class MainActivity : AppCompatActivity() {
         box.addView(swServer)
         box.addView(swProximity)
         box.addView(note)
-        AlertDialog.Builder(this)
+
+        // ── mission item 4: delivery diagnostics ──────────────────────
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        val permOk = androidx.core.app.NotificationManagerCompat.from(this).areNotificationsEnabled()
+        val channelOk = com.medpad.tracker.sync.AppNotifier.displayAllowed(
+            permOk,
+            com.medpad.tracker.sync.AppNotifier.channelImportance(nm, com.medpad.tracker.TrackerApp.CHANNEL_ALERTS),
+        )
+        val pm = getSystemService(android.os.PowerManager::class.java)
+        val batteryExempt = try {
+            pm?.isIgnoringBatteryOptimizations(packageName) == true
+        } catch (_: Exception) {
+            true // unknown — do not scare the user with a wrong "blocked"
+        }
+        val svcRunning = TrackingService.running
+
+        // the dialog is built FIRST so the diagLine fix-actions can capture
+        // it (a local function may only reference variables declared above)
+        val dlg = androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle(R.string.notif_settings_title)
             .setView(box)
             .setPositiveButton(R.string.save) { _, _ ->
@@ -356,7 +377,62 @@ class MainActivity : AppCompatActivity() {
                 NotificationPrefs.proximityEnabled = swProximity.isChecked
             }
             .setNegativeButton(R.string.cancel, null)
-            .show()
+            .create()
+
+        fun diagLine(label: String, ok: Boolean, okText: String, badText: String, fix: (androidx.appcompat.app.AlertDialog) -> Unit): View {
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
+            row.addView(TextView(this).apply {
+                text = if (ok) "✓ $label: $okText" else "✗ $label: $badText"
+                textSize = 13f
+                setTextColor(if (ok) 0xFF166534.toInt() else 0xFFB91C1C.toInt())
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            if (!ok) {
+                row.addView(androidx.appcompat.widget.AppCompatButton(this).apply {
+                    text = getString(R.string.notif_diag_fix)
+                    textSize = 12f
+                    setOnClickListener { _ -> fix(dlg) }
+                })
+            }
+            return row
+        }
+
+        val diagTitle = TextView(this).apply {
+            text = getString(R.string.notif_diag_title)
+            textSize = 13f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding(0, pad, 0, pad / 2)
+        }
+        box.addView(diagTitle)
+
+        box.addView(diagLine(getString(R.string.notif_diag_perm), channelOk,
+            getString(R.string.notif_diag_on), getString(R.string.notif_diag_perm_off)) { d ->
+            d.dismiss()
+            try {
+                startActivity(android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                    putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, packageName)
+                })
+            } catch (_: Exception) { /* honest no-op */ }
+        })
+        box.addView(diagLine(getString(R.string.notif_diag_battery), batteryExempt,
+            getString(R.string.notif_diag_battery_ok), getString(R.string.notif_diag_battery_off)) { d ->
+            d.dismiss()
+            try {
+                startActivity(android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    android.net.Uri.parse("package:$packageName")))
+            } catch (_: Exception) { /* honest no-op */ }
+        })
+        box.addView(diagLine(getString(R.string.notif_diag_service), svcRunning,
+            getString(R.string.notif_diag_on), getString(R.string.notif_diag_service_off)) { _ ->
+            TrackingService.start(this@MainActivity)
+        })
+        val lockNote = TextView(this).apply {
+            text = getString(R.string.notif_locked_note)
+            textSize = 12f
+            setPadding(0, pad / 2, 0, 0)
+        }
+        box.addView(lockNote)
+        dlg.show()
     }
 
     private fun showCheckin() {
