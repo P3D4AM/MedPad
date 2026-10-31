@@ -1,0 +1,12 @@
+<!-- mission 12 / item 7 — small dot badge marking a day that HAS reports
+     (compound drawable under the day number). Vector → fixed intrinsic
+     size, so setCompoundDrawablesWithIntrinsicBounds renders it exactly. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="6dp"
+    android:height="6dp"
+    android:viewportWidth="6"
+    android:viewportHeight="6">
+    <path
+        android:fillColor="@color/teal_600"
+        android:pathData="M3,3m-2.6,0a2.6,2.6 0,1 1,5.2 0a2.6,2.6 0,1 1,-5.2 0" />
+</vector>

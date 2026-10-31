@@ -52,6 +52,7 @@ class ReportsActivity : AppCompatActivity() {
     private lateinit var recycler: RecyclerView
     private lateinit var calendarGrid: RecyclerView
     private lateinit var calendarBox: View
+    private lateinit var calWeekHeader: LinearLayout
     private lateinit var tvMonthName: TextView
     private lateinit var tvEmpty: TextView
     private val adapter = ReportsAdapter()
@@ -64,9 +65,27 @@ class ReportsActivity : AppCompatActivity() {
         recycler = findViewById(R.id.recycler)
         calendarGrid = findViewById(R.id.calendarGrid)
         calendarBox = findViewById(R.id.calendarBox)
+        calWeekHeader = findViewById(R.id.calWeekHeader)
         tvMonthName = findViewById(R.id.tvMonthName)
         tvEmpty = findViewById(R.id.tvEmpty)
         players = VoiceMiniPlayerHub(this, scope)
+
+        // mission 12 / item 7 — full-RTL calendar: the app does not declare
+        // supportsRtl, so the grid and its header are flipped explicitly:
+        // column 0 (rightmost) is شنبه, the week reads right→left exactly
+        // like a Persian paper calendar.
+        calendarGrid.layoutDirection = View.LAYOUT_DIRECTION_RTL
+        calWeekHeader.layoutDirection = View.LAYOUT_DIRECTION_RTL
+        JalaliDate.WEEK_DAYS.forEach { name ->
+            val tv = TextView(this).apply {
+                text = name
+                textSize = 11f
+                gravity = android.view.Gravity.CENTER
+                setTextColor(0xFF57534E.toInt())
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            calWeekHeader.addView(tv)
+        }
 
         recycler.layoutManager = LinearLayoutManager(this)
         recycler.adapter = adapter
@@ -114,13 +133,28 @@ class ReportsActivity : AppCompatActivity() {
     }
 
     private fun renderCalendar() {
-        tvMonthName.text = "${JalaliDate.MONTH_NAMES[calMonth - 1]} ${calYear}"
+        tvMonthName.text = "${JalaliDate.MONTH_NAMES[calMonth - 1]} ${JalaliDate.faDigits(calYear)}"
         val days = JalaliDate.monthLength(calYear, calMonth)
-        val cells = (1..days).map { d ->
-            val g = JalaliDate.toGregorian(calYear, calMonth, d)
-            val gj = J(calYear, calMonth, d)
+        // mission 12 / item 7 — leading blanks so day ۱ lands under its own
+        // weekday column (شنبه is column 0 = rightmost in the RTL grid)
+        val firstDow = JalaliDate.weekDayIndex(calYear, calMonth, 1)
+        val cells = ArrayList<DayCell?>(firstDow + days)
+        repeat(firstDow) { cells.add(null) }
+        // the Jalali «today» for the TODAY marker (device clock, Tehran day)
+        val nowCal = Calendar.getInstance().apply { timeZone = java.util.TimeZone.getTimeZone("Asia/Tehran") }
+        val today = JalaliDate.fromGregorian(
+            nowCal.get(Calendar.YEAR), nowCal.get(Calendar.MONTH) + 1, nowCal.get(Calendar.DAY_OF_MONTH),
+        )
+        // days that carry at least one report (the dot badge)
+        val reportDays = HashSet<Int>()
+        for (r in allReports) {
+            val j = parseDate(r)
+            if (j.year == calYear && j.month == calMonth) reportDays.add(j.day)
+        }
+        for (d in 1..days) {
             val selected = filterDay?.let { it.year == calYear && it.month == calMonth && it.day == d } == true
-            DayCell(d, selected, g)
+            val isToday = today.year == calYear && today.month == calMonth && today.day == d
+            cells.add(DayCell(d, selected, isToday, reportDays.contains(d)))
         }
         calAdapter.cells = cells
         calAdapter.notifyDataSetChanged()
@@ -151,7 +185,9 @@ class ReportsActivity : AppCompatActivity() {
         }
     }
 
-    class DayCell(val day: Int, val selected: Boolean, val g: IntArray)
+    /** mission 12 / item 7 — a calendar cell: null = leading blank,
+     *  otherwise day number + selected/today/has-report markers. */
+    class DayCell(val day: Int, val selected: Boolean, val today: Boolean, val hasReport: Boolean)
 
     // ── reports list ────────────────────────────────────────
     inner class ReportsAdapter : RecyclerView.Adapter<ReportsAdapter.VH>() {
@@ -211,7 +247,7 @@ class ReportsActivity : AppCompatActivity() {
                         orientation = LinearLayout.HORIZONTAL
                         gravity = android.view.Gravity.CENTER_VERTICAL
                     }
-                    row.addView(players.labelView(getString(R.string.player_file_label, toFaDigits(i + 1))))
+                    row.addView(players.labelView(getString(R.string.player_file_label, JalaliDate.faDigits(i + 1))))
                     row.addView(players.buildRow(fid, furl))
                     h.boxVoices.addView(row)
                 }
@@ -225,15 +261,9 @@ class ReportsActivity : AppCompatActivity() {
         }
     }
 
-    /** Persian digits for the player labels («صوت ۱»). */
-    private fun toFaDigits(n: Int): String {
-        val fa = arrayOf("۰", "۱", "۲", "۳", "۴", "۵", "۶", "۷", "۸", "۹")
-        return n.toString().map { fa[it - '0'] }.joinToString("")
-    }
-
     // ── jalali calendar grid ────────────────────────────────
     inner class CalAdapter : RecyclerView.Adapter<CalAdapter.VH>() {
-        var cells: List<DayCell> = emptyList()
+        var cells: List<DayCell?> = emptyList()
 
         inner class VH(v: View) : RecyclerView.ViewHolder(v) {
             val btn: Button = v.findViewById(R.id.btnDay)
@@ -246,9 +276,37 @@ class ReportsActivity : AppCompatActivity() {
 
         override fun onBindViewHolder(h: VH, pos: Int) {
             val c = cells[pos]
-            h.btn.text = c.day.toString()
-            h.btn.setBackgroundResource(if (c.selected) R.drawable.day_selected else R.drawable.day_normal)
-            h.btn.setTextColor(if (c.selected) 0xFFFFFFFF.toInt() else 0xFF1C1917.toInt())
+            if (c == null) {
+                // leading blank — occupies the weekday column, not clickable
+                h.btn.text = ""
+                h.btn.background = null
+                h.btn.isEnabled = false
+                h.btn.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0)
+                return
+            }
+            h.btn.isEnabled = true
+            // mission 12 / item 7 — Persian digits («۱۴» not "14")
+            h.btn.text = JalaliDate.faDigits(c.day)
+            h.btn.background = when {
+                c.selected -> android.content.res.ResourcesCompat.getDrawable(
+                    resources, R.drawable.day_selected, null,
+                )
+                c.today -> android.content.res.ResourcesCompat.getDrawable(
+                    resources, R.drawable.day_today, null,
+                )
+                else -> android.content.res.ResourcesCompat.getDrawable(
+                    resources, R.drawable.day_normal, null,
+                )
+            }
+            h.btn.setTextColor(
+                if (c.selected) 0xFFFFFFFF.toInt() else 0xFF1C1917.toInt(),
+            )
+            // mission 12 / item 7 — the dot badge marks days that carry at
+            // least one report (hidden on the selected day: the filled
+            // circle is already the strongest marker)
+            h.btn.setCompoundDrawablesWithIntrinsicBounds(
+                0, 0, 0, if (c.hasReport && !c.selected) R.drawable.dot_report_day else 0,
+            )
             h.btn.setOnClickListener {
                 filterDay = J(calYear, calMonth, c.day)
                 calendarBox.visibility = View.GONE

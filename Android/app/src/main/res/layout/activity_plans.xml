@@ -20,7 +20,6 @@
             android:layout_width="40dp"
             android:layout_height="40dp"
             android:background="?attr/selectableItemBackgroundBorderless"
-            android:rotation="180"
             android:src="@drawable/ic_back"
             app:tint="@color/teal_700"
             android:contentDescription="@string/cancel" />

@@ -66,6 +66,9 @@ class CheckoutDialogFragment(
         tvRecState = view.findViewById(R.id.tvRecState)
         btnRec = view.findViewById(R.id.btnRec)
         boxTakes = view.findViewById(R.id.boxTakes)
+        // mission 12 / item 5 — on checkout the voice is REQUIRED (server
+        // contract: no voice → 400); the label carries the star.
+        tvRecState?.text = getString(R.string.record_voice_required)
 
         val edNote = view.findViewById<NoPasteEditText>(R.id.edNote)
         val btnCancel = view.findViewById<Button>(R.id.btnCancel)

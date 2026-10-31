@@ -316,4 +316,11 @@
     <string name="perm_bg_settings_hint">در صفحهٔ بازشده روی «مجوزها» → «موقعیت مکانی» → «همیشه اجازه» بزنید، سپس به برنامه برگردید.</string>
     <string name="tracking_bg_banner">مکان‌یابی فقط «حین استفاده» مجاز است — برای ثبت مسیر کامل در پس‌زمینه، آن را روی «همیشه اجازه» بگذارید.</string>
     <string name="tracking_gps_banner">سرویس موقعیت مکانی گوشی خاموش است — مسیر و موقعیت ثبت نمی‌شود.</string>
+
+    <!-- Item 5 — required(*) / optional annotations (mirrors the server contract) -->
+    <string name="select_customer_required">انتخاب مشتری *</string>
+    <string name="note_hint_optional">یادداشت این بازدید (اختیاری)…</string>
+    <string name="checkout_note_hint_required">گزارش پایان بازدید — حداقل ۱۰ نویسه *</string>
+    <string name="record_voice_optional">ضبط صدا (اختیاری)</string>
+    <string name="record_voice_required">ضبط صدا *</string>
 </resources>

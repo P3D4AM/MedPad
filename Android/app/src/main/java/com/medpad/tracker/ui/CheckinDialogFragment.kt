@@ -164,6 +164,11 @@ class CheckinDialogFragment(
         btnRec = view.findViewById(R.id.btnRec)
         btnPlay = view.findViewById(R.id.btnPlay)
         boxTakes = view.findViewById(R.id.boxTakes)
+        // mission 12 / item 5 — the shared voice section is OPTIONAL here
+        // (the server contract: check-in voice is optional, checkout's is
+        // required) — the label says so up front, the same rule the server
+        // enforces.
+        tvRecState?.text = getString(R.string.record_voice_optional)
 
         // mission item 8 — a live device clock + the plan-window comparison
         // sit at the TOP of the form (before the customer spinner): the rep

@@ -18,7 +18,7 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="@string/select_customer"
+        android:text="@string/select_customer_required"
         android:textSize="13sp"
         android:textColor="@color/gray_500"
         android:layout_marginBottom="4dp" />
@@ -34,7 +34,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginBottom="12dp"
-        android:hint="@string/note_hint">
+        android:hint="@string/note_hint_optional">
 
         <com.google.android.material.textfield.TextInputEditText
             android:id="@+id/edNote"

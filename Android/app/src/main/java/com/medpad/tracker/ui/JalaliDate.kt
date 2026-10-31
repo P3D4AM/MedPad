@@ -142,4 +142,24 @@ object JalaliDate {
     val WEEK_DAYS = arrayOf("شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه")
 
     fun formatFa(j: J): String = "%d %s %d".format(j.day, MONTH_NAMES[j.month - 1], j.year)
+
+    /** mission 12 / item 7 — 0-based Persian weekday of a Jalali date:
+     *  0 = شنبه (Saturday) … 6 = جمعه (Friday). Pure Gregorian round-trip
+     *  (no hand-rolled Zeller — the existing jalaali conversion IS the
+     *  source of truth, leap years included). */
+    fun weekDayIndex(jy: Int, jm: Int, jd: Int): Int {
+        val g = toGregorian(jy, jm, jd)
+        val cal = java.util.Calendar.getInstance()
+        cal.set(java.util.Calendar.YEAR, g[0])
+        cal.set(java.util.Calendar.MONTH, g[1] - 1)
+        cal.set(java.util.Calendar.DAY_OF_MONTH, g[2])
+        val dow = cal.get(java.util.Calendar.DAY_OF_WEEK) // SUNDAY=1 … SATURDAY=7
+        return dow % 7 // SATURDAY(7)→0=شنبه, SUNDAY(1)→1=یکشنبه, … FRIDAY(6)→6=جمعه
+    }
+
+    /** mission 12 / item 7 — Persian digits for calendar labels («۱۴», «۲»). */
+    fun faDigits(n: Int): String {
+        val fa = arrayOf("۰", "۱", "۲", "۳", "۴", "۵", "۶", "۷", "۸", "۹")
+        return n.toString().map { fa[it - '0'] }.joinToString("")
+    }
 }

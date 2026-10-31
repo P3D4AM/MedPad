@@ -17,7 +17,6 @@
             android:layout_width="40dp"
             android:layout_height="40dp"
             android:background="?attr/selectableItemBackgroundBorderless"
-            android:rotation="180"
             android:src="@drawable/ic_back"
             app:tint="@color/teal_700"
             android:contentDescription="@string/cancel" />
@@ -62,6 +61,7 @@
                 android:layout_width="40dp"
                 android:layout_height="40dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
+                android:rotation="180"
                 android:src="@drawable/ic_back"
                 app:tint="@color/teal_600"
                 android:contentDescription="@string/pick_date" />
@@ -81,17 +81,25 @@
                 android:layout_width="40dp"
                 android:layout_height="40dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
-                android:rotation="180"
                 android:src="@drawable/ic_back"
                 app:tint="@color/teal_600"
                 android:contentDescription="@string/pick_date" />
         </LinearLayout>
 
+        <!-- mission 12 / item 7 — Persian weekday header (شنبه…جمعه), RTL
+             order, matching the grid below -->
+        <LinearLayout
+            android:id="@+id/calWeekHeader"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="6dp" />
+
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/calendarGrid"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp" />
+            android:layout_marginTop="4dp" />
     </LinearLayout>
 
     <androidx.recyclerview.widget.RecyclerView

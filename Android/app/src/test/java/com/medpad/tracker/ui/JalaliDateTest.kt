@@ -84,6 +84,31 @@ class JalaliDateTest {
     }
 
     @Test
+    fun `weekDayIndex maps the Persian week correctly`() {
+        // mission 12 / item 7 — 0 = شنبه (Saturday) … 6 = جمعه (Friday).
+        // 2026-10-24 is a Saturday → 1405-08-02 must be شنبه.
+        assertEquals(0, JalaliDate.weekDayIndex(1405, 8, 2))
+        // 2026-10-30 is a Friday → 1405-08-08 must be جمعه.
+        assertEquals(6, JalaliDate.weekDayIndex(1405, 8, 8))
+        // 2026-11-01 is a Sunday → 1405-08-10 must be یکشنبه.
+        assertEquals(1, JalaliDate.weekDayIndex(1405, 8, 10))
+        // Nowruz 1405 = 2026-03-21, a Saturday
+        assertEquals(0, JalaliDate.weekDayIndex(1405, 1, 1))
+        // all seven consecutive days map to 0..6 in order
+        val base = JalaliDate.weekDayIndex(1405, 8, 2)
+        repeat(7) { i ->
+            assertEquals(i, (base + i) % 7)
+        }
+    }
+
+    @Test
+    fun `faDigits renders Persian digits`() {
+        assertEquals("۱", JalaliDate.faDigits(1))
+        assertEquals("۱۴", JalaliDate.faDigits(14))
+        assertEquals("۱۴۰۵", JalaliDate.faDigits(1405))
+    }
+
+    @Test
     fun `weekday mapping stays in bounds for all seven days`() {
         // PlansActivity.renderDayLabel: WEEK_DAYS[(DAY_OF_WEEK - SATURDAY + 7) % 7]
         val cal = gregorian(2026, 10, 24) // a Saturday
