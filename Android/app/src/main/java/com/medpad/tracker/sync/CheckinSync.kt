@@ -86,6 +86,16 @@ object CheckinSync {
         return item.copy(uid = uid)
     }
 
+    /** mission item 6 — read one queued item back by its idempotency key.
+     *  The submit dialogs call this right after flush(): a null return =
+     *  the server CONFIRMED the event (it left the queue); a 'failed'
+     *  status carries the server's Persian rejection text (e.g. the 422
+     *  geofence message with the exact distance + allowed radius), which
+     *  the dialog shows verbatim — the user sees WHY, not a generic error. */
+    suspend fun itemByLocalId(localId: String): PendingCheckin? = withContext(Dispatchers.IO) {
+        AppDatabase.get(TrackerContext.app).pendingCheckinDao().byLocalId(localId)
+    }
+
     /** Flush whole queue. Returns number of items sent.
      *  Failed (permanently rejected) items are skipped, not retried here —
      *  they are visible in the queue UI with their error and can be

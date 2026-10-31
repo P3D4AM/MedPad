@@ -136,17 +136,28 @@ class CheckinDialogFragment(
             btnSubmit.isEnabled = false
             progress.visibility = View.VISIBLE
             scope.launch {
+                // mission item 6 — track the item so a PERMANENT server
+                // rejection (e.g. 422 geofence: «فاصلهٔ شما … بیشتر از شعاع
+                // مجاز چک‌این …») surfaces its Persian text HERE, in the
+                // dialog, instead of a generic sync error buried in the
+                // queue screen.
+                var serverError: String? = null
                 val ok = try {
                     withContext(Dispatchers.IO) {
                         // G-6 (phase 1 / task 2): the REAL device GPS fix (with
                         // accuracy), or NO location at all — the customer's
                         // coordinates are never sent as the employee position.
                         val fix = DeviceGps.snapshot()
-                        CheckinSync.enqueue(
+                        val item = CheckinSync.enqueue(
                             "checkin", cus.id, edNote.text.toString(), voice,
                             fix?.lat, fix?.lng, fix?.accuracyM,
                         )
                         CheckinSync.flush() >= 0
+                        val after = CheckinSync.itemByLocalId(item.localId)
+                        if (after != null && after.status == com.medpad.tracker.db.QUEUE_STATUS_FAILED) {
+                            serverError = after.lastError
+                        }
+                        after == null // confirmed by the server → left the queue
                     }
                 } catch (e: Exception) {
                     false
@@ -158,7 +169,7 @@ class CheckinDialogFragment(
                     dismiss()
                 } else {
                     btnSubmit.isEnabled = true
-                    tvRecState?.text = getString(R.string.sync_error)
+                    tvRecState?.text = serverError ?: getString(R.string.sync_error)
                 }
             }
         }

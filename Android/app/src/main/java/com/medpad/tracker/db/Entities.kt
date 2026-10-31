@@ -145,6 +145,13 @@ interface PendingCheckinDao {
 
     @Query("SELECT COUNT(*) FROM pending_checkins WHERE kind = 'checkin' AND customerId = :customerId AND createdAt > :since")
     suspend fun recentCount(customerId: String, since: Long): Int
+
+    /** mission item 6 — read one item back by its idempotency key (the
+     *  submit dialogs use this to surface the SERVER's Persian rejection
+     *  text — e.g. the 422 geofence message with the exact distance and
+     *  allowed radius — instead of a generic sync error). */
+    @Query("SELECT * FROM pending_checkins WHERE localId = :localId LIMIT 1")
+    suspend fun byLocalId(localId: String): PendingCheckin?
 }
 
 /**

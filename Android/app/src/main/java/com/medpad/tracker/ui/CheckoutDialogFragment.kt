@@ -93,16 +93,25 @@ class CheckoutDialogFragment(private val onDone: () -> Unit = {}) : DialogFragme
             btnSubmit.isEnabled = false
             progress.visibility = View.VISIBLE
             scope.launch {
+                // mission item 6 — surface the SERVER's rejection text (e.g.
+                // the independent check-out geofence 422 with the exact
+                // distance + allowed radius) in the dialog itself.
+                var serverError: String? = null
                 val ok = try {
                     withContext(Dispatchers.IO) {
                         // G-6 (phase 1 / task 2): real device GPS fix (with
                         // accuracy) or no location — never fabricated.
                         val fix = DeviceGps.snapshot()
-                        CheckinSync.enqueue(
+                        val item = CheckinSync.enqueue(
                             "checkout", null, note, voice,
                             fix?.lat, fix?.lng, fix?.accuracyM,
                         )
                         CheckinSync.flush() >= 0
+                        val after = CheckinSync.itemByLocalId(item.localId)
+                        if (after != null && after.status == com.medpad.tracker.db.QUEUE_STATUS_FAILED) {
+                            serverError = after.lastError
+                        }
+                        after == null // confirmed by the server → left the queue
                     }
                 } catch (e: Exception) {
                     false
@@ -114,7 +123,11 @@ class CheckoutDialogFragment(private val onDone: () -> Unit = {}) : DialogFragme
                     dismiss()
                 } else {
                     btnSubmit.isEnabled = true
-                    Toast.makeText(requireContext(), R.string.sync_error, Toast.LENGTH_SHORT).show()
+                    if (serverError != null) {
+                        tvRecState?.text = serverError
+                    } else {
+                        Toast.makeText(requireContext(), R.string.sync_error, Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
         }
