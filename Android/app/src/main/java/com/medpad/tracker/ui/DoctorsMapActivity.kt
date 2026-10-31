@@ -243,14 +243,7 @@ class DoctorsMapActivity : AppCompatActivity() {
         markers.clear()
         if (doctors.isEmpty()) return
 
-        var minLat = doctors[0].lat
-        var maxLat = doctors[0].lat
-        var minLng = doctors[0].lng
-        var maxLng = doctors[0].lng
-
         for (d in doctors) {
-            minLat = minOf(minLat, d.lat); maxLat = maxOf(maxLat, d.lat)
-            minLng = minOf(minLng, d.lng); maxLng = maxOf(maxLng, d.lng)
             val m = Marker(map).apply {
                 position = GeoPoint(d.lat, d.lng)
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
@@ -266,36 +259,27 @@ class DoctorsMapActivity : AppCompatActivity() {
             map.overlays.add(m)
         }
 
-        // mission item 9 — SMART initial zoom: fit the bounds of the city
-        // that holds MOST of the rep's coordinate-bearing customers (ties
-        // break deterministically), NOT every customer in every city — the
-        // old behaviour opened on a country/continent-scale view. Free pan
+        // mission 12 / item 2 — initial view: fit the bounds of ALL valid
+        // coordinates (the (0,0) "no coords" marker excluded — including it
+        // was the «پرش به آمریکا» ocean-zoom bug). ONE point → a readable
+        // zoom on it; NO valid coordinates → never fly to a fake place (the
+        // admin's default-city centre stays + an honest toast). Free pan
         // and zoom stay untouched (this runs once per render, animate=false).
-        val focus = com.medpad.tracker.util.MapFocus.pick(doctors)
-        val f = focus.focus
+        val focus = com.medpad.tracker.util.MapFocus.allBounds(doctors)
+        val b = focus.bounds
         when {
-            f != null -> {
+            b != null -> {
                 try {
                     map.zoomToBoundingBox(
-                        BoundingBox(f.lats.max(), f.lngs.max(), f.lats.min(), f.lngs.min())
-                            .increaseByScale(1.4f), // padding — markers clear the screen edges
+                        BoundingBox(b.maxLat, b.maxLng, b.minLat, b.minLng)
+                            .increaseByScale(1.4f), // padding — markers clear the edges
                         false,
                     )
-                } catch (_: Exception) { /* single point in the city */ }
+                } catch (_: Exception) { /* degenerate box — keep the current view */ }
             }
-            focus.allCoordsFallback.isNotEmpty() -> {
-                // coords exist but no city data — the honest best: fit them all
-                try {
-                    map.zoomToBoundingBox(
-                        BoundingBox(
-                            focus.allCoordsFallback.maxOf { it.first },
-                            focus.allCoordsFallback.maxOf { it.second },
-                            focus.allCoordsFallback.minOf { it.first },
-                            focus.allCoordsFallback.minOf { it.second },
-                        ).increaseByScale(1.4f),
-                        false,
-                    )
-                } catch (_: Exception) { /* single point */ }
+            focus.single != null -> {
+                map.controller.setCenter(GeoPoint(focus.single.first, focus.single.second))
+                map.controller.setZoom(MapDefaults.FOLLOW_ZOOM)
             }
             else -> {
                 // NO valid coordinates: never move the map to a fake place —

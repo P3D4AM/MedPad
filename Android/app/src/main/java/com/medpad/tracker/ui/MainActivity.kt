@@ -86,6 +86,28 @@ class MainActivity : AppCompatActivity() {
                 message = if (fine) "مجوز مکان‌یابی داده شد" else "مجوز مکان‌یابی رد شد",
             )
         }
+        // mission 12 / item 12 — foreground grants are in: the "Allow all
+        // the time" guidance is offered NEXT (never requested together
+        // with the foreground permissions — the OS auto-denies that).
+        if (fine) maybeAskBackgroundLocation()
+    }
+
+    // mission 12 / item 12 — the direct background-location request (only
+    // honoured on API 29–30; elsewhere the flow routes to settings).
+    private val bgPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        scope.launch {
+            com.medpad.tracker.sync.OpEvents.record(
+                type = "permission.background",
+                status = if (granted) "success" else "failed",
+                errorCode = if (granted) null else "denied",
+                message = if (granted) "مجوز مکان‌یابی همیشگی داده شد" else "مجوز مکان‌یابی همیشگی رد شد",
+            )
+        }
+        if (!granted && LocationPerm.directDialog(Build.VERSION.SDK_INT) == LocationPerm.DirectDialog.DIALOG) {
+            // the dialog was shown and declined — offer the settings path
+            // (never nag again this session)
+        }
+        updateQueueStatus()
     }
 
     private val queueReceiver = object : BroadcastReceiver() {
@@ -267,7 +289,62 @@ class MainActivity : AppCompatActivity() {
             servicePermissions.launch(wanted.toTypedArray())
         } else {
             TrackingService.start(this)
+            // mission 12 / item 12 — foreground already granted (returning
+            // user): the "Allow all the time" guidance still applies
+            maybeAskBackgroundLocation()
         }
+    }
+
+    // ── mission 12 / item 12 — the "Allow all the time" guided flow ──
+
+    private fun foregroundLocationGranted(): Boolean =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+    private fun backgroundLocationGranted(): Boolean =
+        Build.VERSION.SDK_INT < 29 || // no separate background permission below Android 10
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+    private var bgAskedThisSession = false
+
+    /** Offer the "Allow all the time" upgrade exactly when it is missing and
+     *  can actually be granted (foreground first, API 29+). The honest
+     *  explainer comes BEFORE anything else; then the direct dialog (API
+     *  29–30) or the app's own settings page (API 31+). One offer per
+     *  session — the banner below keeps a permanent, non-nagging entry. */
+    private fun maybeAskBackgroundLocation(force: Boolean = false) {
+        if (!LocationPerm.flowAvailable(Build.VERSION.SDK_INT)) return
+        if (!foregroundLocationGranted() || backgroundLocationGranted()) return
+        if (bgAskedThisSession && !force) return
+        bgAskedThisSession = true
+        AlertDialog.Builder(this)
+            .setTitle(R.string.perm_bg_title)
+            .setMessage(R.string.perm_bg_body)
+            .setPositiveButton(R.string.perm_bg_allow) { _, _ ->
+                when (LocationPerm.directDialog(Build.VERSION.SDK_INT)) {
+                    LocationPerm.DirectDialog.DIALOG ->
+                        bgPermission.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                    LocationPerm.DirectDialog.SETTINGS_ONLY ->
+                        openAppPermissionSettings()
+                }
+            }
+            .setNegativeButton(R.string.perm_bg_not_now, null)
+            .show()
+    }
+
+    /** THIS app's official settings page — the only place "Allow all the
+     *  time" can be chosen on Android 11+. Returning from there is caught
+     *  by onResume → updateQueueStatus, which re-reads the REAL state. */
+    private fun openAppPermissionSettings() {
+        try {
+            Toast.makeText(this, R.string.perm_bg_settings_hint, Toast.LENGTH_LONG).show()
+            startActivity(
+                android.content.Intent(
+                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    android.net.Uri.fromParts("package", packageName, null),
+                ),
+            )
+        } catch (_: Exception) { /* honest no-op */ }
     }
 
     private fun withMic(action: (Boolean) -> Unit) {
@@ -575,23 +652,47 @@ class MainActivity : AppCompatActivity() {
             val old = pv.isNotEmpty() && pv.split('.').firstOrNull()?.toIntOrNull()?.let { it < 1 } == true ||
                 pv.startsWith("1.6") || pv.startsWith("1.7")
             findViewById<TextView>(R.id.tvPanelWarning).visibility = if (old) View.VISIBLE else View.GONE
-            // phase 3: honest tracking-permission state — the banner shows
-            // whenever the location permission is missing; tapping it (re)asks
-            // and starts the service on grant. Permission state also reaches
-            // the panel through every upload's status snapshot.
+            // phase 3 / mission 12 item 12 — honest tracking-permission state,
+            // now with the THREE distinct realities the user can face:
+            //   1. no location permission at all      → the standard flow
+            //   2. permission granted but GPS OFF     → hardware switch banner
+            //      (a permission banner would lie here — the OS switch is the
+            //      blocker, so the banner says so and opens the right page)
+            //   3. while-in-use only                  → the "Allow all the
+            //      time" upgrade entry (permanent, non-nagging)
+            // The state is re-read on every resume, so a change made in the
+            // system settings is reflected the moment the user returns.
             val tvPerm = findViewById<TextView>(R.id.tvTrackingPerm)
-            val permOk = ContextCompat.checkSelfPermission(
-                this@MainActivity, Manifest.permission.ACCESS_FINE_LOCATION,
-            ) == PackageManager.PERMISSION_GRANTED ||
-                ContextCompat.checkSelfPermission(
-                    this@MainActivity, Manifest.permission.ACCESS_COARSE_LOCATION,
-                ) == PackageManager.PERMISSION_GRANTED
-            if (permOk) {
-                tvPerm.visibility = View.GONE
-            } else {
-                tvPerm.text = getString(R.string.tracking_perm_banner)
-                tvPerm.visibility = View.VISIBLE
-                tvPerm.setOnClickListener { askServicePermissions() }
+            val fg = foregroundLocationGranted()
+            val bg = backgroundLocationGranted()
+            val gpsOn = try {
+                val lm = getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
+                lm.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER) ||
+                    lm.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER)
+            } catch (_: Exception) {
+                true // unknown — never scare the user with a wrong banner
+            }
+            when {
+                !fg -> {
+                    tvPerm.text = getString(R.string.tracking_perm_banner)
+                    tvPerm.setOnClickListener { askServicePermissions() }
+                    tvPerm.visibility = View.VISIBLE
+                }
+                !gpsOn -> {
+                    tvPerm.text = getString(R.string.tracking_gps_banner)
+                    tvPerm.setOnClickListener {
+                        try {
+                            startActivity(android.content.Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                        } catch (_: Exception) { /* honest no-op */ }
+                    }
+                    tvPerm.visibility = View.VISIBLE
+                }
+                !bg -> {
+                    tvPerm.text = getString(R.string.tracking_bg_banner)
+                    tvPerm.setOnClickListener { maybeAskBackgroundLocation(force = true) }
+                    tvPerm.visibility = View.VISIBLE
+                }
+                else -> tvPerm.visibility = View.GONE
             }
             // G-2 (phase 1 / task 2): the server rejected our token (expired,
             // revoked or the employee was deactivated) → send the user to the

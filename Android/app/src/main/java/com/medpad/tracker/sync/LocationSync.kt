@@ -141,9 +141,11 @@ object LocationSync {
             coarse -> "coarse"
             else -> "denied"
         }
-        // background permission exists from API 29; we do not REQUEST it
-        // (the foreground service pattern runs on while-in-use access) but
-        // we REPORT its true state so the panel can advise the admin.
+        // background permission exists from API 29. mission 12 / item 12:
+        // the app now OFFERS the guided "Allow all the time" flow (MainActivity)
+        // — the foreground service still runs on while-in-use access, and this
+        // snapshot keeps reporting the TRUE state so the panel can advise the
+        // admin (a "while in use" device shows honest gaps in its route).
         val bg = if (Build.VERSION.SDK_INT >= 29) {
             if (granted(Manifest.permission.ACCESS_BACKGROUND_LOCATION)) "granted" else "denied"
         } else "unavailable"

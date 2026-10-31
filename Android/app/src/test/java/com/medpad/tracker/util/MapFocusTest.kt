@@ -2,83 +2,88 @@ package com.medpad.tracker.util
 
 import com.medpad.tracker.db.Doctor
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Mission item 9 — the deterministic initial map focus: the city holding
- * MOST of the rep's coordinate-bearing customers, with a stable tie-break;
- * never a fabricated coordinate.
+ * mission 12 / item 2 — MapFocus.allBounds contract.
+ *
+ * The mission replaces dev.6's "focus the majority city" with the
+ * ALL-coordinates contract:
+ *   - every VALID coordinate contributes ((0,0) = the app's "no coords"
+ *     marker and is excluded — including it was the ocean-zoom bug);
+ *   - 2+ points → min/max bounds over them ALL (multi-city included);
+ *   - exactly 1 point → [single] (centre + readable zoom, not a fit);
+ *   - 0 points → nothing: the map never flies to a fake place.
  */
 class MapFocusTest {
 
-    private fun doc(
-        id: String,
-        lat: Double,
-        lng: Double,
-        city: String? = null,
-    ) = Doctor(
-        id = id, name = id, type = "doctor", lat = lat, lng = lng, city = city,
-        updatedAt = 0L, assigned = true,
-    )
+    private fun doc(lat: Double, lng: Double, city: String? = null) =
+        Doctor(id = "d$lat-$lng-$city", name = "n", lat = lat, lng = lng, city = city)
 
     @Test
-    fun `the city with the most customers wins`() {
-        val r = MapFocus.pick(
+    fun `zero-coordinate customers are excluded from the bounds`() {
+        // the OLD pre-dev.6 bug: (0,0) rows stretched the box to ocean scale
+        val r = MapFocus.allBounds(
             listOf(
-                doc("m1", 35.70, 51.42, "تهران"),
-                doc("m2", 35.71, 51.43, "تهران"),
-                doc("m3", 35.72, 51.44, "تهران"),
-                doc("k1", 36.30, 59.60, "مشهد"),
-                doc("k2", 36.31, 59.61, "مشهد"),
+                doc(35.70, 51.40),
+                doc(0.0, 0.0), // "no coords" marker — must not contribute
             ),
         )
-        assertEquals("تهران", r.focus?.city)
-        assertEquals(3, r.focus?.lats?.size)
-        assertEquals(5, r.allCoordsFallback.size)
+        assertEquals(1, r.validCount)
+        assertNotNull(r.single)
+        assertNull(r.bounds)
+        assertEquals(35.70 to 51.40, r.single)
     }
 
     @Test
-    fun `a tie breaks on the smallest city name - stable across renders`() {
-        val a = MapFocus.pick(
-            listOf(doc("m1", 36.30, 59.60, "مشهد"), doc("k1", 35.70, 51.42, "تهران")),
-        )
-        val b = MapFocus.pick(
-            listOf(doc("k1", 35.70, 51.42, "تهران"), doc("m1", 36.30, 59.60, "مشهد")),
-        )
-        assertEquals(a.focus?.city, b.focus?.city)
-        // تهران < مشهد lexicographically (Arabic-script code points)
-        assertEquals("تهران", a.focus?.city)
-    }
-
-    @Test
-    fun `customers without coordinates never count`() {
-        val r = MapFocus.pick(
+    fun `all valid coordinates form the bounds — multi city included`() {
+        // mission item 2: a rep with customers in Tehran AND Shiraz sees
+        // BOTH in the initial view (dev.6 focused only the majority city)
+        val r = MapFocus.allBounds(
             listOf(
-                doc("t1", 35.70, 51.42, "تهران"),
-                doc("zero1", 0.0, 0.0, "تهران"), // no coords — excluded everywhere
-                doc("zero2", 0.0, 0.0, "مشهد"),
+                doc(35.70, 51.40, "تهران"),
+                doc(35.72, 51.41, "تهران"),
+                doc(29.60, 52.53, "شیراز"),
             ),
         )
-        assertEquals("تهران", r.focus?.city)
-        assertEquals(1, r.focus?.lats?.size)
-        assertEquals(1, r.allCoordsFallback.size)
+        assertEquals(3, r.validCount)
+        val b = r.bounds!!
+        assertEquals(29.60, b.minLat, 1e-9)
+        assertEquals(35.72, b.maxLat, 1e-9)
+        assertEquals(51.40, b.minLng, 1e-9)
+        assertEquals(52.53, b.maxLng, 1e-9)
+        assertNull(r.single)
     }
 
     @Test
-    fun `no city data but coords exist - fallback to all points, no city invented`() {
-        val r = MapFocus.pick(
-            listOf(doc("a", 35.70, 51.42), doc("b", 36.30, 59.60, " ")),
-        )
-        assertNull(r.focus)
-        assertEquals(2, r.allCoordsFallback.size)
+    fun `a single valid point is a centre not a fit`() {
+        val r = MapFocus.allBounds(listOf(doc(35.70, 51.40), doc(0.0, 0.0)))
+        assertEquals(35.70 to 51.40, r.single)
+        assertNull(r.bounds)
     }
 
     @Test
-    fun `no coordinates at all - nothing to focus, nothing fabricated`() {
-        val r = MapFocus.pick(listOf(doc("a", 0.0, 0.0, "تهران")))
-        assertNull(r.focus)
-        assertTrue(r.allCoordsFallback.isEmpty())
+    fun `no valid coordinates means no movement`() {
+        val r = MapFocus.allBounds(listOf(doc(0.0, 0.0), doc(0.0, 0.0)))
+        assertEquals(0, r.validCount)
+        assertNull(r.bounds)
+        assertNull(r.single)
+    }
+
+    @Test
+    fun `empty list means no movement`() {
+        val r = MapFocus.allBounds(emptyList())
+        assertEquals(0, r.validCount)
+        assertNull(r.bounds)
+        assertNull(r.single)
+    }
+
+    @Test
+    fun `hasCoords treats only the exact zero pair as missing`() {
+        assertEquals(false, MapFocus.hasCoords(0.0, 0.0))
+        assertEquals(true, MapFocus.hasCoords(0.0, 51.4)) // on the Greenwich meridian — real
+        assertEquals(true, MapFocus.hasCoords(35.7, 51.4))
     }
 }
