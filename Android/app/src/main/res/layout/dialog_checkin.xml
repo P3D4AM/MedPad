@@ -50,6 +50,15 @@
         android:id="@+id/voiceSection"
         layout="@layout/voice_section" />
 
+    <!-- mission 12 / item 9 — the validated takes of THIS event (rendered
+         programmatically: one row per recording with its own duration,
+         preview and delete; deleting one take never touches the others) -->
+    <LinearLayout
+        android:id="@+id/boxTakes"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical" />
+
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

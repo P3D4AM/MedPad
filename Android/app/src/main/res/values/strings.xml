@@ -290,4 +290,20 @@
     <!-- Item 4 — server-address normalization -->
     <string name="err_server_url_empty">آدرس سرور را وارد کنید (مثال: http://192.168.1.10:3000)</string>
     <string name="err_server_url_no_host">آدرس سرور کامل نیست — نام میزبان یا IP را وارد کنید</string>
+
+    <!-- Items 10 + 9 — recording lifecycle + multiple takes per event -->
+    <string name="voice_start_failed">شروع ضبط ممکن نشد — میکروفن در دسترس نیست</string>
+    <string name="voice_invalid">ضبط نامعتبر بود و ثبت نشد (%1$s) — لطفاً دوباره ضبط کنید</string>
+    <string name="voice_recorded_more">ضبط شد ✓ (%1$s) — برای افزودن ضبط دیگر دوباره ضبط کنید</string>
+    <string name="voice_take_label">صوت %1$s · %2$s</string>
+    <string name="voice_take_delete">حذف</string>
+
+    <!-- Item 6 — «گزارش‌های من» mini player -->
+    <string name="player_pause">مکث</string>
+    <string name="player_resume">ادامه از محل مکث</string>
+    <string name="player_stop">توقف</string>
+    <string name="player_paused">مکث</string>
+    <string name="player_ended">پایان</string>
+    <string name="player_loading">در حال بارگذاری…</string>
+    <string name="player_file_label">صوت %s</string>
 </resources>

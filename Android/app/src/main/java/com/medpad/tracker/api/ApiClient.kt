@@ -113,6 +113,10 @@ object ApiClient {
     }
 
     // ── check-in / check-out ────────────────────────────────
+    /** mission 12 / item 9 — one or MORE voice takes per event: every file
+     *  becomes its own `voice` multipart part (the server reads them with
+     *  form.getAll('voice')). Old panels that reject multipart fall back
+     *  to the JSON path which cannot carry files (P08 — documented drop). */
     @Throws(Exception::class)
     fun checkin(
         customerId: String,
@@ -120,7 +124,7 @@ object ApiClient {
         lat: Double?,
         lng: Double?,
         localId: String,
-        voice: File?,
+        voices: List<File> = emptyList(),
         clientAt: Long? = null,
         accuracyM: Double? = null,
         onProgress: ((Float) -> Unit)? = null,
@@ -140,16 +144,18 @@ object ApiClient {
             mp.addFormDataPart("lng", lng.toString())
             accuracyM?.let { if (it > 0) mp.addFormDataPart("accuracy", it.toString()) }
         }
-        if (voice != null && voice.exists()) {
-            mp.addFormDataPart("voice", voice.name,
-                voice.asRequestBody("audio/mp4".toMediaType()))
+        for (v in voices) {
+            if (v.exists() && v.length() > 0) {
+                mp.addFormDataPart("voice", v.name,
+                    v.asRequestBody("audio/mp4".toMediaType()))
+            }
         }
         val tracked = ProgressBody(mp.build()) { f -> onProgress?.invoke(f) }
         return exec(req("/api/app/checkin", "POST", tracked))
     }
 
     @Throws(Exception::class)
-    fun checkout(note: String, localId: String, voice: File?, clientAt: Long? = null, lat: Double? = null, lng: Double? = null, accuracyM: Double? = null): JSONObject {
+    fun checkout(note: String, localId: String, voices: List<File> = emptyList(), clientAt: Long? = null, lat: Double? = null, lng: Double? = null, accuracyM: Double? = null): JSONObject {
         val mp = MultipartBody.Builder().setType(MultipartBody.FORM)
             .addFormDataPart("note", note)
             .addFormDataPart("localId", localId)
@@ -161,9 +167,12 @@ object ApiClient {
             mp.addFormDataPart("lng", lng.toString())
             accuracyM?.let { if (it > 0) mp.addFormDataPart("accuracy", it.toString()) }
         }
-        if (voice != null && voice.exists()) {
-            mp.addFormDataPart("voice", voice.name,
-                voice.asRequestBody("audio/mp4".toMediaType()))
+        // mission 12 / item 9 — every validated take rides its own part
+        for (v in voices) {
+            if (v.exists() && v.length() > 0) {
+                mp.addFormDataPart("voice", v.name,
+                    v.asRequestBody("audio/mp4".toMediaType()))
+            }
         }
         return exec(req("/api/app/checkout", "POST", mp.build()))
     }

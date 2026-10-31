@@ -9,6 +9,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Update
+import java.io.File
 
 /**
  * Customer/doctor entity cached locally (synced with LWW from panel).
@@ -86,7 +87,10 @@ data class PendingCheckin(
     val kind: String,                  // "checkin" | "checkout"
     val customerId: String? = null,    // checkin only
     val note: String,
-    val voicePath: String? = null,     // local file path
+    val voicePath: String? = null,     // LEGACY single local file path (pre-v13 rows)
+    /** mission 12 / item 9 — JSON array of local voice file paths (multiple
+     *  recordings per event). Null on legacy rows (see [voiceFiles]). */
+    val voicePaths: String? = null,
     val lat: Double? = null,
     val lng: Double? = null,
     val accuracy: Double? = null,      // G-6: GPS accuracy (meters)
@@ -94,7 +98,25 @@ data class PendingCheckin(
     val attempts: Int = 0,
     val lastError: String? = null,
     val status: String = QUEUE_STATUS_PENDING, // pending | sending | failed
-)
+) {
+    /** mission 12 / item 9 — every local voice file of this item, old and
+     *  new: the v13 JSON array when present, else the legacy single path.
+     *  Missing files are filtered by the callers (upload/delete paths). */
+    fun voiceFiles(): List<File> {
+        voicePaths?.let { json ->
+            val out = ArrayList<File>()
+            try {
+                val arr = org.json.JSONArray(json)
+                for (i in 0 until arr.length()) {
+                    val p = arr.optString(i)
+                    if (p.isNotEmpty() && p != "null") out.add(File(p))
+                }
+            } catch (_: Exception) { /* corrupt JSON → fall back below */ }
+            if (out.isNotEmpty()) return out
+        }
+        return voicePath?.takeIf { it.isNotEmpty() }?.let { listOf(File(it)) } ?: emptyList()
+    }
+}
 
 @Dao
 interface PendingCheckinDao {

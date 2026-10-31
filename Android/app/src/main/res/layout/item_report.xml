@@ -35,18 +35,7 @@
                 android:layout_height="36dp"
                 android:paddingStart="12dp"
                 android:paddingEnd="12dp"
-                android:layout_marginEnd="6dp"
                 android:text="@string/edit_report"
-                android:textSize="12sp" />
-
-            <Button
-                android:id="@+id/btnItemPlay"
-                style="?attr/materialButtonOutlinedStyle"
-                android:layout_width="wrap_content"
-                android:layout_height="36dp"
-                android:paddingStart="12dp"
-                android:paddingEnd="12dp"
-                android:text="@string/play"
                 android:textSize="12sp" />
         </LinearLayout>
 
@@ -65,5 +54,18 @@
             android:layout_marginTop="4dp"
             android:textSize="11sp"
             android:textColor="@color/gray_500" />
+
+        <!-- mission 12 / item 6 — the mini-player rows (ONE PER recording,
+             item 9): play/pause, stop, speed, seek bar, played/total,
+             resume-from-breakpoint, loading + error states. Rendered
+             programmatically by VoiceMiniPlayerHub; GONE when the report
+             has no audio at all. -->
+        <LinearLayout
+            android:id="@+id/boxVoices"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:orientation="vertical"
+            android:visibility="gone" />
     </LinearLayout>
 </com.google.android.material.card.MaterialCardView>

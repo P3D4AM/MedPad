@@ -34,6 +34,14 @@
         android:id="@+id/voiceSection"
         layout="@layout/voice_section" />
 
+    <!-- mission 12 / item 9 — the validated takes of THIS event (one row per
+         recording: duration, preview, delete; independent of each other) -->
+    <LinearLayout
+        android:id="@+id/boxTakes"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical" />
+
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

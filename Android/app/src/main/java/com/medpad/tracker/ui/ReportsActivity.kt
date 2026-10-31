@@ -1,7 +1,5 @@
 package com.medpad.tracker.ui
 
-import android.media.AudioAttributes
-import android.media.MediaPlayer
 import android.os.Bundle
 import android.text.InputType
 import android.view.LayoutInflater
@@ -27,21 +25,25 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import java.io.File
-import java.io.FileOutputStream
 import java.util.Calendar
 
 /**
  * «گزارش‌های من» — v1.9.0: rep sees own history with a Jalali calendar filter
  * and can replay own voice notes (voice downloaded via token-protected URL).
+ * mission 12 / item 6 (Nov 2026): the bare play button is replaced by the
+ * VoiceMiniPlayerHub — play/pause/resume/stop, speed 1×/1.5×/2×, seek bar,
+ * played/total, resume-from-breakpoint, loading + error states, and ONE
+ * player row PER recording (mission item 9) with no simultaneous playback.
  */
 class ReportsActivity : AppCompatActivity() {
 
     private val scope = CoroutineScope(Dispatchers.Main)
     private var allReports: List<JSONObject> = emptyList()
     private var filterDay: J? = null
-    private var player: MediaPlayer? = null
-    private var playingId: String? = null
+
+    // mission 12 / item 6 — the single-flight mini-player hub (ONE
+    // MediaPlayer for the whole screen; per-file resume memory)
+    private lateinit var players: VoiceMiniPlayerHub
 
     // calendar state
     private var calYear: Int = 0
@@ -64,6 +66,7 @@ class ReportsActivity : AppCompatActivity() {
         calendarBox = findViewById(R.id.calendarBox)
         tvMonthName = findViewById(R.id.tvMonthName)
         tvEmpty = findViewById(R.id.tvEmpty)
+        players = VoiceMiniPlayerHub(this, scope)
 
         recycler.layoutManager = LinearLayoutManager(this)
         recycler.adapter = adapter
@@ -148,40 +151,6 @@ class ReportsActivity : AppCompatActivity() {
         }
     }
 
-    private fun playVoice(reportId: String, voiceUrl: String, onFail: () -> Unit) {
-        scope.launch {
-            val file = withContext(Dispatchers.IO) {
-                try {
-                    val resp = ApiClient.httpCall(voiceUrl)
-                    val dir = File(cacheDir, "voice").apply { mkdirs() }
-                    val f = File(dir, reportId + ".m4a")
-                    FileOutputStream(f).use { it.write(resp) }
-                    f
-                } catch (_: Exception) {
-                    null
-                }
-            }
-            if (file == null || !file.exists()) {
-                Toast.makeText(this@ReportsActivity, R.string.voice_play_failed, Toast.LENGTH_SHORT).show()
-                onFail()
-                return@launch
-            }
-            try {
-                player?.release()
-                player = MediaPlayer().apply {
-                    setAudioAttributes(AudioAttributes.Builder().setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
-                    setDataSource(file.absolutePath)
-                    setOnCompletionListener { release() }
-                    prepare()
-                    start()
-                }
-            } catch (_: Exception) {
-                Toast.makeText(this@ReportsActivity, R.string.voice_play_failed, Toast.LENGTH_SHORT).show()
-                onFail()
-            }
-        }
-    }
-
     class DayCell(val day: Int, val selected: Boolean, val g: IntArray)
 
     // ── reports list ────────────────────────────────────────
@@ -192,7 +161,7 @@ class ReportsActivity : AppCompatActivity() {
             val tvTitle: TextView = v.findViewById(R.id.tvItemTitle)
             val tvNote: TextView = v.findViewById(R.id.tvItemNote)
             val tvTime: TextView = v.findViewById(R.id.tvItemTime)
-            val btnPlay: Button = v.findViewById(R.id.btnItemPlay)
+            val boxVoices: LinearLayout = v.findViewById(R.id.boxVoices)
             val btnEdit: Button = v.findViewById(R.id.btnItemEdit)
         }
 
@@ -214,23 +183,52 @@ class ReportsActivity : AppCompatActivity() {
             h.tvNote.text = note
             h.tvNote.visibility = if (note.isEmpty()) View.GONE else View.VISIBLE
             h.tvTime.text = faTime(r.optString("createdAt"))
-            // mission item 1: the play button appears ONLY for a valid,
-            // playable voice URL. An absent recording (JSON null), an empty
-            // string or the legacy "null" artifact hides the button; a file
-            // that vanished server-side still shows the button and the
-            // existing honest failure toast (never a crash).
-            val voiceUrl = JsonSafe.playableUrl(r, "voiceUrl")
-            h.btnPlay.visibility = if (voiceUrl != null) View.VISIBLE else View.GONE
-            h.btnPlay.setOnClickListener {
-                val id = r.optString("id")
-                playingId = id
-                playVoice(id, voiceUrl ?: "") { playingId = null }
+            // mission 12 / items 6+9 — ONE mini-player row PER recording:
+            // the server's voiceFiles array (id + url each) when present;
+            // the legacy single voiceUrl as a one-row fallback for old
+            // panels / pre-migration events. A report with no playable
+            // audio shows NO player at all.
+            h.boxVoices.removeAllViews()
+            val reportId = r.optString("id")
+            val files = ArrayList<Pair<String, String>>() // file id → url
+            val vfArr = r.optJSONArray("voiceFiles")
+            if (vfArr != null) {
+                for (i in 0 until vfArr.length()) {
+                    val vf = vfArr.optJSONObject(i) ?: continue
+                    val fid = vf.optString("id")
+                    val furl = JsonSafe.playableUrl(vf, "url") ?: continue
+                    if (fid.isNotEmpty() && fid != "null") files.add(fid to furl)
+                }
+            }
+            if (files.isEmpty()) {
+                // legacy fallback — single voiceUrl keyed by the report id
+                JsonSafe.playableUrl(r, "voiceUrl")?.let { files.add(reportId to it) }
+            }
+            if (files.isNotEmpty()) {
+                h.boxVoices.visibility = View.VISIBLE
+                files.forEachIndexed { i, (fid, furl) ->
+                    val row = LinearLayout(this@ReportsActivity).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = android.view.Gravity.CENTER_VERTICAL
+                    }
+                    row.addView(players.labelView(getString(R.string.player_file_label, toFaDigits(i + 1))))
+                    row.addView(players.buildRow(fid, furl))
+                    h.boxVoices.addView(row)
+                }
+            } else {
+                h.boxVoices.visibility = View.GONE
             }
             // phase 2 / §2 (dev.4) — every row is the rep's OWN report
             // (the API returns own history only), so the edit affordance is
             // unconditional; the server still enforces ownership on save.
             h.btnEdit.setOnClickListener { showEditReport(r) }
         }
+    }
+
+    /** Persian digits for the player labels («صوت ۱»). */
+    private fun toFaDigits(n: Int): String {
+        val fa = arrayOf("۰", "۱", "۲", "۳", "۴", "۵", "۶", "۷", "۸", "۹")
+        return n.toString().map { fa[it - '0'] }.joinToString("")
     }
 
     // ── jalali calendar grid ────────────────────────────────
@@ -359,7 +357,8 @@ class ReportsActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        player?.release()
+        // mission 12 / item 6 — release the single MediaPlayer + ticker
+        players.release()
         super.onDestroy()
     }
 }

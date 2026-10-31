@@ -9,6 +9,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.widget.Button
 import android.widget.ImageButton
+import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
@@ -57,12 +58,14 @@ class CheckoutDialogFragment(
     private var startedAt = 0L
     private var tvRecState: TextView? = null
     private var btnRec: ImageButton? = null
+    private var boxTakes: LinearLayout? = null
 
     @SuppressLint("InflateParams")
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
         val view = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_checkout, null)
         tvRecState = view.findViewById(R.id.tvRecState)
         btnRec = view.findViewById(R.id.btnRec)
+        boxTakes = view.findViewById(R.id.boxTakes)
 
         val edNote = view.findViewById<NoPasteEditText>(R.id.edNote)
         val btnCancel = view.findViewById<Button>(R.id.btnCancel)
@@ -102,6 +105,17 @@ class CheckoutDialogFragment(
                     btnRec?.setImageResource(R.drawable.ic_stop)
                     btnRec?.setBackgroundResource(R.drawable.rec_active)
                     handler.post(recTicker)
+                } else {
+                    // mission 12 / item 10 — honest failure, nothing registered
+                    tvRecState?.text = getString(R.string.voice_start_failed)
+                    scope.launch {
+                        com.medpad.tracker.sync.OpEvents.record(
+                            type = "voice.invalid",
+                            status = "failed",
+                            errorCode = recorder.lastInvalidReason,
+                            message = "شروع ضبط ناموفق بود",
+                        )
+                    }
                 }
             }
         }
@@ -117,8 +131,15 @@ class CheckoutDialogFragment(
                 edNote.error = getString(R.string.checkout_min_chars)
                 return@setOnClickListener
             }
-            val voice = recorder.currentFile?.takeIf { it.exists() }
-            if (voice == null) {
+            // mission 12 / item 10 — finalize a take that is still being
+            // written BEFORE attaching it (mid-write uploads used to produce
+            // unplayable server-side files)
+            recorder.stopIfRecording()
+            renderTakes()
+            // mission 12 / item 9 — checkout requires at least ONE validated
+            // take (the server enforces the same rule)
+            val voices = recorder.takes.map { it.file }
+            if (voices.isEmpty()) {
                 tvRecState?.text = getString(R.string.checkout_voice_required)
                 return@setOnClickListener
             }
@@ -129,15 +150,17 @@ class CheckoutDialogFragment(
                 // the independent check-out geofence 422 with the exact
                 // distance + allowed radius) in the dialog itself.
                 var serverError: String? = null
+                var enqueued = false
                 val ok = try {
                     withContext(Dispatchers.IO) {
                         // G-6 (phase 1 / task 2): real device GPS fix (with
                         // accuracy) or no location — never fabricated.
                         val fix = DeviceGps.snapshot()
                         val item = CheckinSync.enqueue(
-                            "checkout", null, note, voice,
+                            "checkout", null, note, voices,
                             fix?.lat, fix?.lng, fix?.accuracyM,
                         )
+                        enqueued = true
                         CheckinSync.flush() >= 0
                         val after = CheckinSync.itemByLocalId(item.localId)
                         if (after != null && after.status == com.medpad.tracker.db.QUEUE_STATUS_FAILED) {
@@ -148,6 +171,9 @@ class CheckoutDialogFragment(
                 } catch (e: Exception) {
                     false
                 }
+                // mission 12 / item 10 — the queue item owns the files now; a
+                // later cancel must never delete a queued item's files
+                if (enqueued) recorder.handOverTakes()
                 recorder.release()
                 progress.visibility = View.GONE
                 if (ok) {
@@ -170,12 +196,84 @@ class CheckoutDialogFragment(
     }
 
     private fun stopRec() {
+        // mission 12 / item 10 — FINALIZING with the validity gate (same as
+        // the check-in dialog): an invalid take is never registered.
         val ms = recorder.stop()
         handler.removeCallbacks(recTicker)
         btnRec?.setImageResource(R.drawable.ic_mic)
         btnRec?.setBackgroundResource(R.drawable.voice_btn_bg)
+        if (ms <= 0 || recorder.state == VoiceRecorder.State.FAILED) {
+            val reason = recorder.lastInvalidReason ?: "empty"
+            tvRecState?.text = getString(R.string.voice_invalid, reason)
+            renderTakes()
+            scope.launch {
+                com.medpad.tracker.sync.OpEvents.record(
+                    type = "voice.invalid",
+                    status = "failed",
+                    errorCode = reason,
+                    relatedType = "checkout",
+                    message = "ضبط نامعتبر — در صف ثبت نشد",
+                )
+            }
+            return
+        }
         val sec = ms / 1000
-        tvRecState?.text = getString(R.string.voice_recorded, String.format(Locale.US, "%02d:%02d", sec / 60, sec % 60))
+        tvRecState?.text = getString(
+            R.string.voice_recorded_more,
+            String.format(Locale.US, "%02d:%02d", sec / 60, sec % 60),
+        )
+        renderTakes()
+    }
+
+    /** mission 12 / item 9 — the takes list (same rows as the check-in
+     *  dialog: number + duration, preview, delete — independent files). */
+    private fun renderTakes() {
+        val box = boxTakes ?: return
+        box.removeAllViews()
+        val pad = (4 * resources.displayMetrics.density).toInt()
+        recorder.takes.forEachIndexed { idx, take ->
+            val row = LinearLayout(requireContext()).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(0, pad, 0, pad)
+            }
+            val sec = take.durationMs / 1000
+            val label = TextView(requireContext()).apply {
+                text = getString(
+                    R.string.voice_take_label,
+                    (idx + 1).toString(),
+                    String.format(Locale.US, "%02d:%02d", sec / 60, sec % 60),
+                )
+                textSize = 13f
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            val btnPlayTake = ImageButton(requireContext()).apply {
+                setImageResource(R.drawable.ic_play)
+                background = null
+                contentDescription = getString(R.string.play)
+                setOnClickListener {
+                    recorder.play(take.file, onError = {
+                        tvRecState?.text = getString(R.string.voice_play_failed)
+                    })
+                }
+            }
+            val btnDel = android.widget.Button(requireContext()).apply {
+                text = getString(R.string.voice_take_delete)
+                textSize = 12f
+                isAllCaps = false
+                minHeight = 0
+                minWidth = 0
+                setPadding(pad * 3, pad, pad * 3, pad)
+                setOnClickListener {
+                    recorder.removeTake(take)
+                    renderTakes()
+                }
+            }
+            row.addView(label)
+            row.addView(btnPlayTake)
+            row.addView(btnDel)
+            box.addView(row)
+        }
     }
 
     override fun onDestroy() {

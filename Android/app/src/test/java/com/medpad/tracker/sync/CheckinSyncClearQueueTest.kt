@@ -53,8 +53,8 @@ class CheckinSyncClearQueueTest {
             writeBytes(byteArrayOf(1, 2, 3))
         }
         assertTrue(voice.exists())
-        CheckinSync.enqueue("checkin", "c1", "note one", voice, 35.7, 51.4, 12.0)
-        CheckinSync.enqueue("checkout", null, "note two", null, 35.7, 51.4, null)
+        CheckinSync.enqueue("checkin", "c1", "note one", listOf(voice), 35.7, 51.4, 12.0)
+        CheckinSync.enqueue("checkout", null, "note two", emptyList(), 35.7, 51.4, null)
         assertEquals(2, CheckinSync.pendingCount())
 
         val dropped = CheckinSync.clearQueue()

@@ -70,14 +70,22 @@ object CheckinSync {
      *  PlansActivity both react to one source of truth. */
     fun markSessionExpired() { sessionExpired = true }
 
-    suspend fun enqueue(kind: String, customerId: String?, note: String, voiceFile: File?, lat: Double?, lng: Double?, accuracyM: Double? = null): PendingCheckin {
+    /** mission 12 / item 9 — enqueue an event with ZERO OR MORE validated
+     *  voice takes (VoiceRecorder.Take files). The paths are stored as a
+     *  JSON array (pending_checkins.voicePaths, Room v13); legacy single-
+     *  file rows keep their `voicePath` and both read through
+     *  PendingCheckin.voiceFiles(). */
+    suspend fun enqueue(kind: String, customerId: String?, note: String, voiceFiles: List<File>, lat: Double?, lng: Double?, accuracyM: Double? = null): PendingCheckin {
         val db = AppDatabase.get(TrackerContext.app)
+        val voicePathsJson = if (voiceFiles.isEmpty()) null else {
+            org.json.JSONArray(voiceFiles.map { it.absolutePath }).toString()
+        }
         val item = PendingCheckin(
             localId = UUID.randomUUID().toString(),
             kind = kind,
             customerId = customerId,
             note = note,
-            voicePath = voiceFile?.absolutePath,
+            voicePaths = voicePathsJson,
             lat = lat,
             lng = lng,
             accuracy = accuracyM,
@@ -88,7 +96,8 @@ object CheckinSync {
             type = "queue.enqueued",
             relatedType = item.kind,
             relatedId = item.customerId,
-            message = "ثبت در صف آفلاین",
+            message = "ثبت در صف آفلاین" +
+                if (voiceFiles.isNotEmpty()) " — ${voiceFiles.size} فایل صوتی" else "",
         )
         return item.copy(uid = uid)
     }
@@ -145,7 +154,7 @@ object CheckinSync {
     suspend fun clearQueue(): Int = withContext(Dispatchers.IO) {
         val db = AppDatabase.get(TrackerContext.app)
         val items = db.pendingCheckinDao().all()
-        items.forEach { it.voicePath?.let { p -> File(p).delete() } }
+        items.forEach { it.voiceFiles().forEach { f -> f.delete() } }
         db.pendingCheckinDao().clearAll()
         // mission item 10 — the drop is USER-CONFIRMED (change-server flow)
         // and must be visible in the admin's event report
@@ -194,7 +203,10 @@ object CheckinSync {
      * Transient (network/5xx/429) → keep 'pending' + stop the round.
      */
     private suspend fun flushOne(db: AppDatabase, item: PendingCheckin): FlushOutcome {
-        val voice = item.voicePath?.let { File(it) }?.takeIf { it.exists() }
+        // mission 12 / item 9 — ALL validated takes of this event ride the
+        // same request (multipart `voice` parts, server form.getAll);
+        // missing files (e.g. cleared cache by hand) are skipped honestly.
+        val voices = item.voiceFiles().filter { it.exists() }
         // Package 1: in-flight marker — if the process dies here, the next
         // flush's resetSending() brings the item back to 'pending'.
         db.pendingCheckinDao().update(item.copy(status = QUEUE_STATUS_SENDING))
@@ -207,14 +219,14 @@ object CheckinSync {
                     lat = item.lat,
                     lng = item.lng,
                     localId = item.localId,
-                    voice = voice,
+                    voices = voices,
                     clientAt = item.createdAt, // v1.9.12 (phase 1): real event time
                     accuracyM = item.accuracy,  // G-6 (phase 1 / task 2)
                 )
                 else -> ApiClient.checkout(
                     note = item.note,
                     localId = item.localId,
-                    voice = voice,
+                    voices = voices,
                     clientAt = item.createdAt, // v1.9.12 (phase 1): real event time
                     lat = item.lat,            // G-6 (phase 1 / task 2)
                     lng = item.lng,
@@ -223,6 +235,13 @@ object CheckinSync {
             }
             if (resp.optBoolean("ok")) {
                 db.pendingCheckinDao().delete(item) // server-confirmed → leave the queue
+                // mission 12 / item 10 — the local voice files are deleted
+                // ONLY now, after the server confirmed the event (an
+                // internet cut keeps every file; a replay can never
+                // duplicate anything because localId is the idempotency
+                // key). Before this, uploaded files piled up in
+                // filesDir/voice forever.
+                voices.forEach { it.delete() }
                 lastError = null
                 markSessionAlive()
                 // mission item 10 — the SERVER confirmed this item
@@ -273,7 +292,7 @@ object CheckinSync {
                     // so the fallback can only succeed against old/JSON
                     // servers) receives the full event — no silent discard of
                     // time/location any more.
-                    if (item.kind == "checkin" && voice != null) {
+                    if (item.kind == "checkin" && voices.isNotEmpty()) {
                         try {
                             val body = JSONObject()
                                 .put("customerId", item.customerId ?: "")

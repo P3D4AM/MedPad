@@ -9,24 +9,73 @@ import java.io.File
 import java.util.UUID
 
 /**
- * Voice recorder — v1.9.1 fixes:
- *  - startNow() is a real function call (was referenced without () — recording
- *    never started when mic permission was already granted!)
- *  - zombie MediaRecorder killed properly on stop
- *  - duration frozen at stop (no timer race)
- *  - playback is async with clear error state
+ * Voice recorder — mission 12 / item 10 (Nov 2026): EXPLICIT lifecycle +
+ * a validity gate, plus multi-take support (item 9).
+ *
+ * ROOT CAUSES this class fixes (the "recorded but no valid file" report):
+ *  1. stop() used to swallow its own exception and keep the file: when
+ *     MediaRecorder.stop() throws, NOTHING valid was captured — the file
+ *     on disk is 0 bytes or a header stub, unplayable everywhere. The old
+ *     code still registered it as "recorded" and the queue uploaded it.
+ *     Now a take is registered ONLY when stop() returned cleanly AND the
+ *     file exists with length > 0 (state FINALIZING → SAVED); otherwise
+ *     the stub is DELETED, the state is FAILED and [lastInvalidReason]
+ *     carries the honest reason for the UI + the op-event log.
+ *  2. Submitting while still recording uploaded a file mid-write (no
+ *     final MP4 atom — unplayable server-side). The dialogs now STOP
+ *     (finalize) before attaching takes to the queue.
+ *  3. Re-recording used to orphan the previous file on disk forever.
+ *     Takes are now a LIST (item 9): every validated take is kept, each
+ *     with its own id + creation time; deleting one never touches the
+ *     others, and none is silently orphaned.
+ *
+ * State machine (item 10):
+ *   IDLE → RECORDING → FINALIZING → SAVED  (take registered)
+ *                     ↘ FAILED             (stub deleted, honest reason)
+ *   SAVED takes are handed to the offline queue by the dialog:
+ *   Queued (pending_checkins row) → Uploading (in-flight) → Uploaded
+ *   (server-confirmed; only THEN are the local files deleted) or Failed
+ *   (permanent rejection — files kept locally with the event).
+ *
+ * v1.9.1 fixes kept: zombie recorder killed on stop, duration frozen at
+ * stop (no timer race), async playback with clear error state.
  */
 class VoiceRecorder(private val context: Context) {
 
+    enum class State { IDLE, RECORDING, FINALIZING, SAVED, FAILED }
+
+    /**
+     * mission 12 / item 9 — one VALIDATED recording take. Independent id
+     * and creation time per file; deleting one take never affects the
+     * others.
+     */
+    data class Take(
+        val id: String, // stable per-take id (the temp filename basis)
+        val file: File,
+        val durationMs: Long,
+        val createdAt: Long,
+    )
+
+    var state: State = State.IDLE
+        private set
+
+    /** Honest reason of the last FAILED finalize (for the UI + op event). */
+    var lastInvalidReason: String? = null
+        private set
+
     private var recorder: MediaRecorder? = null
     private var player: MediaPlayer? = null
-    var currentFile: File? = null
-        private set
-    var isRecording: Boolean = false
-        private set
+    private var pendingFile: File? = null
+    private var startedAt = 0L
+
+    /** All validated takes of this dialog session (item 9). */
+    val takes = mutableListOf<Take>()
+
+    /** Last stop() duration in ms — 0 when the finalize FAILED (item 10). */
     var recordedMs: Long = 0
         private set
-    private var startedAt: Long = 0
+
+    val isRecording: Boolean get() = state == State.RECORDING
 
     val maxAmplitude: Int
         get() = try {
@@ -35,9 +84,18 @@ class VoiceRecorder(private val context: Context) {
             0
         }
 
-    /** Start recording to a fresh m4a file. Returns true on success. */
+    /** Legacy single-file view: the most recent validated take. */
+    val currentFile: File?
+        get() = takes.lastOrNull()?.file
+
+    /** Total recorded duration across all takes. */
+    fun totalDurationMs(): Long = takes.sumOf { it.durationMs }
+
+    /** Start a NEW take (never overwrites a previous one — item 9).
+     *  Returns true when the recorder actually started. */
     fun startNow(): Boolean {
         if (isRecording) return true
+        lastInvalidReason = null
         return try {
             val dir = File(context.filesDir, "voice").apply { mkdirs() }
             val f = File(dir, "v_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}.m4a")
@@ -55,36 +113,107 @@ class VoiceRecorder(private val context: Context) {
             r.prepare()
             r.start()
             recorder = r
-            currentFile = f
+            pendingFile = f
             startedAt = System.currentTimeMillis()
-            recordedMs = 0
-            isRecording = true
+            state = State.RECORDING
             true
         } catch (e: Exception) {
+            // the recorder never started — no file may reach the queue
             releaseRecorder()
+            pendingFile?.delete()
+            pendingFile = null
+            lastInvalidReason = "start-failed: ${e.javaClass.simpleName}"
+            state = State.FAILED
             false
         }
     }
 
-    /** Stop recording; returns recorded duration ms (frozen, not timer-based). */
+    /**
+     * Stop the active take and FINALIZE it (item 10): the take registers
+     * ONLY when stop() returned cleanly AND the file exists with
+     * length > 0. A thrown stop() (nothing captured) or an empty/missing
+     * file is an INVALID take: the stub is deleted, 0 is returned, the
+     * state is FAILED and [lastInvalidReason] says why.
+     */
     fun stop(): Long {
-        if (!isRecording) return recordedMs
-        recordedMs = System.currentTimeMillis() - startedAt
+        if (state != State.RECORDING) return recordedMs
+        state = State.FINALIZING
+        val file = pendingFile
+        var stopClean = true
         try {
             recorder?.stop()
-        } catch (_: Exception) {
-            // stop() throws if nothing valid was captured
+        } catch (e: Exception) {
+            // MediaRecorder.stop() throws when nothing valid was captured
+            stopClean = false
+            lastInvalidReason = "stop-throws: ${e.javaClass.simpleName}"
         }
         releaseRecorder()
-        isRecording = false
-        return recordedMs
+        val duration = System.currentTimeMillis() - startedAt
+        val valid = stopClean && file != null && file.exists() && file.length() > 0L
+        if (!valid) {
+            file?.delete()
+            pendingFile = null
+            if (lastInvalidReason == null) {
+                lastInvalidReason = when {
+                    file == null -> "no-pending-file"
+                    !file.exists() -> "file-missing-after-stop"
+                    else -> "empty-file(${file.length()}B)"
+                }
+            }
+            recordedMs = 0
+            state = State.FAILED
+            return 0
+        }
+        takes.add(
+            Take(
+                id = file!!.nameWithoutExtension,
+                file = file,
+                durationMs = duration,
+                createdAt = System.currentTimeMillis(),
+            ),
+        )
+        pendingFile = null
+        recordedMs = duration
+        state = State.SAVED
+        return duration
     }
 
-    fun discard() {
-        stop()
-        currentFile?.delete()
-        currentFile = null
+    /** Stop if still recording (e.g. the user hit submit mid-take) so a
+     *  file is never attached to the queue while still being written. */
+    fun stopIfRecording(): Long = if (isRecording) stop() else recordedMs
+
+    /** mission 12 / item 9 — remove ONE take (its file is deleted; the
+     *  other takes and their files are untouched). */
+    fun removeTake(take: Take) {
+        if (takes.remove(take)) {
+            take.file.delete()
+        }
+    }
+
+    /** mission 12 / item 10 — ownership hand-over: the offline queue now
+     *  references the take files (they live until the server confirms the
+     *  event, then CheckinSync deletes them). Clears the take list WITHOUT
+     *  deleting anything — a later dialog cancel must never destroy files
+     *  a queued item still points at. */
+    fun handOverTakes() {
+        takes.clear()
+        pendingFile?.delete()
+        pendingFile = null
         recordedMs = 0
+        state = State.IDLE
+    }
+
+    /** Discard EVERYTHING (dialog cancel): stop the active take and delete
+     *  every take file of this session. */
+    fun discard() {
+        if (isRecording) stop()
+        takes.forEach { it.file.delete() }
+        takes.clear()
+        pendingFile?.delete()
+        pendingFile = null
+        recordedMs = 0
+        lastInvalidReason = null
+        state = State.IDLE
     }
 
     /** Async playback of a file; onError/onComplete run on the calling thread's looper. */
@@ -130,7 +259,7 @@ class VoiceRecorder(private val context: Context) {
     }
 
     fun release() {
-        if (isRecording) stop()
+        if (isRecording) stopIfRecording()
         stopPlayback()
     }
 

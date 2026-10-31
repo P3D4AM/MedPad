@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [Doctor::class, PendingCheckin::class, PendingLocation::class, PlannedVisitEntity::class, OpEventEntity::class],
-    version = 12,
+    version = 13,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -29,7 +29,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "medpad.db",
                 )
-                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
+                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
                     .build()
                     .also { inst = it }
             }
@@ -146,9 +146,20 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // mission 12 / item 9 — MULTIPLE voice recordings per check-in/
+        // checkout. Purely ADDITIVE nullable column: a JSON array of local
+        // file paths. Legacy rows keep their single `voicePath` and read it
+        // through PendingCheckin.voiceFiles() — no data is touched, no
+        // backfill needed (the accessor unifies both worlds).
+        private val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE pending_checkins ADD COLUMN voicePaths TEXT")
+            }
+        }
+
         /** Test-only accessor (unit tests build a throwaway instance on a
          *  version-9 file and must install the SAME real migrations). */
         fun migrationsForTest(): Array<Migration> =
-            arrayOf(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
+            arrayOf(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
     }
 }

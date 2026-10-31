@@ -10,6 +10,7 @@ import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.ImageButton
+import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.Spinner
 import android.widget.TextView
@@ -63,6 +64,7 @@ class CheckinDialogFragment(
     private var tvRecState: TextView? = null
     private var btnRec: ImageButton? = null
     private var btnPlay: ImageButton? = null
+    private var boxTakes: LinearLayout? = null
     private var doctors: List<Doctor> = emptyList()
 
     // mission item 8 — live device clock + plan-window comparison state
@@ -161,6 +163,7 @@ class CheckinDialogFragment(
         tvRecState = view.findViewById(R.id.tvRecState)
         btnRec = view.findViewById(R.id.btnRec)
         btnPlay = view.findViewById(R.id.btnPlay)
+        boxTakes = view.findViewById(R.id.boxTakes)
 
         // mission item 8 — a live device clock + the plan-window comparison
         // sit at the TOP of the form (before the customer spinner): the rep
@@ -230,12 +233,23 @@ class CheckinDialogFragment(
                     btnRec?.setBackgroundResource(R.drawable.rec_active)
                     handler.post(recTicker)
                 } else {
-                    tvRecState?.text = getString(R.string.voice_play_failed)
+                    // mission 12 / item 10 — the recorder never started;
+                    // honest reason, nothing registered
+                    tvRecState?.text = getString(R.string.voice_start_failed)
+                    scope.launch {
+                        com.medpad.tracker.sync.OpEvents.record(
+                            type = "voice.invalid",
+                            status = "failed",
+                            errorCode = recorder.lastInvalidReason,
+                            message = "شروع ضبط ناموفق بود",
+                        )
+                    }
                 }
             }
         }
 
         btnPlay?.setOnClickListener {
+            // mission 12 / item 9 — quick preview of the LATEST take
             btnPlay?.isEnabled = false
             recorder.play(recorder.currentFile, onDone = { btnPlay?.isEnabled = true }, onError = {
                 btnPlay?.isEnabled = true
@@ -254,7 +268,12 @@ class CheckinDialogFragment(
                 tvRecState?.text = getString(R.string.need_customer)
                 return@setOnClickListener
             }
-            val voice = recorder.currentFile?.takeIf { it.exists() }
+            // mission 12 / item 10 — NEVER attach a file that is still being
+            // written: finalize the active take first (a mid-write upload
+            // used to produce unplayable server-side files)
+            recorder.stopIfRecording()
+            renderTakes()
+            val voices = recorder.takes.map { it.file }
             btnSubmit.isEnabled = false
             progress.visibility = View.VISIBLE
             scope.launch {
@@ -264,6 +283,7 @@ class CheckinDialogFragment(
                 // dialog, instead of a generic sync error buried in the
                 // queue screen.
                 var serverError: String? = null
+                var enqueued = false
                 val ok = try {
                     withContext(Dispatchers.IO) {
                         // G-6 (phase 1 / task 2): the REAL device GPS fix (with
@@ -271,9 +291,10 @@ class CheckinDialogFragment(
                         // coordinates are never sent as the employee position.
                         val fix = DeviceGps.snapshot()
                         val item = CheckinSync.enqueue(
-                            "checkin", cus.id, edNote.text.toString(), voice,
+                            "checkin", cus.id, edNote.text.toString(), voices,
                             fix?.lat, fix?.lng, fix?.accuracyM,
                         )
+                        enqueued = true
                         CheckinSync.flush() >= 0
                         val after = CheckinSync.itemByLocalId(item.localId)
                         if (after != null && after.status == com.medpad.tracker.db.QUEUE_STATUS_FAILED) {
@@ -284,6 +305,11 @@ class CheckinDialogFragment(
                 } catch (e: Exception) {
                     false
                 }
+                // mission 12 / item 10 — the queue item now owns the files
+                // (whether the flush succeeded or the item is waiting/failed):
+                // a later dialog cancel must never delete files a queued
+                // item still points at. Main-thread hand-over.
+                if (enqueued) recorder.handOverTakes()
                 recorder.release()
                 progress.visibility = View.GONE
                 if (ok) {
@@ -302,13 +328,88 @@ class CheckinDialogFragment(
     }
 
     private fun stopRec() {
-        val ms = recorder.stop() // duration frozen at stop (v1.9.1)
+        // mission 12 / item 10 — FINALIZING with the validity gate: a take
+        // registers only when stop() returned cleanly AND the file is
+        // non-empty; a 0-byte/failed take is discarded with its honest
+        // reason (and lands in the admin's op-event log).
+        val ms = recorder.stop()
         handler.removeCallbacks(recTicker)
         btnRec?.setImageResource(R.drawable.ic_mic)
         btnRec?.setBackgroundResource(R.drawable.voice_btn_bg)
+        if (ms <= 0 || recorder.state == VoiceRecorder.State.FAILED) {
+            val reason = recorder.lastInvalidReason ?: "empty"
+            tvRecState?.text = getString(R.string.voice_invalid, reason)
+            renderTakes()
+            scope.launch {
+                com.medpad.tracker.sync.OpEvents.record(
+                    type = "voice.invalid",
+                    status = "failed",
+                    errorCode = reason,
+                    relatedType = "checkin",
+                    message = "ضبط نامعتبر — در صف ثبت نشد",
+                )
+            }
+            return
+        }
         val sec = ms / 1000
-        tvRecState?.text = getString(R.string.voice_recorded, String.format(Locale.US, "%02d:%02d", sec / 60, sec % 60))
-        if (ms > 0) btnPlay?.visibility = View.VISIBLE
+        tvRecState?.text = getString(
+            R.string.voice_recorded_more,
+            String.format(Locale.US, "%02d:%02d", sec / 60, sec % 60),
+        )
+        renderTakes()
+    }
+
+    /** mission 12 / item 9 — the takes list: one row per validated recording
+     *  (number, duration, preview, delete). Deleting one take never touches
+     *  the others; the submit sends ALL remaining takes. */
+    private fun renderTakes() {
+        val box = boxTakes ?: return
+        box.removeAllViews()
+        val pad = (4 * resources.displayMetrics.density).toInt()
+        recorder.takes.forEachIndexed { idx, take ->
+            val row = LinearLayout(requireContext()).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(0, pad, 0, pad)
+            }
+            val sec = take.durationMs / 1000
+            val label = TextView(requireContext()).apply {
+                text = getString(
+                    R.string.voice_take_label,
+                    (idx + 1).toString(),
+                    String.format(Locale.US, "%02d:%02d", sec / 60, sec % 60),
+                )
+                textSize = 13f
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            val btnPlayTake = ImageButton(requireContext()).apply {
+                setImageResource(R.drawable.ic_play)
+                background = null
+                contentDescription = getString(R.string.play)
+                setOnClickListener {
+                    recorder.play(take.file, onError = {
+                        tvRecState?.text = getString(R.string.voice_play_failed)
+                    })
+                }
+            }
+            val btnDel = android.widget.Button(requireContext()).apply {
+                text = getString(R.string.voice_take_delete)
+                textSize = 12f
+                isAllCaps = false
+                minHeight = 0
+                minWidth = 0
+                setPadding(pad * 3, pad, pad * 3, pad)
+                setOnClickListener {
+                    recorder.removeTake(take)
+                    renderTakes()
+                }
+            }
+            row.addView(label)
+            row.addView(btnPlayTake)
+            row.addView(btnDel)
+            box.addView(row)
+        }
+        btnPlay?.visibility = if (recorder.takes.isNotEmpty()) View.VISIBLE else View.GONE
     }
 
     override fun onDestroy() {
