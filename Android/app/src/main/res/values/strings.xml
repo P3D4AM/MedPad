@@ -145,6 +145,8 @@
     <!-- phase 2 / §1: notification tap-through -->
     <string name="notif_tap_login_needed">برای مشاهدهٔ اعلان ابتدا وارد حساب خود شوید</string>
     <string name="notif_tap_customer_gone">مشتریِ مرتبط با این اعلان دیگر در دسترس شما نیست (حذف شده یا تخصیص آن لغو شده است)</string>
+    <!-- mission item 9 — smart initial map focus -->
+    <string name="map_no_coords">مشتریان شما هنوز مختصات ثبت‌شده ندارند؛ نقشه روی شهر پیش‌فرض تنظیم شده است.</string>
     <!-- mission item 8 — check-in form: live clock + plan-window comparison -->
     <string name="checkin_now_time">زمان ثبت: %1$s — %2$s</string>
     <string name="checkin_planless">این چک‌این بدون برنامهٔ قبلی ثبت می‌شود</string>

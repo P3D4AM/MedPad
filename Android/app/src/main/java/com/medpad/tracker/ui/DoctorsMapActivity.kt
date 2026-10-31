@@ -265,11 +265,44 @@ class DoctorsMapActivity : AppCompatActivity() {
             markers[d.id] = m
             map.overlays.add(m)
         }
-        try {
-            map.zoomToBoundingBox(
-                BoundingBox(maxLat, maxLng, minLat, minLng).increaseByScale(1.4f), false,
-            )
-        } catch (_: Exception) { /* single point */ }
+
+        // mission item 9 — SMART initial zoom: fit the bounds of the city
+        // that holds MOST of the rep's coordinate-bearing customers (ties
+        // break deterministically), NOT every customer in every city — the
+        // old behaviour opened on a country/continent-scale view. Free pan
+        // and zoom stay untouched (this runs once per render, animate=false).
+        val focus = com.medpad.tracker.util.MapFocus.pick(doctors)
+        val f = focus.focus
+        when {
+            f != null -> {
+                try {
+                    map.zoomToBoundingBox(
+                        BoundingBox(f.lats.max(), f.lngs.max(), f.lats.min(), f.lngs.min())
+                            .increaseByScale(1.4f), // padding — markers clear the screen edges
+                        false,
+                    )
+                } catch (_: Exception) { /* single point in the city */ }
+            }
+            focus.allCoordsFallback.isNotEmpty() -> {
+                // coords exist but no city data — the honest best: fit them all
+                try {
+                    map.zoomToBoundingBox(
+                        BoundingBox(
+                            focus.allCoordsFallback.maxOf { it.first },
+                            focus.allCoordsFallback.maxOf { it.second },
+                            focus.allCoordsFallback.minOf { it.first },
+                            focus.allCoordsFallback.minOf { it.second },
+                        ).increaseByScale(1.4f),
+                        false,
+                    )
+                } catch (_: Exception) { /* single point */ }
+            }
+            else -> {
+                // NO valid coordinates: never move the map to a fake place —
+                // keep the default-city centre and tell the user honestly
+                Toast.makeText(this, R.string.map_no_coords, Toast.LENGTH_LONG).show()
+            }
+        }
         map.invalidate()
 
         // mission item 3 — notification tap-through: the notification was
