@@ -13,6 +13,7 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.res.ResourcesCompat
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -288,13 +289,13 @@ class ReportsActivity : AppCompatActivity() {
             // mission 12 / item 7 — Persian digits («۱۴» not "14")
             h.btn.text = JalaliDate.faDigits(c.day)
             h.btn.background = when {
-                c.selected -> android.content.res.ResourcesCompat.getDrawable(
+                c.selected -> ResourcesCompat.getDrawable(
                     resources, R.drawable.day_selected, null,
                 )
-                c.today -> android.content.res.ResourcesCompat.getDrawable(
+                c.today -> ResourcesCompat.getDrawable(
                     resources, R.drawable.day_today, null,
                 )
-                else -> android.content.res.ResourcesCompat.getDrawable(
+                else -> ResourcesCompat.getDrawable(
                     resources, R.drawable.day_normal, null,
                 )
             }

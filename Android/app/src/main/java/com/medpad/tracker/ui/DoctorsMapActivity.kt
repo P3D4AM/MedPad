@@ -427,10 +427,11 @@ class DoctorsMapActivity : AppCompatActivity() {
                                 .setTitle(R.string.customer_saved_unassigned_title)
                                 .setMessage(R.string.customer_saved_unassigned_body)
                                 .setPositiveButton(R.string.customer_request_assignment) { _, _ ->
+                                    val custId = cid ?: return@setPositiveButton
                                     scope.launch {
                                         val sent = withContext(Dispatchers.IO) {
                                             try {
-                                                ApiClient.createAssignmentRequest(cid, "")
+                                                ApiClient.createAssignmentRequest(custId, "")
                                                     .optBoolean("ok")
                                             } catch (_: Exception) {
                                                 // 409 = a pending request already

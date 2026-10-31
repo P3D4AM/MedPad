@@ -98,7 +98,29 @@ class Migration9to10Test {
                 raw.execSQL("DROP TABLE pending_locations")
                 raw.execSQL("ALTER TABLE pl_v9 RENAME TO pending_locations")
 
-                raw.execSQL("PRAGMA user_version = 9")
+                
+            // mission 12 / item 9 — pending_checkins now carries voicePaths
+            // (v13); strip it so the 12→13 step of the reopen runs for real
+            // (otherwise it dies on "duplicate column name")
+            val pcSql = raw.rawQuery(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='pending_checkins'", null,
+            ).use { c -> c.moveToFirst(); c.getString(0) }
+            val pcV12 = pcSql.replace(", `voicePaths` TEXT", "")
+            assertTrue("pc downgrade DDL must differ", pcV12 != pcSql)
+            raw.execSQL("DROP TABLE IF EXISTS pc_v12")
+            raw.execSQL(pcV12.replace("CREATE TABLE `pending_checkins`", "CREATE TABLE pc_v12"))
+            raw.execSQL(
+                "INSERT INTO pc_v12 (uid,localId,kind,customerId,note,voicePath,lat,lng,accuracy,createdAt,attempts,lastError,status) " +
+                    "SELECT uid,localId,kind,customerId,note,voicePath,lat,lng,accuracy,createdAt,attempts,lastError,status FROM pending_checkins",
+            )
+            raw.execSQL("DROP TABLE pending_checkins")
+            raw.execSQL("ALTER TABLE pc_v12 RENAME TO pending_checkins")
+            // NOTE: the localId index is NOT recreated — the entity declares
+            // no index, so Room's expected schema has none and validation
+            // rejects a stray one (MIGRATION_4_5 only creates it on true
+            // v4→v5 upgrades, which these fixtures never simulate)
+
+raw.execSQL("PRAGMA user_version = 9")
                 raw.setTransactionSuccessful()
             } finally {
                 raw.endTransaction()

@@ -116,7 +116,9 @@ class PlansAndReportsSmokeTest {
             calendarGrid.adapter?.itemCount ?: 0
         }
         val cells = calendarGrid.adapter?.itemCount ?: 0
-        assertTrue("calendar should render ~29-31 cells, got $cells", cells in 29..31)
+        // mission 12 / item 7 — the grid carries the month's days PLUS up to 6
+        // leading blanks so day ۱ lands under its own Persian weekday column
+        assertTrue("calendar should render 29-37 cells (days + weekday offset), got $cells", cells in 29..37)
 
         val empty = activity.findViewById<TextView>(R.id.tvEmpty)
         assertEquals(View.VISIBLE, empty.visibility) // no server → no reports → empty state

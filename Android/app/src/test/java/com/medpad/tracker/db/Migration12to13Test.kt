@@ -44,10 +44,29 @@ class Migration12to13Test {
 
     private fun reopened(): AppDatabase {
         SQLiteDatabase.openDatabase(dbFile.path, null, SQLiteDatabase.OPEN_READWRITE).use { raw ->
-            // recreate the v12 shape: no voicePaths column
-            raw.execSQL("CREATE TABLE pending_checkins_v12 AS SELECT uid, localId, kind, customerId, note, voicePath, lat, lng, accuracy, createdAt, attempts, lastError, status FROM pending_checkins")
+            // recreate the v12 shape by EDITING the stored DDL (constraints,
+            // primary key and the localId index survive this way — a plain
+            // CREATE TABLE AS SELECT would drop them and Room's validation
+            // would rightly reject the reopened table)
+            val sql = raw.rawQuery(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='pending_checkins'", null,
+            ).use { c -> c.moveToFirst(); c.getString(0) }
+            val v12 = sql.replace(", `voicePaths` TEXT", "")
+            assertTrue("downgrade DDL must differ (voicePaths removed)", v12 != sql)
+            raw.execSQL("DROP TABLE IF EXISTS pc_v12")
+            raw.execSQL(v12.replace("CREATE TABLE `pending_checkins`", "CREATE TABLE pc_v12"))
+            raw.execSQL(
+                "INSERT INTO pc_v12 (uid,localId,kind,customerId,note,voicePath,lat,lng,accuracy,createdAt,attempts,lastError,status) " +
+                    "SELECT uid,localId,kind,customerId,note,voicePath,lat,lng,accuracy,createdAt,attempts,lastError,status FROM pending_checkins",
+            )
             raw.execSQL("DROP TABLE pending_checkins")
-            raw.execSQL("ALTER TABLE pending_checkins_v12 RENAME TO pending_checkins")
+            raw.execSQL("ALTER TABLE pc_v12 RENAME TO pending_checkins")
+            // DROP TABLE dropped the localId index with it — recreate it or
+            // Room's schema validation fails the reopen
+            // NOTE: the localId index is NOT recreated — the entity declares
+            // no index, so Room's expected schema has none and validation
+            // rejects a stray one (MIGRATION_4_5 only creates it on true
+            // v4→v5 upgrades, which these fixtures never simulate)
             raw.version = 12
         }
         return Room.databaseBuilder(app, AppDatabase::class.java, dbFile.path)
@@ -86,10 +105,13 @@ class Migration12to13Test {
         assertNull(legacy.voicePaths)
         assertEquals(listOf(File("/data/voice/old.m4a")), legacy.voiceFiles())
 
+        // the multi-voice row SURVIVES the round-trip; its voicePaths was
+        // honestly null on the v12 side (the downgrade has nowhere to keep
+        // it — a REAL v12→v13 upgrade starts from rows that never had it),
+        // so after the migration it reads back empty through the accessor
         val multi = db.pendingCheckinDao().byLocalId("q-multi")!!
-        assertEquals(2, multi.voiceFiles().size)
-        assertEquals("/data/voice/a.m4a", multi.voiceFiles()[0].absolutePath)
-        assertEquals("/data/voice/b.m4a", multi.voiceFiles()[1].absolutePath)
+        assertNull(multi.voicePaths)
+        assertTrue(multi.voiceFiles().isEmpty())
 
         val plain = db.pendingCheckinDao().byLocalId("q-legacy")!!
         assertTrue(plain.voiceFiles().isEmpty())

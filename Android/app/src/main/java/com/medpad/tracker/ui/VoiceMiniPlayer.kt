@@ -138,7 +138,11 @@ class VoiceMiniPlayerHub(
             row.speedIdx = (row.speedIdx + 1) % SPEEDS.size
             row.btnSpeed.text = SPEED_LABELS[row.speedIdx]
             if (active === row) {
-                try { player?.playbackRate = SPEEDS[row.speedIdx] } catch (_: Exception) { }
+                try {
+                    player?.setPlaybackParams(
+                        android.media.PlaybackParams().setSpeed(SPEEDS[row.speedIdx]),
+                    )
+                } catch (_: Exception) { }
             }
         }
         row.seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -238,7 +242,9 @@ class VoiceMiniPlayerHub(
                 try { ok.seekTo(resume) } catch (_: Exception) { }
             }
             try {
-                ok.playbackRate = SPEEDS[row.speedIdx]
+                // PlaybackParams (API 23+) — the playbackRate property needs API 35+;
+                // minSdk is 24, so the params route is the compatible one
+                ok.setPlaybackParams(android.media.PlaybackParams().setSpeed(SPEEDS[row.speedIdx]))
                 ok.start()
             } catch (_: Exception) {
                 row.setState(context.getString(R.string.voice_play_failed))
