@@ -11,7 +11,10 @@
 #           package9 (cumulative; supersedes package8) → package5 (bell) →
 #           package13 (phase 2 completion) → package14 (phase 3 tracking:
 #           LocationPing/TrackStatus, upload+config+live+history APIs,
-#           TrackingTab — last)
+#           TrackingTab) → package15 (mission Oct 31: first/last name,
+#           entity notification routing, report diff view, independent
+#           check-in/check-out geofence, one-open-check-in + deviation,
+#           OpEvent log + EventsTab — last)
 #
 # This script performs the WHOLE reproducible pipeline and verifies it:
 #   1. fresh extraction of the base source (git archive)
@@ -47,7 +50,7 @@ set -euo pipefail
 REPO_ROOT="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
 WORK="${2:-$REPO_ROOT/panel-build}"
 BASE_REF="bd9c80b:medpad-full-1.9/inst-stage/panel-src"
-CHAIN="phase1-task1 phase2-remediation phase2-task1 phase2-task2 phase2-dev2-fixes phase2-package4 phase2-madrep phase2-package6 phase2-package7 phase2-package9 phase2-package5 phase2-package13 phase3-package14"
+CHAIN="phase1-task1 phase2-remediation phase2-task1 phase2-task2 phase2-dev2-fixes phase2-package4 phase2-madrep phase2-package6 phase2-package7 phase2-package9 phase2-package5 phase2-package13 phase3-package14 phase4-package15"
 
 # RESUME mode (sandbox convenience): with MEDPAD_BUILD_RESUME=1 an existing
 # $WORK/src with node_modules (from an interrupted run — e.g. a sandbox that
@@ -92,6 +95,8 @@ else
 fi
 # phase 3 marker (both fresh and resumed trees must have it)
 [ -f "$WORK/src/src/components/panel/TrackingTab.tsx" ] || die "patch chain did not produce TrackingTab.tsx"
+# package15 marker (mission Oct 31)
+[ -f "$WORK/src/src/components/panel/EventsTab.tsx" ] || die "patch chain did not produce EventsTab.tsx"
 cd "$WORK/src"
 
 # ── 3. npm install ──────────────────────────────────────────────────────────
@@ -164,7 +169,12 @@ chk "api: app locations"           "[ -f .next/server/app/api/app/locations/rout
 chk "api: panel tracking"          "[ -f .next/server/app/api/panel/tracking/route.js ]"
 chk "api: panel tracking history"  "[ -f .next/server/app/api/panel/tracking/history/route.js ]"
 chk "tracking tab UI chunks"       "grep -rq 'route-map' --include='*.js' ."
-echo "   hardening: PASS=$P FAIL=$F / 23"
+# package15 (mission Oct 31): the event-log API surfaces + tab must ship
+chk "api: app events upload"       "[ -f .next/server/app/api/app/events/route.js ]"
+chk "api: admin events report"     "[ -f .next/server/app/api/admin/events/route.js ]"
+chk "events tab UI chunks"         "grep -rq 'events-filter-employee' --include='*.js' ."
+echo "   hardening: PASS=$P FAIL=$F / 26"
+LAST_HARDENING="$P/$F PASS"
 [ "$F" -eq 0 ] || die "hardening checks failed"
 
 # ── 8. compare with committed bundle (BUILD_ID + build-dir normalized) ─────
@@ -240,7 +250,7 @@ fi
 
 say "RESULT"
 echo "   bundle:        $WORK/bundle/.next"
-echo "   hardening:     23/23 PASS"
+echo "   hardening:     ${LAST_HARDENING:-?}"
 if [ $cmp_rc -eq 0 ]; then echo "   equivalence:   YES (BUILD_ID-normalized)";
 else echo "   equivalence:   DIFFERS (see 8/9 above)"; fi
 echo "   promote manually if intended: cp -r $WORK/bundle/.next/* <repo>/app/panel/.next/"

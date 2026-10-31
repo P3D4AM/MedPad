@@ -1,6 +1,7 @@
 {
   "/_global-error/page": "/_global-error",
   "/_not-found/page": "/_not-found",
+  "/api/admin/events/route": "/api/admin/events",
   "/api/admin/media-orphans/route": "/api/admin/media-orphans",
   "/api/admin/settings/route": "/api/admin/settings",
   "/api/admin/socket-auth/route": "/api/admin/socket-auth",
@@ -12,6 +13,7 @@
   "/api/app/customers/[id]/route": "/api/app/customers/[id]",
   "/api/app/customers/create/route": "/api/app/customers/create",
   "/api/app/customers/route": "/api/app/customers",
+  "/api/app/events/route": "/api/app/events",
   "/api/app/locations/route": "/api/app/locations",
   "/api/app/login/route": "/api/app/login",
   "/api/app/notifications/read/route": "/api/app/notifications/read",

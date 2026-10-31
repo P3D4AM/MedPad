@@ -1,6 +1,7 @@
 {
   "/_global-error/page": "app/_global-error/page.js",
   "/_not-found/page": "app/_not-found/page.js",
+  "/api/admin/events/route": "app/api/admin/events/route.js",
   "/api/admin/media-orphans/route": "app/api/admin/media-orphans/route.js",
   "/api/admin/settings/route": "app/api/admin/settings/route.js",
   "/api/admin/socket-auth/route": "app/api/admin/socket-auth/route.js",
@@ -12,6 +13,7 @@
   "/api/app/customers/[id]/route": "app/api/app/customers/[id]/route.js",
   "/api/app/customers/create/route": "app/api/app/customers/create/route.js",
   "/api/app/customers/route": "app/api/app/customers/route.js",
+  "/api/app/events/route": "app/api/app/events/route.js",
   "/api/app/locations/route": "app/api/app/locations/route.js",
   "/api/app/login/route": "app/api/app/login/route.js",
   "/api/app/notifications/read/route": "app/api/app/notifications/read/route.js",

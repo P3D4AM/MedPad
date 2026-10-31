@@ -168,6 +168,12 @@
       "namedRegex": "^/api(?:/)?$"
     },
     {
+      "page": "/api/admin/events",
+      "regex": "^/api/admin/events(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/admin/events(?:/)?$"
+    },
+    {
       "page": "/api/admin/media-orphans",
       "regex": "^/api/admin/media\\-orphans(?:/)?$",
       "routeKeys": {},
@@ -226,6 +232,12 @@
       "regex": "^/api/app/customers/create(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api/app/customers/create(?:/)?$"
+    },
+    {
+      "page": "/api/app/events",
+      "regex": "^/api/app/events(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/app/events(?:/)?$"
     },
     {
       "page": "/api/app/locations",
