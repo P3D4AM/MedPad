@@ -30,11 +30,19 @@ import java.util.Locale
 /**
  * Checkout dialog — mandatory text (≥10 chars, paste disabled) + mandatory voice.
  * Closes ALL open visits server-side (v1.9.1).
+ * mission item 7 — when the hub knows the open visit (server answered),
+ * its identity is shown BEFORE the submit: customer, check-in time,
+ * planned/plan-less and the elapsed time, so the rep closes the right
+ * visit consciously. A null openVisit (offline / legacy panel) keeps the
+ * old behaviour.
  */
 // Package 2 (crash hardening): default for onDone → no-arg constructor exists
 // → the fragment survives re-instantiation on configuration change instead of
 // crashing the app ("Fragment could not be instantiated" on rotation).
-class CheckoutDialogFragment(private val onDone: () -> Unit = {}) : DialogFragment() {
+class CheckoutDialogFragment(
+    private val openVisit: com.medpad.tracker.sync.CheckinGate.OpenVisit? = null,
+    private val onDone: () -> Unit = {},
+) : DialogFragment() {
 
     private val scope = CoroutineScope(Dispatchers.Main)
     private val recorder = VoiceRecorder(TrackerContext.app)
@@ -60,6 +68,30 @@ class CheckoutDialogFragment(private val onDone: () -> Unit = {}) : DialogFragme
         val btnCancel = view.findViewById<Button>(R.id.btnCancel)
         val btnSubmit = view.findViewById<Button>(R.id.btnSubmit)
         val progress = view.findViewById<ProgressBar>(R.id.progress)
+
+        // mission item 7 — the open visit's identity, before the submit:
+        // WHAT is being closed, since when, planned or plan-less, elapsed.
+        openVisit?.let { v ->
+            val cal = java.util.Calendar.getInstance().apply {
+                timeZone = java.util.TimeZone.getTimeZone("Asia/Tehran")
+                v.startAtMs?.let { timeInMillis = it }
+            }
+            val time = "%02d:%02d".format(cal.get(java.util.Calendar.HOUR_OF_DAY), cal.get(java.util.Calendar.MINUTE))
+            val j = JalaliDate.fromGregorian(cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH) + 1, cal.get(java.util.Calendar.DAY_OF_MONTH))
+            val elapsed = com.medpad.tracker.sync.CheckinGate.elapsedLabel(System.currentTimeMillis(), v.startAtMs)
+            val info = TextView(requireContext()).apply {
+                text = getString(
+                    R.string.checkout_open_info,
+                    v.customerName ?: getString(R.string.customer_unknown),
+                    "$time (${JalaliDate.formatFa(j)})",
+                    getString(if (v.planned) R.string.checkin_open_planned else R.string.checkin_open_planless),
+                    elapsed ?: getString(R.string.elapsed_unknown),
+                )
+                textSize = 13f
+                setPadding(0, 0, 0, (10 * resources.displayMetrics.density).toInt())
+            }
+            (view as? android.view.ViewGroup)?.addView(info, 0)
+        }
 
         btnRec?.setOnClickListener {
             if (recorder.isRecording) {

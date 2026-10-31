@@ -436,6 +436,27 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showCheckin() {
+        // mission item 7 — the one-open-check-in GATE runs before the dialog:
+        // a new check-in may only start when it is CERTAIN no open visit
+        // exists (server-confirmed). See CheckinGate for the policy.
+        scope.launch {
+            val pending = withContext(Dispatchers.IO) { CheckinSync.pendingCount() }
+            val server = withContext(Dispatchers.IO) {
+                try { com.medpad.tracker.api.ApiClient.openVisits() } catch (_: Exception) { null }
+            }
+            when (val d = com.medpad.tracker.sync.CheckinGate.decide(pending, server)) {
+                com.medpad.tracker.sync.CheckinGate.Decision.Allow -> showCheckinDialog()
+                is com.medpad.tracker.sync.CheckinGate.Decision.BlockUnsent ->
+                    infoDialog(getString(R.string.checkin_block_queued, d.count.toString()))
+                com.medpad.tracker.sync.CheckinGate.Decision.BlockOffline ->
+                    infoDialog(getString(R.string.checkin_block_offline))
+                is com.medpad.tracker.sync.CheckinGate.Decision.BlockOpenVisit ->
+                    showOpenVisitDialog(d.visit)
+            }
+        }
+    }
+
+    private fun showCheckinDialog() {
         scope.launch(Dispatchers.IO) { CheckinSync.syncDoctors() }
         val dialog = CheckinDialogFragment {
             scope.launch(Dispatchers.IO) { CheckinSync.flush() }
@@ -443,6 +464,41 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, R.string.checkin_sent, Toast.LENGTH_SHORT).show()
         }
         dialog.show(supportFragmentManager, "checkin")
+    }
+
+    /** mission item 7 — a visit is already open: show exactly WHAT is open
+     *  (customer, start time, planned/plan-less, elapsed) and send the user
+     *  to checkout. The server rejected the second check-in with the same
+     *  facts; this is its honest UI twin. */
+    private fun showOpenVisitDialog(v: com.medpad.tracker.sync.CheckinGate.OpenVisit) {
+        val cal = java.util.Calendar.getInstance().apply {
+            timeZone = java.util.TimeZone.getTimeZone("Asia/Tehran")
+            v.startAtMs?.let { timeInMillis = it }
+        }
+        val time = "%02d:%02d".format(cal.get(java.util.Calendar.HOUR_OF_DAY), cal.get(java.util.Calendar.MINUTE))
+        val j = JalaliDate.fromGregorian(cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH) + 1, cal.get(java.util.Calendar.DAY_OF_MONTH))
+        val elapsed = com.medpad.tracker.sync.CheckinGate.elapsedLabel(System.currentTimeMillis(), v.startAtMs)
+        val body = getString(
+            R.string.checkin_open_body,
+            v.customerName ?: getString(R.string.customer_unknown),
+            "$time (${JalaliDate.formatFa(j)})",
+            getString(if (v.planned) R.string.checkin_open_planned else R.string.checkin_open_planless),
+            elapsed ?: getString(R.string.elapsed_unknown),
+        )
+        AlertDialog.Builder(this)
+            .setTitle(R.string.checkin_open_title)
+            .setMessage(body)
+            .setPositiveButton(R.string.checkin_open_go_checkout) { _, _ -> showCheckout() }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun infoDialog(message: String) {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.checkin_block_title)
+            .setMessage(message)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
     }
 
     private fun showCheckout() {
@@ -454,19 +510,29 @@ class MainActivity : AppCompatActivity() {
         // let the queue + its new failed-state handling deal with it.
         scope.launch {
             val pendingCheckins = withContext(Dispatchers.IO) { CheckinSync.pendingCount() }
-            val open = lastKnownOpenVisits
-            if (open == 0 && pendingCheckins == 0) {
+            val resp = withContext(Dispatchers.IO) {
+                try { com.medpad.tracker.api.ApiClient.openVisits() } catch (_: Exception) { null }
+            }
+            val openList = com.medpad.tracker.sync.CheckinGate.parseOpenVisits(resp)
+            val open = openList.firstOrNull()
+            val openCount = if (resp != null) openList.size else (lastKnownOpenVisits ?: 0)
+            if (openCount == 0 && pendingCheckins == 0) {
                 AlertDialog.Builder(this@MainActivity)
                     .setMessage(R.string.no_active_checkin)
                     .setPositiveButton(R.string.checkin, null)
                     .show()
                 return@launch
             }
-            val dialog = CheckoutDialogFragment {
-                scope.launch(Dispatchers.IO) { CheckinSync.flush() }
-                updateQueueStatus()
-                Toast.makeText(this@MainActivity, R.string.checkout_sent, Toast.LENGTH_SHORT).show()
-            }
+            // mission item 7 — the checkout dialog shows what it is about to
+            // close: customer, start time, planned/plan-less, elapsed.
+            val dialog = CheckoutDialogFragment(
+                openVisit = open,
+                onDone = {
+                    scope.launch(Dispatchers.IO) { CheckinSync.flush() }
+                    updateQueueStatus()
+                    Toast.makeText(this@MainActivity, R.string.checkout_sent, Toast.LENGTH_SHORT).show()
+                },
+            )
             dialog.show(supportFragmentManager, "checkout")
         }
     }

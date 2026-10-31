@@ -145,6 +145,18 @@
     <!-- phase 2 / §1: notification tap-through -->
     <string name="notif_tap_login_needed">برای مشاهدهٔ اعلان ابتدا وارد حساب خود شوید</string>
     <string name="notif_tap_customer_gone">مشتریِ مرتبط با این اعلان دیگر در دسترس شما نیست (حذف شده یا تخصیص آن لغو شده است)</string>
+    <!-- mission item 7 — one-open-check-in gate + open-visit dialogs -->
+    <string name="checkin_block_title">شروع چک‌این جدید ممکن نیست</string>
+    <string name="checkin_block_queued">%1$s چک‌این ارسال‌نشده در صف آفلاین وجود دارد. تا تأیید شدن آن توسط سرور نمی‌توانید ویزیت جدیدی شروع کنید (وضعیت صف در صفحهٔ اصلی قابل مشاهده است).</string>
+    <string name="checkin_block_offline">اتصال به سرور ممکن نیست و وضعیت ویزیت باز قابل بررسی نیست. برای شروع چک‌این جدید، اتصال اینترنت لازم است (تا تأیید سرور، ویزیت جدیدی شروع نمی‌شود).</string>
+    <string name="checkin_open_title">چک‌این بازی برای شما ثبت است</string>
+    <string name="checkin_open_body">ویزیت فعلی: %1$s\nشروع: %2$s\nوضعیت: %3$s\nمدت تاکنون: %4$s\n\nبرای شروع ویزیت جدید، ابتدا این ویزیت را ببندید.</string>
+    <string name="checkin_open_planned">برنامه‌ریزی‌شده</string>
+    <string name="checkin_open_planless">بدون برنامهٔ قبلی</string>
+    <string name="checkin_open_go_checkout">بستن ویزیت (چک‌اوت)</string>
+    <string name="checkout_open_info">در حال بستن ویزیت:\nمشتری: %1$s\nشروع: %2$s\nوضعیت: %3$s\nمدت تاکنون: %4$s</string>
+    <string name="customer_unknown">مشتری نامشخص</string>
+    <string name="elapsed_unknown">نامشخص</string>
     <!-- mission item 4 — notification delivery diagnostics -->
     <string name="notif_diag_title">وضعیت دریافت اعلان‌ها</string>
     <string name="notif_diag_fix">اصلاح</string>
