@@ -307,6 +307,11 @@ class TrackingService : LifecycleService() {
             try {
                 if (Session.isLoggedIn) CheckinSync.flush()
             } catch (_: Exception) { /* keep queue */ }
+            // mission item 10 — the device-side operational events ride the
+            // same heartbeat (idempotent batch; rows only leave after ack)
+            try {
+                if (Session.isLoggedIn) com.medpad.tracker.sync.OpEvents.flushOnce()
+            } catch (_: Exception) { /* keep rows */ }
         }
         // notification poll (package 11: honours the user's toggle and dedups
         // across polls/restarts via the persisted shown-id set — a poll that
@@ -324,12 +329,28 @@ class TrackingService : LifecycleService() {
                     ServerNotifications.pollOnce(applicationContext) { id, title, body, kind, customerId, entityType, entityId ->
                         // phase 2 / §1: tap-through per kind; mission item 3:
                         // entityType/entityId open the exact record
-                        AppNotifier.notify(
+                        val shown = AppNotifier.notify(
                             this@TrackingService, id, title, body,
                             com.medpad.tracker.ui.NotificationTapRouter.pendingIntent(
                                 this@TrackingService, kind, customerId, entityType, entityId,
                             ),
                         )
+                        // mission item 10 — the DISPLAY result (not the poll):
+                        // a blocked permission/channel is a failed display
+                        // that the next poll retries — visible in the report
+                        // (record is suspend → fire-and-forget coroutine)
+                        val okShown = shown
+                        val kindArg = kind
+                        lifecycleScope.launch {
+                            com.medpad.tracker.sync.OpEvents.record(
+                                type = if (okShown) "notif.shown" else "notif.display_failed",
+                                status = if (okShown) "success" else "failed",
+                                errorCode = if (okShown) null else "display-blocked",
+                                relatedType = kindArg,
+                                message = if (okShown) null else "نمایش اعلان ناموفق (مجوز/کانال مسدود) — تلاش مجدد در پایش بعدی",
+                            )
+                        }
+                        shown
                     }
                 }
             } catch (_: Exception) { /* offline */ }

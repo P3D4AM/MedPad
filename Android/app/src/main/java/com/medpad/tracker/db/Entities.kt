@@ -266,3 +266,53 @@ interface PendingLocationDao {
     @Query("DELETE FROM pending_locations")
     suspend fun clear()
 }
+
+/**
+ * Operational events — mission item 10 (Oct 31).
+ *
+ * The DEVICE half of the admin's «گزارش رویدادها»: meaningful operational
+ * events (offline-queue lifecycle, notification display results, location
+ * permission changes) are recorded locally and uploaded in IDEMPOTENT
+ * batches (POST /api/app/events; localId is the idempotency key — a replay
+ * after a crash mid-ack counts as a duplicate server-side, never a second
+ * logical row). Rows are deleted ONLY after the server acknowledged them;
+ * an internet cut never loses an event silently.
+ *
+ * Recorded events are deliberately NARROW (supervision-relevant only) —
+ * never page opens or routine polls, and never secrets.
+ */
+@Entity(tableName = "op_events", indices = [Index("createdAt")])
+data class OpEventEntity(
+    @PrimaryKey(autoGenerate = true) val uid: Long = 0,
+    val localId: String,               // UUID — idempotency key for upload
+    val type: String,                  // fixed taxonomy (server-validated)
+    val status: String = "success",    // success | failed
+    val createdAt: Long = System.currentTimeMillis(), // DEVICE time of the event
+    val errorCode: String? = null,
+    val message: String? = null,       // SAFE summary — no secrets, ever
+    val relatedType: String? = null,
+    val relatedId: String? = null,
+    val attempt: Int? = null,
+)
+
+@Dao
+interface OpEventDao {
+    @Insert
+    suspend fun insert(e: OpEventEntity): Long
+
+    /** oldest-first batch for upload (order preserved) */
+    @Query("SELECT * FROM op_events ORDER BY createdAt ASC LIMIT :limit")
+    suspend fun oldest(limit: Int): List<OpEventEntity>
+
+    /** delete server-acknowledged (or permanently rejected) rows by pk */
+    @Query("DELETE FROM op_events WHERE uid IN (:uids)")
+    suspend fun deleteByUids(uids: List<Long>)
+
+    @Query("SELECT COUNT(*) FROM op_events")
+    suspend fun count(): Int
+
+    /** full wipe — ONLY on logout / server change (rows belong to the old
+     *  server's employee; the queue clear confirms with the user first) */
+    @Query("DELETE FROM op_events")
+    suspend fun clear()
+}

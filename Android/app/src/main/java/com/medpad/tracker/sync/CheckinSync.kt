@@ -83,6 +83,13 @@ object CheckinSync {
             accuracy = accuracyM,
         )
         val uid = db.pendingCheckinDao().insert(item)
+        // mission item 10 — the queue lifecycle as seen from the device
+        OpEvents.record(
+            type = "queue.enqueued",
+            relatedType = item.kind,
+            relatedId = item.customerId,
+            message = "ثبت در صف آفلاین",
+        )
         return item.copy(uid = uid)
     }
 
@@ -140,6 +147,14 @@ object CheckinSync {
         val items = db.pendingCheckinDao().all()
         items.forEach { it.voicePath?.let { p -> File(p).delete() } }
         db.pendingCheckinDao().clearAll()
+        // mission item 10 — the drop is USER-CONFIRMED (change-server flow)
+        // and must be visible in the admin's event report
+        OpEvents.record(
+            type = "queue.dropped",
+            status = "failed",
+            errorCode = "server-switch",
+            message = "پاک‌سازی صف با تأیید کاربر (تغییر سرور) — ${'$'}{items.size} مورد",
+        )
         items.size
     }
 
@@ -165,6 +180,7 @@ object CheckinSync {
     suspend fun retryFailed(): Int = withContext(Dispatchers.IO) {
         val db = AppDatabase.get(TrackerContext.app)
         db.pendingCheckinDao().requeueFailed()
+        OpEvents.record(type = "queue.retry", message = "تلاش مجدد دستی موارد ردشده")
         flush()
     }
 
@@ -209,6 +225,14 @@ object CheckinSync {
                 db.pendingCheckinDao().delete(item) // server-confirmed → leave the queue
                 lastError = null
                 markSessionAlive()
+                // mission item 10 — the SERVER confirmed this item
+                OpEvents.record(
+                    type = "queue.delivered",
+                    relatedType = item.kind,
+                    relatedId = item.localId,
+                    attempt = item.attempts + 1,
+                    message = "تحویل تأییدشده توسط سرور",
+                )
                 return FlushOutcome.SENT
             }
             // ok=false with 200 — unexpected from this panel; treat as a
@@ -279,6 +303,7 @@ object CheckinSync {
                     // manual retry) instead of blocking the queue forever.
                     lastError = e.message
                     db.pendingCheckinDao().update(current.copy(status = QUEUE_STATUS_FAILED, attempts = item.attempts + 1, lastError = lastError))
+                    OpEvents.record(type = "queue.rejected", status = "failed", errorCode = "400", relatedType = item.kind, relatedId = item.localId, attempt = item.attempts + 1, message = "رد دائمی توسط سرور (۴۰۰/۴۰۴)")
                     return FlushOutcome.FAILED
                 }
                 409, 422 -> {
@@ -288,6 +313,7 @@ object CheckinSync {
                     // Both become 'failed' (kept + readable + retryable).
                     lastError = e.message
                     db.pendingCheckinDao().update(current.copy(status = QUEUE_STATUS_FAILED, attempts = item.attempts + 1, lastError = lastError))
+                    OpEvents.record(type = "queue.rejected", status = "failed", errorCode = String.format(java.util.Locale.US, "%d", e.code), relatedType = item.kind, relatedId = item.localId, attempt = item.attempts + 1, message = "رد دائمی توسط سرور (۴۰۹/۴۲۲)")
                     return FlushOutcome.FAILED
                 }
                 else -> {

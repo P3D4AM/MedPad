@@ -8,8 +8,8 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [Doctor::class, PendingCheckin::class, PendingLocation::class, PlannedVisitEntity::class],
-    version = 11,
+    entities = [Doctor::class, PendingCheckin::class, PendingLocation::class, PlannedVisitEntity::class, OpEventEntity::class],
+    version = 12,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -17,6 +17,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun pendingCheckinDao(): PendingCheckinDao
     abstract fun pendingLocationDao(): PendingLocationDao
     abstract fun plannedVisitDao(): PlannedVisitDao
+    abstract fun opEventDao(): OpEventDao
 
     companion object {
         @Volatile private var inst: AppDatabase? = null
@@ -28,7 +29,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "medpad.db",
                 )
-                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
                     .build()
                     .also { inst = it }
             }
@@ -124,9 +125,30 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // mission item 10 — the operational event upload queue. A brand-new
+        // table; purely ADDITIVE (nothing existing is touched).
+        private val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `op_events` (" +
+                        "`uid` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`localId` TEXT NOT NULL, " +
+                        "`type` TEXT NOT NULL, " +
+                        "`status` TEXT NOT NULL, " +
+                        "`createdAt` INTEGER NOT NULL, " +
+                        "`errorCode` TEXT, " +
+                        "`message` TEXT, " +
+                        "`relatedType` TEXT, " +
+                        "`relatedId` TEXT, " +
+                        "`attempt` INTEGER)"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_op_events_createdAt` ON `op_events` (`createdAt`)")
+            }
+        }
+
         /** Test-only accessor (unit tests build a throwaway instance on a
          *  version-9 file and must install the SAME real migrations). */
         fun migrationsForTest(): Array<Migration> =
-            arrayOf(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+            arrayOf(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
     }
 }

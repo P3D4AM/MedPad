@@ -281,6 +281,14 @@ object ApiClient {
         exec(req("/api/app/locations", "POST",
             payload.toString().toRequestBody("application/json".toMediaType())))
 
+    /** mission item 10 — idempotent batch upload of device-side operational
+     *  events (the admin's «گزارش رویدادها»). localId is the idempotency
+     *  key: a replayed batch counts as duplicates server-side. */
+    @Throws(Exception::class)
+    fun uploadEvents(payload: JSONObject): JSONObject =
+        exec(req("/api/app/events", "POST",
+            payload.toString().toRequestBody("application/json".toMediaType())))
+
     fun mediaUrl(voicePath: String): String =
         "${Session.serverUrl}/api/media/$voicePath?token=${Session.token}"
 

@@ -73,6 +73,19 @@ class MainActivity : AppCompatActivity() {
     ) { granted ->
         val ok = granted.values.all { it }
         if (ok) TrackingService.start(this)
+        // mission item 10 — the location permission state change is exactly
+        // the kind of operational fact the admin's event report needs (it
+        // explains sudden gaps in tracking data). record is suspend.
+        val fine = granted[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            granted[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        scope.launch {
+            com.medpad.tracker.sync.OpEvents.record(
+                type = "permission.location",
+                status = if (fine) "success" else "failed",
+                errorCode = if (fine) null else "denied",
+                message = if (fine) "مجوز مکان‌یابی داده شد" else "مجوز مکان‌یابی رد شد",
+            )
+        }
     }
 
     private val queueReceiver = object : BroadcastReceiver() {
@@ -109,6 +122,9 @@ class MainActivity : AppCompatActivity() {
                 CheckinSync.flush()
                 CheckinSync.syncDoctors()
                 LocationSync.flushOnce(this@MainActivity)
+                // mission item 10 — device-side operational events ride the
+                // same connectivity-regain path (idempotent batch upload)
+                try { com.medpad.tracker.sync.OpEvents.flushOnce() } catch (_: Exception) { }
                 // phase 2 / task 2: refresh the plans cache too (read-only,
                 // separate table — a failure here cannot touch the queue)
                 PlansSync.sync()
