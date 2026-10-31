@@ -1603,4 +1603,5 @@ Work Log:
 
 Stage Summary:
 - هر ۱۲ مورد مأموریت در ۶ مرحله پیاده، کامیت و تست شد. اندروید ۱۶۸/۱۶۸ با محیط واقعی؛ پنل ۴۲/۴۲ مأموریت + ۴۵۸ چک رگرسیون همه سبز؛ APK امضاشده vCode 18؛ باندل پنل بازساخته و ارتقایافته.
-- وضعیت: DONE (پوش/تگ/انتشار همین سشن انجام می‌شود — نتایج در همین تسک تکمیل می‌شود).
+- وضعیت: **DONE_VERIFIED**. پوش: ۷ کامیت (`4b69fce..9447f6a`) — SHA از GitHub با ls-remote تأیید شد (`9447f6a564c9961b0ac871d0ebd8c1c72e110b93`)؛ main دست‌نخورده. تگ annotated v1.9.13-dev.7 روی `9447f6a` (ls-remote: 34f40c11) → ZIP از خود تگ با مسیرهای مستثنای dev.4/5/6 (۳٬۰۲۶ فایل، ۱۴۴٬۵۲۸٬۹۰۴ بایت؛ رشته‌های نسخه داخل ZIP قبل از انتشار بررسی شد: APP-VERSION/INSTALLER_VER/بنر bat/عنوان README-fa همه dev.7؛ CRLF حفظ ۱۹۲×CRLF/۰×LF؛ VoiceFile در template.db) → Release prerelease (id 430235507) با ۴ asset: APK 8,956,372 بایت (SHA-256 e128de0f…b5b2e0) + ZIP (SHA-256 a3ba4cdf…33fb2) + SHA1SUMS + SHA256SUMS. **دانلود-برگشتی از GitHub: هر دو هش SHA-256 و SHA-1 OK + unzip -t سالم.** https://github.com/P3D4AM/MedPad/releases/tag/v1.9.13-dev.7
+- قدم بعدی: تست میدانی مالک (اعلان قفل، GPS واقعی، «همیشه اجازه» روی OEMها، پخش صداهای قدیمی/جدید) + تصمیم‌های RELEASE-CHECKLIST §۷ (کلید امضای پایدار، انتشار پایدار v1.9.13، typing debt).
