@@ -109,11 +109,21 @@ chk "G1 alice customer list contains exactly 1 row" \
 curl -s -H "X-Medpad-Token: $TOK_A" "$BASE/api/app/customers?since=2020-01-01T00:00:00Z" -o $W/acs.json
 chk "G1 incremental sync filters too" "! grep -q '$CUS_Z' $W/acs.json"
 
+# mission item 7 (Oct 31): the one-open-check-in rule — the server now
+# REJECTS a second open visit (409) instead of silently auto-closing the
+# previous one. Sequential check-in scenarios therefore close their visit
+# before the next one (voice is REQUIRED on checkout — tiny fixture file).
+printf 'fake-audio' > $W/voice.m4a
+closevisit() { curl -s -X POST $BASE/api/app/checkout -H "X-Medpad-Token: $1" \
+  -F "note=between-scenarios fixture close" -F "localId=cv-$RANDOM-$RANDOM" \
+  -F "voice=@$W/voice.m4a;type=audio/mp4" -o /dev/null; }
+
 # G1.3 check-in to an ASSIGNED customer works
 curl -s -X POST $BASE/api/app/checkin -H "X-Medpad-Token: $TOK_A" \
   -F "customerId=$CUS_X" -F "note=g1 assigned checkin" -F "localId=g1-a-$RANDOM" \
   -F "lat=35.7001" -F "lng=51.4001" -o $W/ci-ok.json
 chk "G1 checkin to assigned customer -> ok" "grep -q '\"ok\":true' $W/ci-ok.json"
+closevisit $TOK_A
 
 # G1.4/G1.5 check-in to customers NOT assigned to alice -> 403
 CODE=$(curl -s -o $W/ci-y.json -w '%{http_code}' -X POST $BASE/api/app/checkin \
@@ -192,6 +202,7 @@ curl -s -b $W/cj -X POST $BASE/api/assignments -H 'content-type: application/jso
   -d "{\"employeeId\":\"$EMP_A\",\"customerId\":\"$CUS_X\"}" -o /dev/null
 curl -s -X POST $BASE/api/app/checkin -H "X-Medpad-Token: $TOK_A" \
   -F "customerId=$CUS_X" -F "note=g1 replay base" -F "localId=$LID_G1" -o /dev/null
+closevisit $TOK_A
 curl -s -b $W/cj -X DELETE "$BASE/api/assignments?employeeId=$EMP_A&customerId=$CUS_X" -o /dev/null
 CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST $BASE/api/app/checkin \
   -H "X-Medpad-Token: $TOK_A" -F "customerId=$CUS_X" -F "note=g1 replay attempt" \
@@ -210,6 +221,7 @@ CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST $BASE/api/app/checkin \
   -H "X-Medpad-Token: $TOK_B" -F "customerId=$CUS_N" -F "note=bob new customer" \
   -F "localId=g1-bn-$RANDOM" -F "lat=35.73" -F "lng=51.43")
 chk "G1 checkin to own created customer -> ok" "[ \"$CODE\" = 200 ]"
+closevisit $TOK_B
 curl -s -H "X-Medpad-Token: $TOK_A" "$BASE/api/app/customers" -o $W/ac3.json
 chk "G1 other employee cannot see the new customer" "! grep -q '$CUS_N' $W/ac3.json"
 
@@ -466,6 +478,7 @@ TOK_D=$(python3 -c "import json;print(json.load(open('$W/dl.json'))['token'])")
 curl -s -X POST $BASE/api/app/checkin -H "X-Medpad-Token: $TOK_D" \
   -F "customerId=$CUS_D" -F "note=g3 dave history checkin" -F "localId=g3-d-$RANDOM" \
   -F "lat=35.8001" -F "lng=51.5001" -o /dev/null
+closevisit $TOK_D
 CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Medpad-Token: $TOK_D" "$BASE/api/app/config")
 chk "G3 dave token works pre-deactivation" "[ \"$CODE\" = 200 ]"
 
@@ -718,6 +731,7 @@ sys.exit(0)
 EOF
 RC=$?
 chk "G6 no-GPS: lat/lng are NULL (not the customer's coords)" "[ $RC -eq 0 ]"
+closevisit $TOK_F
 
 # G6.3 invalid coordinates -> same treatment
 CODE=$(curl -s -o $W/g6bad.json -w '%{http_code}' -X POST $BASE/api/app/checkin \
@@ -725,11 +739,13 @@ CODE=$(curl -s -o $W/g6bad.json -w '%{http_code}' -X POST $BASE/api/app/checkin 
   -F "localId=g6-bad-$RANDOM" -F "lat=999" -F "lng=52.0" -F "clientAt=$(g6ago)")
 chk "G6 invalid lat=999 -> accepted, locationMissing" \
   "[ \"$CODE\" = 200 ] && grep -q '\"locationMissing\":true' $W/g6bad.json"
+closevisit $TOK_F
 CODE=$(curl -s -o $W/g6bad2.json -w '%{http_code}' -X POST $BASE/api/app/checkin \
   -H "X-Medpad-Token: $TOK_F" -F "customerId=$CUS_F" -F "note=g6 nan coords" \
   -F "localId=g6-nan-$RANDOM" -F "lat=NaN" -F "lng=Infinity" -F "clientAt=$(g6ago)")
 chk "G6 NaN/Infinity coords -> accepted, locationMissing" \
   "[ \"$CODE\" = 200 ] && grep -q '\"locationMissing\":true' $W/g6bad2.json"
+closevisit $TOK_F
 
 # G6.4 valid GPS near the customer -> recorded with accuracy + distance, in radius
 curl -s -X POST $BASE/api/app/checkin -H "X-Medpad-Token: $TOK_F" \
@@ -747,12 +763,14 @@ sys.exit(0)
 EOF
 RC=$?
 chk "G6 distance computed (Haversine, meters), in radius" "[ $RC -eq 0 ]"
+closevisit $TOK_F
 
 # G6.5 accuracy over tolerance (default 50m) -> location discarded
 curl -s -X POST $BASE/api/app/checkin -H "X-Medpad-Token: $TOK_F" \
   -F "customerId=$CUS_F" -F "note=g6 low accuracy" -F "localId=g6-lowacc-$RANDOM" -F "clientAt=$(g6ago)" \
   -F "lat=36.000100" -F "lng=52.000100" -F "accuracy=200" -o $W/g6lowacc.json
 chk "G6 accuracy=200 > tolerance -> locationMissing" "grep -q '\"locationMissing\":true' $W/g6lowacc.json"
+closevisit $TOK_F
 
 # G6.6 impossible accuracy (<=0 / huge) -> location discarded even with tolerance off
 curl -s -b $W/cj -X PUT "$BASE/api/admin/settings" -H 'content-type: application/json' \
@@ -761,16 +779,19 @@ curl -s -X POST $BASE/api/app/checkin -H "X-Medpad-Token: $TOK_F" \
   -F "customerId=$CUS_F" -F "note=g6 zero acc" -F "localId=g6-zacc-$RANDOM" -F "clientAt=$(g6ago)" \
   -F "lat=36.000100" -F "lng=52.000100" -F "accuracy=0" -o $W/g6zacc.json
 chk "G6 accuracy=0 (impossible) -> locationMissing even with tolerance off" "grep -q '\"locationMissing\":true' $W/g6zacc.json"
+closevisit $TOK_F
 curl -s -X POST $BASE/api/app/checkin -H "X-Medpad-Token: $TOK_F" \
   -F "customerId=$CUS_F" -F "note=g6 huge acc" -F "localId=g6-hacc-$RANDOM" -F "clientAt=$(g6ago)" \
   -F "lat=36.000100" -F "lng=52.000100" -F "accuracy=999999" -o $W/g6hacc.json
 chk "G6 accuracy=999999 (impossible) -> locationMissing" "grep -q '\"locationMissing\":true' $W/g6hacc.json"
+closevisit $TOK_F
 
 # G6.7 tolerance OFF + plausible accuracy -> location kept
 curl -s -X POST $BASE/api/app/checkin -H "X-Medpad-Token: $TOK_F" \
   -F "customerId=$CUS_F" -F "note=g6 tolerance off" -F "localId=g6-toff-$RANDOM" -F "clientAt=$(g6ago)" \
   -F "lat=36.000100" -F "lng=52.000100" -F "accuracy=300" -o $W/g6toff.json
 chk "G6 tolerance off: accuracy=300 kept, location recorded" "grep -q '\"locationMissing\":false' $W/g6toff.json"
+closevisit $TOK_F
 
 # G6.8 out-of-radius (default warn policy): recorded + flagged, NOT rejected
 curl -s -b $W/cj -X PUT "$BASE/api/admin/settings" -H 'content-type: application/json' \
@@ -781,6 +802,7 @@ curl -s -X POST $BASE/api/app/checkin -H "X-Medpad-Token: $TOK_F" \
   -F "lat=36.0500" -F "lng=52.0500" -F "accuracy=10" -o $W/g6far.json
 chk "G6 out-of-radius (warn mode): event ACCEPTED" "grep -q '\"ok\":true' $W/g6far.json"
 chk "G6 out-of-radius flagged outOfRadius=true" "grep -q '\"outOfRadius\":true' $W/g6far.json"
+closevisit $TOK_F
 python3 - "$W/g6far.json" << 'EOF'
 import json, sys
 d = json.load(open(sys.argv[1]))['checkin']
@@ -803,6 +825,7 @@ CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST $BASE/api/app/checkin \
   -H "X-Medpad-Token: $TOK_F" -F "customerId=$CUS_F" -F "note=g6 strict ok" \
   -F "localId=g6-strictok-$RANDOM" -F "lat=36.000100" -F "lng=52.000100" -F "accuracy=10" -F "clientAt=$(g6ago)")
 chk "G6 strict mode: in-radius check-in still works" "[ \"$CODE\" = 200 ]"
+closevisit $TOK_F
 # back to warn mode for the rest of the suite
 curl -s -b $W/cj -X PUT "$BASE/api/admin/settings" -H 'content-type: application/json' \
   -d '{"gpsStrictRadius":0}' -o /dev/null
@@ -829,6 +852,7 @@ curl -s -X POST $BASE/api/app/checkin -H "X-Medpad-Token: $TOK_F" \
   -F "customerId=$CUS_F" -F "note=g6 small radius" -F "localId=g6-sr-$RANDOM" -F "clientAt=$(g6ago)" \
   -F "lat=36.000100" -F "lng=52.000100" -F "accuracy=10" -o $W/g6sr.json
 chk "G6 per-customer radius=10m: same fix now outOfRadius" "grep -q '\"outOfRadius\":true' $W/g6sr.json"
+closevisit $TOK_F
 curl -s -b $W/cj -X PUT "$BASE/api/customers/$CUS_F" -H 'content-type: application/json' \
   -d '{"radius":150}' -o /dev/null
 

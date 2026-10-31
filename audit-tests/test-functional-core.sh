@@ -117,6 +117,15 @@ chk "F1 deactivated employee login -> 401" "[ \"$CODE\" = 401 ]"
 curl -s -b $W/cj -X PUT $BASE/api/employees/$EMP2 -H 'content-type: application/json' \
   -d '{"active":true}' -o /dev/null
 
+# mission item 7 (Oct 31): the one-open-check-in rule — the server now
+# REJECTS a second open visit (409) instead of silently auto-closing the
+# previous one. Sequential check-in scenarios therefore close their visit
+# before the next one (voice is REQUIRED on checkout — tiny fixture file).
+printf 'fake-audio' > $W/voice.m4a
+closevisit() { curl -s -X POST $BASE/api/app/checkout -H "X-Medpad-Token: $1" \
+  -F "note=between-scenarios fixture close" -F "localId=cv-$RANDOM-$RANDOM" \
+  -F "voice=@$W/voice.m4a;type=audio/mp4" -o /dev/null; }
+
 # ── F4: check-in happy path + idempotency ────────────────────
 LID1="fcore-$RANDOM-1"
 curl -s -X POST $BASE/api/app/checkin -H "X-Medpad-Token: $TOK1" \
@@ -133,6 +142,7 @@ chk "F4 localId replay -> same row id" "grep -q '\"id\":\"$CI1\"' $W/ci1r.json"
 
 curl -s -b $W/cj "$BASE/api/checkins" -o $W/checkins.json
 chk "F4 admin sees the checkin" "grep -q '$CI1' $W/checkins.json"
+closevisit $TOK1
 
 # ── F5: offline-queue event time (clientAt) ──────────────────
 # 5a: checkin with clientAt 3h ago (inside the 7-day window)
@@ -206,6 +216,7 @@ sys.exit(0 if abs((created - now).total_seconds()) < 120 else 1)
 EOF
 RC=$?
 chk "F5 stale clientAt (30d) falls back to now" "[ $RC -eq 0 ]"
+# (visit stays OPEN — F6 below closes it with its own valid checkout)
 
 # 5e: garbage clientAt -> server clock fallback
 LID4="fcore-$RANDOM-4"
@@ -221,6 +232,7 @@ sys.exit(0 if abs((created - now).total_seconds()) < 120 else 1)
 EOF
 RC=$?
 chk "F5 garbage clientAt falls back to now" "[ $RC -eq 0 ]"
+# (visit stays OPEN — F6 below closes it with its own valid checkout)
 
 # ── F6: checkout validation ──────────────────────────────────
 CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST $BASE/api/app/checkout \

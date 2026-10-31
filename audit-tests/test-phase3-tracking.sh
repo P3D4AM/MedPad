@@ -122,8 +122,9 @@ chk "TC valid save ok" "grep -q '\"ok\":true' $W/tc_set.json"
 curl -s -H "X-Medpad-Token: $TOK" "$BASE/api/app/tracking-config" -o $W/tc2.json
 chk "TC app sees updated values" \
   "py \"import json;d=json.load(open('$W/tc2.json'))['config'];exit(0 if d['moveIntervalSec']==60 and d['stillIntervalSec']==300 and d['maxAgeSec']==600 else 1)\""
+# mission item 6 (Oct 31): the settings audit now carries OLD → NEW per key
 chk "TC audit row for settings.update" \
-  "py \"import sqlite3;c=sqlite3.connect('$DB');exit(0 if c.execute(\\\"SELECT COUNT(*) FROM AuditLog WHERE action='settings.update' AND detail LIKE '%trackMoveIntervalSec=60%'\\\").fetchone()[0]>=1 else 1)\""
+  "py \"import sqlite3;c=sqlite3.connect('$DB');exit(0 if c.execute(\\\"SELECT COUNT(*) FROM AuditLog WHERE action='settings.update' AND detail LIKE '%trackMoveIntervalSec: 45 → 60%'\\\").fetchone()[0]>=1 else 1)\""
 # restore defaults for the rest of the suite (maxAge 900 matters for stale)
 curl -s -b $W/cj -X PUT $BASE/api/admin/settings -H 'content-type: application/json' \
   -d '{"trackMoveIntervalSec": 45, "trackStillIntervalSec": 240, "trackMaxAgeSec": 900}' -o /dev/null

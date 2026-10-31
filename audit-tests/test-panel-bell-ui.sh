@@ -156,6 +156,19 @@ with sync_playwright() as p:
             return [r.status, d.ok === true, d.duplicate === true];
         }""" % json.dumps(TOK1), cus)
 
+    # mission item 7 (Oct 31): the one-open-check-in rule — close BU2's
+    # visit so BU5's check-in is a REAL new visit (voice required on checkout)
+    def closevisit():
+        return page.evaluate("""async () => {
+            const fd = new FormData();
+            fd.append('note', 'p5ui between-scenarios close');
+            fd.append('localId', 'p5ui-co-' + Date.now());
+            fd.append('voice', new Blob([new Uint8Array([1,2,3])]), 'v.m4a');
+            const r = await fetch('/api/app/checkout', { method: 'POST',
+                headers: { 'X-Medpad-Token': %s }, body: fd });
+            return r.status;
+        }""" % json.dumps(TOK1))
+
     # BU2: realtime — assignment + check-in -> badge 2, no reload
     step("bu2_assign_status", lambda: assign(CUS1))
     step("bu2_checkin_status", lambda: checkin(CUS1))
@@ -188,9 +201,13 @@ with sync_playwright() as p:
     page.keyboard.press("Escape")
 
     # BU5: realtime again -> badge 3
+    step("bu5_close_prev_visit", lambda: closevisit())
     step("bu5_assign_status", lambda: assign(CUS2))
     step("bu5_checkin_status", lambda: checkin(CUS2))
-    step("bu5_badge_3_live", lambda: wait_badge(3))
+    # mission item 7: the between-scenarios checkout itself is a real bell
+    # event (+1) — the badge expectation includes it (2 read-state + close +
+    # assign + checkin)
+    step("bu5_badge_3_live", lambda: wait_badge(4))
 
     # BU6: mark-all -> badge disappears, rows stay listed and read
     page.click('[data-testid="bell-button"]')
@@ -204,7 +221,7 @@ with sync_playwright() as p:
         return True
     step("bu6_badge_gone", lambda: badge_gone())
     step("bu6_rows_still_listed", lambda: page.locator('[data-testid^="bell-item-"]').count())
-    step("bu6_rows_expect_4", lambda: page.locator('[data-testid^="bell-item-"]').count() == 4)
+    step("bu6_rows_expect_4", lambda: page.locator('[data-testid^="bell-item-"]').count() == 5)
     step("bu6_no_mark_buttons", lambda: page.locator('[data-testid^="bell-mark-one-"]').count() == 0)
     step("bu6_not_empty_state", lambda: page.locator('[data-testid="bell-empty"]').count() == 0)
     page.keyboard.press("Escape")
@@ -251,12 +268,12 @@ PYBROWSER
     chk "BU5 second assignment -> 200" "[ \"\$(g bu5_assign_status)\" = '200' ]"
     BU5_CI=$(g bu5_checkin_status)
     chk "BU5 second check-in -> ok" "echo '$BU5_CI' | grep -q '200, True'"
-    chk "BU5 badge shows 3 LIVE (H4)" "[ \"\$(g bu5_badge_3_live)\" = 'True' ]"
+    chk "BU5 badge shows 4 LIVE (H4 — includes the fixture-checkout event)" "[ \"\$(g bu5_badge_3_live)\" = 'True' ]"
     chk "BU6 mark-all: badge DISAPPEARS (refetch to 0, H1)" "[ \"\$(g bu6_badge_gone)\" = 'True' ]"
-    chk "BU6 all 4 rows stay listed (2 BU2 + 2 BU5, one already read)" "[ \"\$(g bu6_rows_expect_4)\" = 'True' ]"
+    chk "BU6 all 5 rows stay listed (2 BU2 + close + 2 BU5, one already read)" "[ \"\$(g bu6_rows_expect_4)\" = 'True' ]"
     chk "BU6 no mark-one buttons left" "[ \"\$(g bu6_no_mark_buttons)\" = 'True' ]"
     chk "BU6 not the empty state" "[ \"\$(g bu6_not_empty_state)\" = 'True' ]"
-    chk "BU7 reopen: 4 read rows persist" "[ \"\$(g bu7_rows_persist)\" = '4' ]"
+    chk "BU7 reopen: 5 read rows persist" "[ \"\$(g bu7_rows_persist)\" = '5' ]"
     chk "BU8 session-expired state shown (H3)" "[ \"\$(g bu8_expired_state)\" = 'True' ]"
     chk "BU8 relogin returns to login screen" "[ \"\$(g bu8_back_to_login)\" = 'True' ]"
     N_ERR=$(py "import json;print(len(json.load(open('$W/bu.json')).get('errors',[])))")

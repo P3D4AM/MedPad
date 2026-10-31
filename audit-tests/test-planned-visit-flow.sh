@@ -185,12 +185,22 @@ chk "PV3 plan B still scheduled (link takes earliest first)" "py \"import json;p
 curl -s -H "X-Medpad-Token: $TOK1" "$BASE/api/app/planned-visits?from=$TODAY&to=$TODAY" -o $W/app1_after1.json
 chk "PV3 app refetch: A done + visitStartLocal" "py \"import json;ps=[p for p in json.load(open('$W/app1_after1.json'))['plans']];a=[p for p in ps if p['id']=='$PA'][0];exit(0 if a['status']=='done' and a.get('visitStartLocal') else 1)\""
 
+# mission item 7 (Oct 31): the one-open-check-in rule — the server now
+# REJECTS a second open visit (409) instead of silently auto-closing the
+# previous one. Sequential check-in scenarios therefore close their visit
+# before the next one (voice is REQUIRED on checkout — tiny fixture file).
+printf 'fake-audio' > $W/voice.m4a
+closevisit() { curl -s -X POST $BASE/api/app/checkout -H "X-Medpad-Token: $1" \
+  -F "note=between-scenarios fixture close" -F "localId=cv-$RANDOM-$RANDOM" \
+  -F "voice=@$W/voice.m4a;type=audio/mp4" -o /dev/null; }
+
 # ── PV4: replay idempotency + multi-plan linking + F never linked ──
 curl -s -X POST $BASE/api/app/checkin -H "X-Medpad-Token: $TOK1" \
   -F "customerId=$CUS1" -F "note=plan flow test one" -F "localId=$L1" \
   -F "lat=35.7002" -F "lng=51.4002" -o $W/ci1r.json
 chk "PV4 replay same localId -> duplicate:true" "grep -q '\"duplicate\":true' $W/ci1r.json"
 chk "PV4 replay created NO second visit" "py \"import json;d1=json.load(open('$W/ci1.json'));dr=json.load(open('$W/ci1r.json'));exit(0 if d1['checkin']['id']==dr['checkin']['id'] else 1)\""
+closevisit $TOK1
 
 # check-in #2 at cus2 -> links G (earliest scheduled at cus2); F is needs_reschedule -> NEVER linked
 L3="pv-l3-$(date +%s)"
@@ -200,6 +210,7 @@ curl -s -X POST $BASE/api/app/checkin -H "X-Medpad-Token: $TOK1" \
 chk "PV4 check-in #2 (cus2) accepted" "grep -q '\"ok\":true' $W/ci2.json"
 curl -s -H "X-Medpad-Token: $TOK1" "$BASE/api/app/planned-visits?from=$TODAY&to=$TODAY" -o $W/app1_after2.json
 chk "PV4 G done + F untouched (needs_reschedule, no visitId)" "py \"import json;ps=[p for p in json.load(open('$W/app1_after2.json'))['plans']];g=[p for p in ps if p['id']=='$PG'][0];f=[p for p in ps if p['id']=='$PF'][0];exit(0 if g['status']=='done' and g.get('visitId') and f['status']=='needs_reschedule' and not f.get('visitId') else 1)\""
+closevisit $TOK1
 
 # check-in #3 back at cus1 (dedup 'recent' is now cus2 -> passes) -> links B
 L2="pv-l2-$(date +%s)"
@@ -209,6 +220,7 @@ curl -s -X POST $BASE/api/app/checkin -H "X-Medpad-Token: $TOK1" \
 chk "PV4 check-in #3 (cus1 again) accepted" "grep -q '\"ok\":true' $W/ci3.json"
 curl -s -b $W/cj "$BASE/api/planned-visits?date=$TODAY&employeeId=$EMP1" -o $W/admin_after3.json
 chk "PV4 B done with a DIFFERENT visitId than A" "py \"import json;ps=[p for p in json.load(open('$W/admin_after3.json'))['plans']];a=[p for p in ps if p['id']=='$PA'][0];b=[p for p in ps if p['id']=='$PB'][0];exit(0 if a['status']=='done' and b['status']=='done' and a['visitId']!=b['visitId'] else 1)\""
+closevisit $TOK1
 
 # ── PV5: cancelled plan never linked ─────────────────────────
 CODE=$(curl -s -o $W/c_cancel.json -w '%{http_code}' -b $W/cj -X POST $BASE/api/planned-visits/$PC/cancel \

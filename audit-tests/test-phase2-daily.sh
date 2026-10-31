@@ -97,6 +97,15 @@ TOK_REZA=$(apptok e_reza rezapass123)
 chk "PD0 app logins (2 sessions for e_ali)" "[ -n '$TOK' ] && [ -n '$TOK2' ]"
 echo "$TOK" > $W/tok; echo "$TOK2" > $W/tok2; echo "$EMP" > $W/emp
 
+# mission item 7 (Oct 31): the one-open-check-in rule — the server now
+# REJECTS a second open visit (409) instead of silently auto-closing the
+# previous one. Sequential check-in scenarios therefore close their visit
+# before the next one (voice is REQUIRED on checkout — tiny fixture file).
+printf 'fake-audio' > $W/voice.m4a
+closevisit() { curl -s -X POST $BASE/api/app/checkout -H "X-Medpad-Token: $1" \
+  -F "note=between-scenarios fixture close" -F "localId=cv-$RANDOM-$RANDOM" \
+  -F "voice=@$W/voice.m4a;type=audio/mp4" -o /dev/null; }
+
 # report to be edited later (2 edits -> 2 versions)
 curl -s -X POST $BASE/api/app/checkin -H "X-Medpad-Token: $TOK" \
   -F "customerId=$CUS1" -F "note=گزارش اولیه ویزیت" -F "lat=35.7001" -F "lng=51.4001" \
@@ -108,6 +117,7 @@ curl -s -X POST $BASE/api/app/report-edit -H "X-Medpad-Token: $TOK" -H 'content-
   -d "{\"checkinId\":\"$CH_EDIT\",\"note\":\"گزارش نهایی با جزئیات کامل\"}" -o /dev/null
 echo "$CH_EDIT" > $W/ch_edit
 chk "PD0 edited report (2 versions)" "grep -q '\"ok\":true' $W/ch_edit.json"
+closevisit $TOK
 
 # 8-second PCM WAV (no proprietary codec — headless-Chromium safe)
 py "
@@ -123,7 +133,9 @@ mkvoice() { curl -s -X POST $BASE/api/app/checkin -H "X-Medpad-Token: $TOK" \
   -F "customerId=$1" -F "note=$2" -F "lat=$3" -F "lng=$4" -F "localId=$5" \
   -F "voice=@$W/tone8s.wav;type=audio/wav" -o $6; }
 mkvoice $CUS2 'گزارش صدای یک' 35.7101 51.4101 p2d-lid-2 $W/ch_v1.json
+closevisit $TOK
 mkvoice $CUS4 'گزارش صدای دو' 35.7301 51.4301 p2d-lid-3 $W/ch_v2.json
+closevisit $TOK
 mkvoice $CUS3 'گزارش با صدای گمشده' 35.7201 51.4201 p2d-lid-4 $W/ch_gone.json
 CH_V1=$(py "import json;print(json.load(open('$W/ch_v1.json'))['checkin']['id'])")
 CH_V2=$(py "import json;print(json.load(open('$W/ch_v2.json'))['checkin']['id'])")
@@ -131,6 +143,7 @@ CH_GONE=$(py "import json;print(json.load(open('$W/ch_gone.json'))['checkin']['i
 VGONE=$(py "import json;print(json.load(open('$W/ch_gone.json'))['checkin']['voicePath'])")
 echo "$CH_V1" > $W/ch_v1; echo "$CH_V2" > $W/ch_v2; echo "$CH_GONE" > $W/ch_gone
 chk "PD0 three voice check-ins" "[ -n '$CH_V1' ] && [ -n '$CH_V2' ] && [ -n '$CH_GONE' ]"
+closevisit $TOK
 # delete the third file from disk -> media route 404s -> player error state
 rm -f "$W/inst/panel/.next/standalone/uploads/$VGONE"
 chk "PD0 gone-file really 404s" "! curl -s -b $W/cj -o /dev/null -w '%{http_code}' $BASE/api/media/$VGONE | grep -q 200"
@@ -193,6 +206,7 @@ CH_FRESH=$(py "import json;print(json.load(open('$W/ch_fresh.json'))['checkin'][
 curl -s -b $W/cj "$BASE/api/checkins?limit=500" -o $W/list.json
 chk "RE1 fresh report: versionCount 0 (new note != edit)" \
   "py \"import json;d=json.load(open('$W/list.json'));c=[x for x in d['checkins'] if x['id']=='$CH_FRESH'][0];exit(0 if c['noteVersionCount']==0 else 1)\""
+closevisit $TOK
 chk "RE1b edited report: versionCount 2 in panel list" \
   "py \"import json;d=json.load(open('$W/list.json'));c=[x for x in d['checkins'] if x['id']=='$CH_EDIT'][0];exit(0 if c['noteVersionCount']==2 else 1)\""
 curl -s -X POST $BASE/api/app/report-edit -H "X-Medpad-Token: $TOK" -H 'content-type: application/json' \
@@ -324,13 +338,19 @@ with sync_playwright() as p:
     page.wait_for_selector('[data-testid="note-history-dialog"]')
     page.wait_for_selector('[data-testid="note-history-row-0"]')
     rows = page.locator('[data-testid^="note-history-row-"]').count()
-    new0 = page.locator('[data-testid="note-history-new-0"]').text_content()
-    old_last = page.locator(f'[data-testid="note-history-old-{rows-1}"]').text_content()
+    # mission item 5 — the story view: original text block, per-edit word
+    # diffs (add spans green / del spans struck), current text at the end
+    original = page.locator('[data-testid="note-history-original-text"]').text_content()
+    current = page.locator('[data-testid="note-history-current-text"]').text_content()
+    add0 = page.locator('[data-testid="note-history-diff-0-add"]').first.text_content()
+    del0 = page.locator('[data-testid="note-history-diff-0-del"]').first.text_content()
     editor0 = page.locator('[data-testid="note-history-editor-0"]').text_content()
     step("ap7_dialog_rows", lambda: rows == 3)
-    step("ap7_newest_first", lambda: "تسویه" in new0)
-    step("ap7_original_at_bottom", lambda: old_last == "گزارش اولیه ویزیت")
-    step("ap7_editor", lambda: editor0 == "E Ali")
+    step("ap7_newest_first", lambda: "تسویه" in current)
+    step("ap7_original_at_bottom", lambda: original == "گزارش اولیه ویزیت")
+    step("ap7_editor", lambda: "E Ali" in editor0)
+    step("ap7_diff_add_visible", lambda: add0 and add0.strip() != "")
+    step("ap7_diff_del_visible", lambda: del0 and del0.strip() != "")
 
     browser.close()
 
@@ -341,7 +361,8 @@ PYBROWSER
     for k in ap1_playing_time_advances ap1_duration_loaded ap2_resume_from_position \
              ap2_still_playing ap3_speed_cycle ap4_stop_resets ap5_single_flight \
              ap6_error_text ap6_retry_button ap6_retry_keeps_error_state \
-             ap7_badge ap7_dialog_rows ap7_newest_first ap7_original_at_bottom ap7_editor; do
+             ap7_badge ap7_dialog_rows ap7_newest_first ap7_original_at_bottom ap7_editor \
+             ap7_diff_add_visible ap7_diff_del_visible; do
       chk "AP $k" "py \"import json;d=json.load(open('$W/ap_result.json'));exit(0 if d.get('$k') is True else 1)\""
     done
     chk "AP browser zero step errors" \
@@ -415,6 +436,7 @@ print(1 if (t and i) else 0)
     -F "customerId=$CUS5" -F "note=گزارش پس از ارتقا" -F "lat=35.7401" -F "lng=51.4401" \
     -F "localId=p2d-lid-6" -o $W/up_ch.json
   UP_CH=$(py "import json;print(json.load(open('$W/up_ch.json'))['checkin']['id'])")
+  closevisit $TOK
   curl -s -X POST $BASE/api/app/report-edit -H "X-Medpad-Token: $TOK" -H 'content-type: application/json' \
     -d "{\"checkinId\":\"$UP_CH\",\"note\":\"گزارش پس از ارتقا — ویرایش‌شده\"}" -o $W/up_edit.json
   chk "UP4 edit works on migrated DB" "grep -q '\"versionCount\":1' $W/up_edit.json"
