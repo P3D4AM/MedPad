@@ -18,6 +18,7 @@ import com.medpad.tracker.location.TrackingService
 import com.medpad.tracker.sync.CheckinSync
 import com.medpad.tracker.sync.LocationSync
 import com.medpad.tracker.util.NetSecurity
+import com.medpad.tracker.util.ServerUrl
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -192,14 +193,22 @@ object AccountDialogs {
             val saveBtn = dlg.getButton(AlertDialog.BUTTON_POSITIVE)
             saveBtn.setOnClickListener {
                 errBox.visibility = View.GONE
-                val newUrl = input.text?.toString()?.trim() ?: ""
-                if (!Validators.isHttpServerUrl(newUrl)) {
-                    errBox.text = activity.getString(R.string.err_server_url_invalid)
+                val rawUrl = input.text?.toString()?.trim() ?: ""
+                // mission 12 / item 4 — SAME forgiving normalization as the
+                // login screen (ServerUrl.normalize): a bare host/IP gets the
+                // default http:// prefix, an explicit https:// is preserved,
+                // doubled scheme prefixes collapse and pasted bidi junk is
+                // stripped. Only genuinely unusable input is rejected.
+                val newUrl = ServerUrl.normalize(rawUrl) ?: run {
+                    errBox.text = when {
+                        rawUrl.isBlank() -> activity.getString(R.string.err_server_url_empty)
+                        ServerUrl.hasUnsupportedScheme(rawUrl) -> activity.getString(R.string.err_server_url_invalid)
+                        else -> activity.getString(R.string.err_server_url_no_host)
+                    }
                     errBox.visibility = View.VISIBLE
                     return@setOnClickListener
                 }
-                val normalized = newUrl.trimEnd('/')
-                if (normalized == Session.serverUrl) {
+                if (newUrl == Session.serverUrl) {
                     errBox.text = activity.getString(R.string.account_server_same)
                     errBox.visibility = View.VISIBLE
                     return@setOnClickListener
@@ -207,7 +216,7 @@ object AccountDialogs {
                 // P09 — same one-time informed-consent warning as the login
                 // screen for a PUBLIC cleartext address (token + voice + all
                 // app traffic would travel unencrypted to the new server).
-                if (NetSecurity.needsCleartextWarning(normalized) && !cleartextAck) {
+                if (NetSecurity.needsCleartextWarning(newUrl) && !cleartextAck) {
                     AlertDialog.Builder(activity)
                         .setTitle(R.string.cleartext_warning_title)
                         .setMessage(R.string.cleartext_warning_body)
@@ -244,10 +253,13 @@ object AccountDialogs {
                         return@launch
                     }
                     try {
-                        val cfg = withContext(Dispatchers.IO) { ApiClient.configAt(normalized) }
+                        val cfg = withContext(Dispatchers.IO) { ApiClient.configAt(newUrl) }
                         // 200 — the token is valid on the new server too
                         // (migrated database): keep the session, swap the URL.
-                        Session.serverUrl = normalized
+                        Session.serverUrl = newUrl
+                        // mission 12 / item 3 — the accepted address is the one
+                        // the login screen will pre-fill from now on
+                        Session.lastServerUrl = newUrl
                         Session.panelVersion = cfg.optString("panelVersion", "")
                         dlg.dismiss()
                         Toast.makeText(activity, R.string.account_server_changed, Toast.LENGTH_LONG).show()
@@ -268,7 +280,10 @@ object AccountDialogs {
                             }
                             TrackingService.stop(activity)
                             Session.clear(activity)
-                            Session.serverUrl = normalized
+                            Session.serverUrl = newUrl
+                            // mission 12 / item 3 — the NEW address is kept for
+                            // the login screen (survives the session clear)
+                            Session.lastServerUrl = newUrl
                             dlg.dismiss()
                             Toast.makeText(activity, R.string.account_server_relogin, Toast.LENGTH_LONG).show()
                             activity.startActivity(Intent(activity, LoginActivity::class.java))

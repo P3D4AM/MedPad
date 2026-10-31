@@ -6,15 +6,18 @@ import android.view.View
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import com.google.android.material.textfield.TextInputLayout
 import com.medpad.tracker.R
 import com.medpad.tracker.Session
 import com.medpad.tracker.api.ApiClient
 import com.medpad.tracker.util.NetSecurity
+import com.medpad.tracker.util.ServerUrl
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -25,16 +28,22 @@ import org.json.JSONException
  * Login — v1.7.0: guest mode REMOVED. Server URL + username + password only.
  *
  * v1.9.13-dev.2 (user report #2 — "the app cannot connect to the server"):
- * the old single generic toast ("check address and password") made network
- * problems, wrong credentials and malformed URLs indistinguishable — the #1
- * support complaint. Now every failure gets a SPECIFIC, actionable Persian
- * message in an inline error box:
- *  - UnknownHost / Connect refused / timeout / SSL  → network guidance
- *    (LAN URL format, same Wi-Fi, server running, Windows firewall allow)
- *  - HTTP 401  → credentials + the fact that the APP logs in with an
- *    EMPLOYEE account created in the panel (not the panel admin)
- *  - HTTP 429  → rate-limit lockout (wait ~15 minutes)
- *  - JSON/HTML garbage → the URL probably misses the port / is not MedPad
+ * every failure gets a SPECIFIC, actionable Persian message in an inline
+ * error box (network vs credentials vs rate-limit vs not-MedPad).
+ *
+ * mission 12 / item 3 (Nov 2026): after the FIRST successful login the
+ * server address is remembered independently of the session (see
+ * Session.lastServerUrl) and SURVIVES logout. The field collapses into a
+ * summary row — the rep logs in with username + password only — and
+ * «تغییر آدرس سرور» brings the input back for when the panel moves.
+ *
+ * mission 12 / item 4: the address field is forgiving in exactly one
+ * direction — it starts pre-filled with `http://`, a bare host/IP is
+ * auto-completed with the default scheme, an explicit `https://` is
+ * preserved, doubled scheme prefixes are collapsed and pasted bidi/zero-
+ * width characters are stripped (ServerUrl.normalize). Only genuinely
+ * unusable input (empty, no host, unsupported scheme) is rejected with an
+ * honest message.
  */
 class LoginActivity : AppCompatActivity() {
 
@@ -53,6 +62,10 @@ class LoginActivity : AppCompatActivity() {
         setContentView(R.layout.activity_login)
 
         val url = findViewById<EditText>(R.id.edServer)
+        val boxServer = findViewById<TextInputLayout>(R.id.boxServer)
+        val boxSaved = findViewById<LinearLayout>(R.id.boxSavedServer)
+        val tvSaved = findViewById<TextView>(R.id.tvSavedServer)
+        val btnChangeServer = findViewById<Button>(R.id.btnChangeServer)
         val user = findViewById<EditText>(R.id.edUsername)
         val pass = findViewById<EditText>(R.id.edPassword)
         val btn = findViewById<Button>(R.id.btnLogin)
@@ -60,19 +73,49 @@ class LoginActivity : AppCompatActivity() {
         val errBox = findViewById<TextView>(R.id.tvLoginError)
         val chkRemember = findViewById<CheckBox>(R.id.chkRemember)
 
-        url.setText(Session.serverUrl)
+        // ── mission 12 / item 3 — remembered address: collapse the field ──
+        // The remembered address survives logout by design; the FIRST login
+        // on a device (no remembered address) shows the input, pre-filled
+        // with the default scheme (item 4).
+        val saved = Session.lastServerUrl
+        if (saved.isNotEmpty()) {
+            url.setText(saved)
+            tvSaved.text = getString(R.string.login_saved_server, saved)
+            boxSaved.visibility = View.VISIBLE
+            boxServer.visibility = View.GONE
+        } else {
+            url.setText(ServerUrl.DEFAULT_SCHEME)
+        }
+        btnChangeServer.setOnClickListener {
+            boxSaved.visibility = View.GONE
+            boxServer.visibility = View.VISIBLE
+            url.setText(if (saved.isNotEmpty()) saved else ServerUrl.DEFAULT_SCHEME)
+            url.requestFocus()
+            url.setSelection(url.text?.length ?: 0)
+        }
+
         // package 10 — remembered username (explicit user opt-in; the
         // password is NEVER stored — auto-login is token-based)
         chkRemember.isChecked = Session.rememberUsername
         if (Session.rememberUsername) user.setText(Session.rememberedUsername)
 
         btn.setOnClickListener {
-            val sUrl = url.text.toString().trim()
+            val rawUrl = url.text.toString().trim()
             val sUser = user.text.toString().trim()
             val sPass = pass.text.toString()
             errBox.visibility = View.GONE
-            if (!sUrl.startsWith("http")) {
-                url.error = getString(R.string.server_url_hint)
+            // ── mission 12 / item 4 — normalize instead of reject ──
+            // A bare host gets the default http:// prefix, an explicit
+            // https:// is preserved, doubled schemes collapse, pasted bidi
+            // junk disappears. Only unusable input fails, with a specific
+            // Persian message.
+            val sUrl = ServerUrl.normalize(rawUrl) ?: run {
+                val msg = when {
+                    rawUrl.isBlank() -> getString(R.string.err_server_url_empty)
+                    ServerUrl.hasUnsupportedScheme(rawUrl) -> getString(R.string.err_server_url_invalid)
+                    else -> getString(R.string.err_server_url_no_host)
+                }
+                fail(msg)
                 return@setOnClickListener
             }
             if (sUser.isEmpty() || sPass.isEmpty()) {
@@ -106,6 +149,10 @@ class LoginActivity : AppCompatActivity() {
                     }
                     if (resp.optBoolean("ok")) {
                         Session.serverUrl = sUrl
+                        // mission 12 / item 3 — remember the address for the
+                        // NEXT login (survives logout; independent of the
+                        // session token)
+                        Session.lastServerUrl = sUrl
                         Session.token = resp.getString("token")
                         // package 10 — persist the username choice
                         Session.rememberUsername = chkRemember.isChecked
@@ -113,11 +160,10 @@ class LoginActivity : AppCompatActivity() {
                         val emp = resp.getJSONObject("employee")
                         Session.employeeId = emp.optString("id")
                         Session.employeeName = emp.optString("name")
-                        // mission item 2: first name for the greeting. JsonSafe
-                        // keeps an old panel's ABSENT field (and the JSON-null
-                        // answer of a legacy employee) from leaking the literal
-                        // string "null" into the UI — it becomes "" and the
-                        // greeting simply drops the name.
+                        // mission item 2 (Oct 31): first name for the greeting.
+                        // JsonSafe keeps an old panel's ABSENT field (and the
+                        // JSON-null answer of a legacy employee) from leaking
+                        // the literal string "null" into the UI.
                         Session.employeeFirstName =
                             com.medpad.tracker.util.JsonSafe.text(emp, "firstName")
                         // best-effort: fetch panel version for old-panel warning

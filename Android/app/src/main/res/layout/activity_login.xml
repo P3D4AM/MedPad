@@ -22,7 +22,45 @@
             android:textColor="@color/teal_700"
             android:layout_marginBottom="30dp" />
 
+        <!-- mission 12 / item 3 — when a remembered server address exists the
+             field is COLLAPSED into this summary row: after the first login
+             the rep only enters username + password. «تغییر آدرس سرور»
+             re-expands the input for when the panel moves. -->
+        <LinearLayout
+            android:id="@+id/boxSavedServer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="#e0f2f1"
+            android:padding="10dp"
+            android:layout_marginBottom="4dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/tvSavedServer"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:textSize="13sp"
+                android:textColor="@color/teal_700"
+                android:textDirection="ltr"
+                android:ellipsize="middle"
+                android:singleLine="true" />
+
+            <Button
+                android:id="@+id/btnChangeServer"
+                style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/login_change_server"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <!-- mission 12 / item 4 — the field starts PRE-FILLED with http:// so
+             the scheme is visible; a bare host/IP is auto-completed with it. -->
         <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/boxServer"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="4dp"

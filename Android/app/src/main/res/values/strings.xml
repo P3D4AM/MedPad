@@ -272,4 +272,22 @@
     <string name="report_edit_failed">ویرایش گزارش ناموفق بود — اتصال به سرور لازم است</string>
     <string name="err_report_not_found">گزارش روی سرور پیدا نشد (ممکن است حذف شده باشد) — صفحه را تازه‌سازی کنید</string>
     <string name="err_report_note_too_long">متن گزارش خیلی طولانی است (حداکثر ۵۰۰۰ نویسه)</string>
+
+    <!-- ═══ Mission 12 (Nov 2026) — comprehensive fix round ═══ -->
+
+    <!-- Item 1 — customer registered by a rep lands UNASSIGNED -->
+    <string name="customer_saved_unassigned_title">مشتری ثبت شد — در انتظار تخصیص</string>
+    <string name="customer_saved_unassigned_body">این مشتری ثبت شد اما هنوز به هیچ مدرپی اختصاص داده نشده است؛ بنابراین فعلاً در فهرست و نقشهٔ مشتریان شما دیده نمی‌شود. پس از تخصیص توسط مدیر، به‌صورت خودکار به فهرست شما اضافه می‌شود. می‌خواهید همین حالا درخواست تخصیص آن را برای خودتان بفرستید؟</string>
+    <string name="customer_request_assignment">درخواست تخصیص به من</string>
+    <string name="customer_no_request">نه، بعداً</string>
+    <string name="customer_request_failed">ارسال درخواست تخصیص ناموفق بود — اتصال به سرور لازم است</string>
+    <string name="request_sent">درخواست تخصیص ثبت شد — پس از بررسی مدیر، نتیجه از طریق اعلان اعلام می‌شود</string>
+
+    <!-- Item 3 — logout keeps the server address; login only asks user/pass -->
+    <string name="login_saved_server">سرور: %1$s</string>
+    <string name="login_change_server">تغییر آدرس سرور</string>
+
+    <!-- Item 4 — server-address normalization -->
+    <string name="err_server_url_empty">آدرس سرور را وارد کنید (مثال: http://192.168.1.10:3000)</string>
+    <string name="err_server_url_no_host">آدرس سرور کامل نیست — نام میزبان یا IP را وارد کنید</string>
 </resources>

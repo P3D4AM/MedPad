@@ -95,6 +95,17 @@ object Session {
         get() = loginPrefs()?.getBoolean(KEY_REMEMBER_FLAG, false) ?: false
         set(v) = loginPrefs()?.edit()?.putBoolean(KEY_REMEMBER_FLAG, v)?.apply() ?: Unit
 
+    /** mission 12 / item 3 — the last SUCCESSFULLY used server address, kept
+     *  in the login prefs file so it SURVIVES logout / session-clear (which
+     *  wipes the session prefs, token included). After the first successful
+     *  login the login screen pre-fills and hides the address field — the
+     *  user only enters username + password — with an explicit «تغییر آدرس
+     *  سرور» toggle for when the panel moves. Written on every successful
+     *  login and on every accepted server change; never a secret. */
+    var lastServerUrl: String
+        get() = loginPrefs()?.getString(KEY_LAST_SERVER, "") ?: ""
+        set(v) = loginPrefs()?.edit()?.putString(KEY_LAST_SERVER, v.trimEnd('/'))?.apply() ?: Unit
+
     val isLoggedIn: Boolean get() = token.isNotEmpty() && serverUrl.isNotEmpty()
 
     fun clear(context: Context) {
@@ -122,4 +133,5 @@ object Session {
     private const val KEY_PANEL_VER = "panel_version"
     private const val KEY_REMEMBER_USER = "remembered_username"
     private const val KEY_REMEMBER_FLAG = "remember_username_flag"
+    private const val KEY_LAST_SERVER = "last_server_url"
 }

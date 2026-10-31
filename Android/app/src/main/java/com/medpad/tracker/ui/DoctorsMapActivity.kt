@@ -398,18 +398,27 @@ class DoctorsMapActivity : AppCompatActivity() {
                 }
                 val city = pickedCity
                 scope.launch {
-                    val ok = withContext(Dispatchers.IO) {
+                    var ok = false
+                    var createdId: String? = null
+                    withContext(Dispatchers.IO) {
                         try {
                             if (existing == null) {
                                 // create: blank/absent pair → omit entirely
                                 val pair = city?.takeIf { it.first.isNotBlank() && it.second.isNotBlank() }
-                                ApiClient.createCustomer(
+                                val resp = ApiClient.createCustomer(
                                     name, lat, lng,
                                     edAddress.text.toString().trim(), edPhone.text.toString().trim(), "doctor",
                                     pair?.first, pair?.second,
-                                ).optBoolean("ok")
+                                )
+                                ok = resp.optBoolean("ok")
+                                // mission 12 / item 1 — the new customer lands
+                                // UNASSIGNED (the server no longer auto-assigns
+                                // the creator); remember its id so we can offer
+                                // the honest next step (an assignment REQUEST).
+                                createdId = resp.optJSONObject("customer")?.optString("id")
+                                    ?.takeIf { it.isNotEmpty() && it != "null" }
                             } else {
-                                DoctorsSync.edit(
+                                ok = DoctorsSync.edit(
                                     existing, name,
                                     edAddress.text.toString().trim(), edPhone.text.toString().trim(),
                                     city?.first, city?.second,
@@ -420,7 +429,45 @@ class DoctorsMapActivity : AppCompatActivity() {
                         }
                     }
                     if (ok) {
-                        Toast.makeText(this@DoctorsMapActivity, R.string.customer_saved, Toast.LENGTH_SHORT).show()
+                        // val copy → smart-castable inside the dialog lambda
+                        val cid = createdId
+                        if (existing == null && cid != null) {
+                            // mission 12 / item 1 — honest post-create flow: the
+                            // customer is registered but NOT yet assigned, so it
+                            // will NOT appear in this rep's list or on this map
+                            // (both show only assigned customers) until the
+                            // admin decides. Offer the existing assignment-
+                            // request flow — the admin still decides.
+                            val cid = createdId
+                            AlertDialog.Builder(this@DoctorsMapActivity)
+                                .setTitle(R.string.customer_saved_unassigned_title)
+                                .setMessage(R.string.customer_saved_unassigned_body)
+                                .setPositiveButton(R.string.customer_request_assignment) { _, _ ->
+                                    scope.launch {
+                                        val sent = withContext(Dispatchers.IO) {
+                                            try {
+                                                ApiClient.createAssignmentRequest(cid, "")
+                                                    .optBoolean("ok")
+                                            } catch (_: Exception) {
+                                                // 409 = a pending request already
+                                                // exists — also "sent" from the
+                                                // rep's point of view; anything
+                                                // else is an honest failure
+                                                false
+                                            }
+                                        }
+                                        Toast.makeText(
+                                            this@DoctorsMapActivity,
+                                            if (sent) R.string.request_sent else R.string.customer_request_failed,
+                                            Toast.LENGTH_LONG,
+                                        ).show()
+                                    }
+                                }
+                                .setNegativeButton(R.string.customer_no_request, null)
+                                .show()
+                        } else {
+                            Toast.makeText(this@DoctorsMapActivity, R.string.customer_saved, Toast.LENGTH_SHORT).show()
+                        }
                         load()
                     } else {
                         Toast.makeText(this@DoctorsMapActivity, R.string.sync_error, Toast.LENGTH_SHORT).show()
