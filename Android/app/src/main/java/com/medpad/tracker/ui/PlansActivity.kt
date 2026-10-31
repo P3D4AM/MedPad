@@ -66,6 +66,22 @@ class PlansActivity : AppCompatActivity() {
     /** The selected server-local day (YYYY-MM-DD). */
     private var dayKey: String = PlansSync.deviceDayKey(0)
 
+    companion object {
+        /** mission item 3 — open THIS exact plan (notification tap): jump to
+         *  its day, highlight the row and open its details dialog. */
+        const val EXTRA_PLAN_ID = "medpad.extra.PLAN_ID"
+        /** mission item 3 — open the «درخواست‌های من» dialog (a rejected
+         *  assignment-request notification). */
+        const val EXTRA_OPEN_REQUESTS = "medpad.extra.OPEN_REQUESTS"
+    }
+
+    // mission item 3 — consumed once, after the first successful render
+    private var pendingFocusPlanId: String? = null
+    private var pendingOpenRequests = false
+
+    /** the plan row currently highlighted (notification tap focus) */
+    private var highlightedPlanId: String? = null
+
     /** true while a sync is in flight (drives the loading state). */
     private var syncing = false
 
@@ -105,6 +121,11 @@ class PlansActivity : AppCompatActivity() {
         // anchor on the server's today when we have one (device clock may skew)
         val serverToday = PlansSync.serverToday()
         if (serverToday.isNotEmpty()) dayKey = serverToday
+
+        // mission item 3 — notification tap-through extras (consumed after
+        // the first successful render, when the cache is warm)
+        pendingFocusPlanId = intent.getStringExtra(EXTRA_PLAN_ID)?.takeIf { it.isNotEmpty() }
+        pendingOpenRequests = intent.getBooleanExtra(EXTRA_OPEN_REQUESTS, false)
 
         sync(false)
     }
@@ -146,7 +167,53 @@ class PlansActivity : AppCompatActivity() {
             syncing = false
             render()
             renderSyncLine()
+            consumePendingFocus()
         }
+    }
+
+    /** mission item 3 — consume the notification-tap extras exactly ONCE,
+     *  after the first render (plan cache warm). A plan that is not in the
+     *  cache (older than the synced window / cancelled long ago) gets an
+     *  honest toast and the screen stays on today — never a crash. */
+    private fun consumePendingFocus() {
+        pendingFocusPlanId?.let { pid ->
+            pendingFocusPlanId = null
+            scope.launch {
+                val plan = withContext(Dispatchers.IO) {
+                    try {
+                        com.medpad.tracker.db.AppDatabase
+                            .get(com.medpad.tracker.sync.TrackerContext.app)
+                            .plannedVisitDao().byId(pid)
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
+                if (plan == null) {
+                    Toast.makeText(this@PlansActivity, R.string.notif_tap_plan_gone, Toast.LENGTH_LONG).show()
+                    return@launch
+                }
+                // jump to the plan's day and focus its row
+                dayKey = plan.dayKey
+                highlightedPlanId = plan.id
+                render()
+                focusPlanRow(plan)
+            }
+        }
+        if (pendingOpenRequests) {
+            pendingOpenRequests = false
+            showMyRequests()
+        }
+    }
+
+    /** scroll the plan's row into view and open its details dialog — the
+     *  notification was ABOUT this plan, so the tap lands ON it. */
+    private fun focusPlanRow(plan: PlannedVisitEntity) {
+        val pos = adapter.items.indexOfFirst {
+            it is Row.Plan && it.plan.id == plan.id
+        }
+        if (pos >= 0) recycler.scrollToPosition(pos)
+        // small delay so the scroll settles before the dialog covers it
+        recycler.postDelayed({ showDetails(plan) }, 350)
     }
 
     private fun render() {
@@ -580,6 +647,17 @@ class PlansActivity : AppCompatActivity() {
             fun bind(plan: PlannedVisitEntity) {
                 tvTime.text = plan.timeLocal
                 tvDuration.text = getString(R.string.plan_duration_min, plan.durationMin.toString())
+
+                // mission item 3 — the notification-tap focus highlight: an
+                // amber STROKE (keeps the card's own background intact)
+                (card as? com.google.android.material.card.MaterialCardView)?.let { cv ->
+                    if (highlightedPlanId == plan.id) {
+                        cv.strokeWidth = (resources.displayMetrics.density * 2).toInt()
+                        cv.setStrokeColor(0xFFF59E0B.toInt())
+                    } else {
+                        cv.strokeWidth = 0
+                    }
+                }
 
                 // priority badge (high/low only — normal needs no noise)
                 when (plan.priority) {

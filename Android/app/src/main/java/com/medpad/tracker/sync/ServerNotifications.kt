@@ -44,14 +44,16 @@ object ServerNotifications {
      * passes AppNotifier.notify; tests simulate failures). Display
      * exceptions count as failures — they must not abort the round.
      *
-     * phase 2 / §1: the display callback now also receives the notification
-     * KIND and CUSTOMER ID so the caller can attach the tap-through
-     * contentIntent (NotificationTapRouter) — the tap opens the related
-     * screen per kind.
+     * phase 2 / §1: the display callback receives the notification KIND and
+     * CUSTOMER ID so the caller can attach the tap-through contentIntent.
+     * mission item 3 (Oct 31): entityType/entityId complete the payload so
+     * the tap opens the exact RECORD (a specific plan / the customer's
+     * marker / the requests dialog), not just the screen. All entity
+     * fields are null for historical rows and old panels.
      */
     suspend fun pollOnce(
         context: Context,
-        display: (notifId: Int, title: String, body: String, kind: String?, customerId: String?) -> Boolean,
+        display: (notifId: Int, title: String, body: String, kind: String?, customerId: String?, entityType: String?, entityId: String?) -> Boolean,
     ): PollResult = withContext(Dispatchers.IO) {
         val resp = ApiClient.notifications()
         val arr: JSONArray = resp.optJSONArray("notifications") ?: JSONArray()
@@ -71,11 +73,14 @@ object ServerNotifications {
             }
             val title = n.optString("title")
             val body = n.optString("body")
-            // phase 2 / §1: kind + customerId feed the tap-through routing
+            // phase 2 / §1: kind + customerId feed the tap-through routing;
+            // mission item 3: entityType/entityId name the exact record
             val kind = if (n.has("kind") && !n.isNull("kind")) n.optString("kind") else null
             val customerId = if (n.has("customerId") && !n.isNull("customerId")) n.optString("customerId") else null
+            val entityType = if (n.has("entityType") && !n.isNull("entityType")) n.optString("entityType") else null
+            val entityId = if (n.has("entityId") && !n.isNull("entityId")) n.optString("entityId") else null
             val shown = try {
-                display(id.hashCode(), title, body, kind, customerId)
+                display(id.hashCode(), title, body, kind, customerId, entityType, entityId)
             } catch (_: Exception) {
                 false
             }

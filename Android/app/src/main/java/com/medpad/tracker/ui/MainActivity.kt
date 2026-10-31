@@ -12,6 +12,7 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.View
 import android.widget.Button
 import android.widget.ImageButton
@@ -78,6 +79,27 @@ class MainActivity : AppCompatActivity() {
         override fun onReceive(context: Context?, intent: Intent?) {
             updateQueueStatus()
         }
+    }
+
+    // mission item 3 — duplicate-tap guard: the same tap destination
+    // delivered twice within this window (double-tap on the notification,
+    // or the single-top intent redelivery) opens the destination ONCE.
+    private var lastTapSignature: String? = null
+    private var lastTapAt = 0L
+
+    /** mission item 3 — single-top redelivery: the hub is already on top
+     *  and the user tapped a notification. Without this override the tap
+     *  was silently IGNORED while the app was open (routeFrom only ran in
+     *  onCreate). Consumed here with the same guarded-hub rules: no
+     *  session → persist + login detour; otherwise forward (deduped). */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        val route = NotificationTapRouter.routeFrom(intent) ?: return
+        if (!Session.isLoggedIn) {
+            NotificationTapRouter.savePending(this, route)
+            return
+        }
+        scope.launch { forwardTapRoute(route) }
     }
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
@@ -241,16 +263,37 @@ class MainActivity : AppCompatActivity() {
         micPermission.launch(Manifest.permission.RECORD_AUDIO)
     }
 
-    /** phase 2 / §1 — forward a consumed notification-tap route to the
-     *  related screen. Runs after the main UI is up so the back stack
-     *  always has the home screen below the destination.
+    /** phase 2 / §1 + mission item 3 — forward a consumed notification-tap
+     *  route to the related screen/RECORD. Runs after the main UI is up so
+     *  the back stack always has the home screen below the destination.
+     *  Entity payloads open the exact record:
+     *    plan    → PlansActivity on that plan's day, row highlighted +
+     *              details opened
+     *    request → PlansActivity with the «درخواست‌های من» dialog open
+     *    customer→ the map centred on that customer's marker
+     *  Without an entity (historical rows / old panels) the kind mapping
+     *  decides the screen, as before.
      *  MAP routes check the referenced customer against the local cache:
      *  deleted/unassigned → the map still opens, with an honest toast
      *  (understandable + safe, never a crash). */
     private suspend fun forwardTapRoute(route: NotificationTapRouter.Route) {
+        // collapse duplicate deliveries of the SAME destination (mission
+        // item 3: «از باز شدن چندباره یک مقصد … جلوگیری کن»)
+        val now = SystemClock.elapsedRealtime()
+        if (route.signature == lastTapSignature && now - lastTapAt < 2_500) return
+        lastTapSignature = route.signature
+        lastTapAt = now
+
         when (route.route) {
             NotificationTapRouter.ROUTE_PLANS -> {
-                startActivity(Intent(this, PlansActivity::class.java))
+                val i = Intent(this, PlansActivity::class.java)
+                when (route.entityType) {
+                    NotificationTapRouter.ENTITY_PLAN ->
+                        i.putExtra(PlansActivity.EXTRA_PLAN_ID, route.entityId)
+                    NotificationTapRouter.ENTITY_REQUEST ->
+                        i.putExtra(PlansActivity.EXTRA_OPEN_REQUESTS, true)
+                }
+                startActivity(i)
             }
             NotificationTapRouter.ROUTE_MAP -> {
                 var known = true
@@ -269,7 +312,11 @@ class MainActivity : AppCompatActivity() {
                         Toast.makeText(this@MainActivity, R.string.notif_tap_customer_gone, Toast.LENGTH_LONG).show()
                     }
                 }
-                startActivity(Intent(this, DoctorsMapActivity::class.java))
+                val i = Intent(this, DoctorsMapActivity::class.java)
+                if (known && route.customerId != null) {
+                    i.putExtra(DoctorsMapActivity.EXTRA_FOCUS_CUSTOMER_ID, route.customerId)
+                }
+                startActivity(i)
             }
             // ROUTE_HOME (and anything else): no forwarding — the user is
             // already home. The route is simply consumed.

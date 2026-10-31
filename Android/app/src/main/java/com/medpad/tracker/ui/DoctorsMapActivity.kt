@@ -69,6 +69,11 @@ class DoctorsMapActivity : AppCompatActivity() {
 
     companion object {
         private const val REQ_LOCATION = 41
+
+        /** mission item 3 — notification tap-through: centre the map on THIS
+         *  customer's marker (and open its info window). The hub has already
+         *  verified the customer exists locally. */
+        const val EXTRA_FOCUS_CUSTOMER_ID = "medpad.extra.FOCUS_CUSTOMER_ID"
     }
 
     private val eventsReceiver = object : MapEventsReceiver {
@@ -266,6 +271,22 @@ class DoctorsMapActivity : AppCompatActivity() {
             )
         } catch (_: Exception) { /* single point */ }
         map.invalidate()
+
+        // mission item 3 — notification tap-through: the notification was
+        // about ONE customer → centre on that marker and open its info
+        // window. The hub (MainActivity) only passes the extra when the
+        // customer is still in the local cache; a vanished marker would be
+        // a cache race, handled honestly below.
+        intent.getStringExtra(EXTRA_FOCUS_CUSTOMER_ID)?.takeIf { it.isNotEmpty() }?.let { cid ->
+            val m = markers[cid]
+            if (m != null) {
+                map.controller.animateTo(m.position)
+                map.controller.setZoom(kotlin.math.max(map.zoomLevelDouble, MapDefaults.FOLLOW_ZOOM))
+                m.showInfoWindow()
+            } else {
+                Toast.makeText(this, R.string.notif_tap_customer_gone, Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     private fun editDialog(existing: Doctor?, lat: Double, lng: Double) {

@@ -191,6 +191,11 @@ interface PlannedVisitDao {
     @Query("SELECT * FROM planned_visits WHERE dayKey = :dayKey ORDER BY timeLocal")
     suspend fun byDay(dayKey: String): List<PlannedVisitEntity>
 
+    /** mission item 3 — notification tap-through: find the exact plan the
+     *  notification is about (any cached day), to jump to its day + row. */
+    @Query("SELECT * FROM planned_visits WHERE id = :id LIMIT 1")
+    suspend fun byId(id: String): PlannedVisitEntity?
+
     @Query("SELECT COUNT(*) FROM planned_visits")
     suspend fun count(): Int
 

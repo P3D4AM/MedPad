@@ -222,13 +222,15 @@ class TrackingService : LifecycleService() {
                     }
                     // package 11 — local proximity alert honours the user's toggle
                     if (NotificationPrefs.proximityEnabled) {
-                        // phase 2 / §1: tap-through — opens the map for this customer
+                        // phase 2 / §1 + mission item 3: tap-through opens the
+                        // map centred on THIS customer's marker
                         AppNotifier.notify(
                             this@TrackingService, doc.id.hashCode(),
                             getString(R.string.notif_nearby, doc.name),
                             "فاصله حدود ${dist.roundToInt()} متر",
                             com.medpad.tracker.ui.NotificationTapRouter.pendingIntent(
                                 this@TrackingService, "proximity", doc.id,
+                                com.medpad.tracker.ui.NotificationTapRouter.ENTITY_CUSTOMER, doc.id,
                             ),
                         )
                     }
@@ -282,12 +284,13 @@ class TrackingService : LifecycleService() {
             lastNotifPollAt = now
             try {
                 if (Session.isLoggedIn) {
-                    ServerNotifications.pollOnce(applicationContext) { id, title, body, kind, customerId ->
-                        // phase 2 / §1: tap-through per kind (map / plans / home)
+                    ServerNotifications.pollOnce(applicationContext) { id, title, body, kind, customerId, entityType, entityId ->
+                        // phase 2 / §1: tap-through per kind; mission item 3:
+                        // entityType/entityId open the exact record
                         AppNotifier.notify(
                             this@TrackingService, id, title, body,
                             com.medpad.tracker.ui.NotificationTapRouter.pendingIntent(
-                                this@TrackingService, kind, customerId,
+                                this@TrackingService, kind, customerId, entityType, entityId,
                             ),
                         )
                     }

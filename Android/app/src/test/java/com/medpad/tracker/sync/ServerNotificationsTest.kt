@@ -120,11 +120,11 @@ class ServerNotificationsTest {
     /** The injected display: fails for titles registered in [failingTitles].
      *  phase 2 / §1: also RECORDS (title → kind, customerId) so tests can
      *  assert the tap-through metadata is passed through to the display. */
-    private val displayedMeta = CopyOnWriteArrayList<Pair<String, Pair<String?, String?>>>()
+    private val displayedMeta = CopyOnWriteArrayList<Pair<String, Pair<String?, Pair<String?, Pair<String?, String?>>>>>()
 
-    private fun testDisplay(): (Int, String, String, String?, String?) -> Boolean =
-        { _, title, _, kind, customerId ->
-            displayedMeta.add(title to (kind to customerId))
+    private fun testDisplay(): (Int, String, String, String?, String?, String?, String?) -> Boolean =
+        { _, title, _, kind, customerId, entityType, entityId ->
+            displayedMeta.add(title to (kind to (customerId to (entityType to entityId))))
             if (failingTitles.contains(title)) {
                 false // simulate a system display failure
             } else {
@@ -242,7 +242,7 @@ class ServerNotificationsTest {
         NotificationPrefs.markShown(app, "notif-c")
 
         var displayCalls = 0
-        val r = ServerNotifications.pollOnce(app) { _, _, _, _, _ -> displayCalls++; true }
+        val r = ServerNotifications.pollOnce(app) { _, _, _, _, _, _, _ -> displayCalls++; true }
 
         // NOT re-displayed (no duplicate) …
         assertEquals(0, displayCalls)
@@ -260,7 +260,7 @@ class ServerNotificationsTest {
         addServerRow("notif-old", "اعلان خوانده‌شده", readAt = "2026-10-29T00:00:00.000Z")
 
         var displayCalls = 0
-        val r = ServerNotifications.pollOnce(app) { _, _, _, _, _ -> displayCalls++; true }
+        val r = ServerNotifications.pollOnce(app) { _, _, _, _, _, _, _ -> displayCalls++; true }
 
         assertEquals(0, displayCalls)
         assertEquals(0, r.displayed)
@@ -273,7 +273,7 @@ class ServerNotificationsTest {
         addServerRow("notif-x", "استثنا")
         addServerRow("notif-y", "عادی")
 
-        val r = ServerNotifications.pollOnce(app) { _, title, _, _, _ ->
+        val r = ServerNotifications.pollOnce(app) { _, title, _, _, _, _, _ ->
             if (title == "استثنا") throw IllegalStateException("notification manager exploded")
             true
         }
@@ -299,11 +299,12 @@ class ServerNotificationsTest {
         assertEquals(4, r.displayed)
         fun meta(title: String) = displayedMeta.first { it.first == title }.second
         // assignment carries BOTH kind and customerId → the caller can route
-        // the tap to the customer's screen
-        assertEquals("assignment" to "cus-1", meta("تخصیص"))
-        assertEquals("plan" to null, meta("برنامه"))
-        assertEquals("info" to null, meta("اطلاع"))
+        // the tap to the customer's screen. mission item 3: entityType/
+        // entityId complete the record-level routing payload.
+        assertEquals("assignment" to ("cus-1" to (null to null)), meta("تخصیص"))
+        assertEquals("plan" to (null to (null to null)), meta("برنامه"))
+        assertEquals("info" to (null to (null to null)), meta("اطلاع"))
         // legacy/no metadata → nulls (router defaults to the safe HOME route)
-        assertEquals(null to null, meta("بدون نوع"))
+        assertEquals(null to (null to (null to null)), meta("بدون نوع"))
     }
 }

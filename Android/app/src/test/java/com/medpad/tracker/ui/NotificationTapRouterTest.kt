@@ -159,4 +159,92 @@ class NotificationTapRouterTest {
             .edit().putString("route", "not-a-real-route").apply()
         assertNull(NotificationTapRouter.takePending(app))
     }
+
+    // ── mission item 3: ENTITY-level destinations ────────────────
+
+    @Test
+    fun `entity plan routes to the plans screen carrying the plan id`() {
+        val r = NotificationTapRouter.routeForEntity("plan", null, "plan", "p-77")
+        assertEquals(NotificationTapRouter.ROUTE_PLANS, r.route)
+        assertEquals("plan", r.entityType)
+        assertEquals("p-77", r.entityId)
+    }
+
+    @Test
+    fun `entity request routes to the plans screen carrying the request id`() {
+        val r = NotificationTapRouter.routeForEntity("assignment", null, "request", "ar-9")
+        assertEquals(NotificationTapRouter.ROUTE_PLANS, r.route)
+        assertEquals("request", r.entityType)
+        assertEquals("ar-9", r.entityId)
+    }
+
+    @Test
+    fun `entity customer routes to the map focused on that customer`() {
+        val r = NotificationTapRouter.routeForEntity("assignment", null, "customer", "cus-4")
+        assertEquals(NotificationTapRouter.ROUTE_MAP, r.route)
+        assertEquals("cus-4", r.customerId)
+        assertEquals("cus-4", r.entityId)
+    }
+
+    @Test
+    fun `no entity degrades to the kind mapping with legacy customer id`() {
+        val r = NotificationTapRouter.routeForEntity("assignment", "cus-4", null, null)
+        assertEquals(NotificationTapRouter.ROUTE_MAP, r.route)
+        assertEquals("cus-4", r.customerId)
+        assertNull(r.entityType)
+        // kind-only plan (historical row) → plans screen without a record id
+        val p = NotificationTapRouter.routeForEntity("plan", null, null, null)
+        assertEquals(NotificationTapRouter.ROUTE_PLANS, p.route)
+        assertNull(p.entityId)
+    }
+
+    @Test
+    fun `unknown entity type degrades to the kind mapping - never forwarded`() {
+        val r = NotificationTapRouter.routeForEntity("info", null, "brand-new-type", "x")
+        assertEquals(NotificationTapRouter.ROUTE_HOME, r.route)
+        assertNull(r.entityType)
+    }
+
+    @Test
+    fun `entity payload survives the pendingIntent roundtrip`() {
+        val pi = NotificationTapRouter.pendingIntent(app, "plan", null, "plan", "p-77")
+        val wrapped: Intent = Shadows.shadowOf(pi).savedIntent
+        val route = NotificationTapRouter.routeFrom(wrapped)!!
+        assertEquals(NotificationTapRouter.ROUTE_PLANS, route.route)
+        assertEquals("plan", route.entityType)
+        assertEquals("p-77", route.entityId)
+    }
+
+    @Test
+    fun `entity payload survives the pending persistence (login detour)`() {
+        NotificationTapRouter.savePending(
+            app,
+            NotificationTapRouter.routeForEntity("plan", null, "plan", "p-5"),
+        )
+        val taken = NotificationTapRouter.takePending(app)!!
+        assertEquals(NotificationTapRouter.ROUTE_PLANS, taken.route)
+        assertEquals("plan", taken.entityType)
+        assertEquals("p-5", taken.entityId)
+        assertNull(NotificationTapRouter.takePending(app))
+    }
+
+    @Test
+    fun `a forged entity type in an intent is stripped not forwarded`() {
+        val i = Intent()
+            .putExtra(NotificationTapRouter.EXTRA_ROUTE, NotificationTapRouter.ROUTE_PLANS)
+            .putExtra(NotificationTapRouter.EXTRA_ENTITY_TYPE, "evil")
+            .putExtra(NotificationTapRouter.EXTRA_ENTITY_ID, "x")
+        val route = NotificationTapRouter.routeFrom(i)!!
+        assertEquals(NotificationTapRouter.ROUTE_PLANS, route.route)
+        assertNull(route.entityType)
+        assertNull(route.entityId)
+    }
+
+    @Test
+    fun `route signature distinguishes records on the same screen`() {
+        val a = NotificationTapRouter.routeForEntity("plan", null, "plan", "p-1")
+        val b = NotificationTapRouter.routeForEntity("plan", null, "plan", "p-2")
+        org.junit.Assert.assertNotEquals(a.signature, b.signature)
+        assertEquals(a.signature, a.copy().signature)
+    }
 }

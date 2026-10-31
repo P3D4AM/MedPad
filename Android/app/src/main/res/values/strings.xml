@@ -145,6 +145,7 @@
     <!-- phase 2 / §1: notification tap-through -->
     <string name="notif_tap_login_needed">برای مشاهدهٔ اعلان ابتدا وارد حساب خود شوید</string>
     <string name="notif_tap_customer_gone">مشتریِ مرتبط با این اعلان دیگر در دسترس شما نیست (حذف شده یا تخصیص آن لغو شده است)</string>
+    <string name="notif_tap_plan_gone">این برنامه در حافظهٔ دستگاه نیست؛ ممکن است مربوط به روز دیگری باشد یا همگام‌سازی نشده باشد.</string>
 
     <!-- Planned visits (phase 2 / task 2) -->
     <string name="plans_title">برنامهٔ بازدیدها</string>
