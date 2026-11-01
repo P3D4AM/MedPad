@@ -62,6 +62,9 @@ class Migration11to12Test {
             // no index, so Room's expected schema has none and validation
             // rejects a stray one (MIGRATION_4_5 only creates it on true
             // v4→v5 upgrades, which these fixtures never simulate)
+            // Customer 360 — a pre-v14 install has none of it
+            MigrationTestFixtures.stripCustomer360Doctors(raw)
+            MigrationTestFixtures.dropCustomer360Tables(raw)
             raw.version = 11
         }
         return Room.databaseBuilder(app, AppDatabase::class.java, dbFile.path)

@@ -16,6 +16,14 @@ import java.io.File
  * Package 8: province/city come from the server's offline Iran-cities
  * dataset — nullable and absent on old servers, so they parse tolerantly
  * (optString default null) and default to null for legacy rows.
+ *
+ * Customer 360 (phase 1): the new profile fields are NULLABLE with default
+ * null — rows synced from an OLD server (no such columns in its JSON)
+ * parse fine and keep null; the local table migrates additively (v14).
+ * `active` mirrors the server's logical-delete flag (default true — every
+ * legacy row is active); `pendingLocalId` is non-null ONLY on rows created
+ * OFFLINE in the pending queue (see PendingCustomerOp) — it maps the temp
+ * local row to the server row once the create is confirmed.
  */
 @Entity(tableName = "doctors")
 data class Doctor(
@@ -31,7 +39,22 @@ data class Doctor(
     val radius: Double = 150.0,
     val updatedAt: Long = 0L, // epoch ms — LWW key
     val assigned: Boolean = false,
-)
+    // ── Customer 360 (phase 1) — additive, nullable, default-null ──
+    val lastName: String? = null,
+    val title: String? = null,
+    val specialty: String? = null,
+    val managerName: String? = null,
+    val phone2: String? = null,
+    val district: String? = null,
+    val postalCode: String? = null,
+    val notes: String? = null,
+    val active: Boolean = true,
+    /** non-null only on rows created offline (pending queue); null otherwise */
+    val pendingLocalId: String? = null,
+) {
+    /** Display name — given + family name when the split exists. */
+    val fullName: String get() = if (lastName.isNullOrBlank()) name else "$name $lastName"
+}
 
 @Dao
 interface DoctorDao {
@@ -43,6 +66,9 @@ interface DoctorDao {
 
     @Query("SELECT * FROM doctors WHERE id = :id")
     suspend fun byId(id: String): Doctor?
+
+    @Query("SELECT * FROM doctors WHERE pendingLocalId = :localId LIMIT 1")
+    suspend fun byPendingLocalId(localId: String): Doctor?
 
     @Query("SELECT MAX(updatedAt) FROM doctors")
     suspend fun maxUpdatedAt(): Long?
@@ -59,6 +85,149 @@ interface DoctorDao {
     /** G-1 (phase 1 / task 2): drop local rows whose id is no longer assigned. */
     @Query("DELETE FROM doctors WHERE id NOT IN (:keepIds)")
     suspend fun keepOnly(keepIds: List<String>)
+
+    /** Customer 360 — offline-created rows must survive the keepOnly sweep
+     *  (they are not on the server yet; their id starts with "local-"). */
+    @Query("DELETE FROM doctors WHERE id NOT IN (:keepIds) AND pendingLocalId IS NULL")
+    suspend fun keepOnlyExceptPending(keepIds: List<String>)
+
+    /** Customer 360 — the empty-assignment sweep: same rule as
+     *  keepOnlyExceptPending but without the (invalid) empty IN list. */
+    @Query("DELETE FROM doctors WHERE pendingLocalId IS NULL")
+    suspend fun clearExceptPending()
+
+    @Query("DELETE FROM doctors WHERE id = :id")
+    suspend fun deleteById(id: String)
+}
+
+/**
+ * Customer 360 (phase 1) — cached physician↔clinic links. Read-only mirror
+ * of the server's CustomerLink rows that reference customers ASSIGNED to
+ * this rep (the server masks everything else). Replaced whole-table on
+ * every sync (no local edits to arbitrate — same pattern as planned visits).
+ */
+@Entity(
+    tableName = "customer_links",
+    indices = [Index("clinicId"), Index("physicianId")],
+)
+data class CustomerLinkEntity(
+    @PrimaryKey val id: String,
+    val clinicId: String,
+    val physicianId: String,
+    val clinicName: String? = null,
+    val physicianName: String? = null,
+    val note: String? = null,
+    val active: Boolean = true,
+)
+
+@Dao
+interface CustomerLinkDao {
+    @Query("SELECT * FROM customer_links WHERE clinicId = :clinicId AND active = 1")
+    suspend fun byClinic(clinicId: String): List<CustomerLinkEntity>
+
+    @Query("SELECT * FROM customer_links WHERE physicianId = :physicianId AND active = 1")
+    suspend fun byPhysician(physicianId: String): List<CustomerLinkEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(items: List<CustomerLinkEntity>)
+
+    @Query("DELETE FROM customer_links")
+    suspend fun clear()
+}
+
+/**
+ * Customer 360 (phase 1) — offline cache of the customer 360 profile
+ * response (visits, purchase summary, links) so the profile page opens
+ * OFFLINE with the last synced state. One row per customer; `payload` is
+ * the raw server JSON; `fetchedAt` powers the honest «آخرین به‌روزرسانی»
+ * banner. A profile never blocks on this cache — online refresh replaces
+ * it atomically.
+ */
+@Entity(tableName = "customer_profiles")
+data class CustomerProfileCache(
+    @PrimaryKey val customerId: String,
+    val payload: String,
+    val fetchedAt: Long = System.currentTimeMillis(),
+)
+
+@Dao
+interface CustomerProfileDao {
+    @Query("SELECT * FROM customer_profiles WHERE customerId = :customerId")
+    suspend fun byId(customerId: String): CustomerProfileCache?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(cache: CustomerProfileCache)
+
+    @Query("DELETE FROM customer_profiles")
+    suspend fun clear()
+}
+
+/**
+ * Customer 360 (phase 1) — OFFLINE create/edit/link queue for customers.
+ * Same durability contract as the check-in queue:
+ *  * localId (UUID) is the idempotency key — the server's create path
+ *    stores it on the customer row (appLocalId) and returns the existing
+ *    row on replay, so a crash mid-sync can never create a duplicate;
+ *  * rows are deleted ONLY after the server confirmed them (or after a
+ *    PERMANENT 4xx rejection — recorded with the Persian error text);
+ *  * status lifecycle: pending → sending → (confirmed | failed).
+ *
+ * op: "create" — payload carries the full new-customer form; a TEMP doctor
+ *                row (id "local-<uuid>", assigned=false, pendingLocalId=uuid)
+ *                is visible in the local list immediately.
+ *      "edit"  — payload carries the changed fields + the client's known
+ *                updatedAt (LWW); the local row is updated optimistically.
+ *      "link"  — payload carries clinicId/physicianId/note.
+ */
+const val CUSTOP_STATUS_PENDING = "pending"
+const val CUSTOP_STATUS_SENDING = "sending"
+const val CUSTOP_STATUS_FAILED = "failed"
+
+@Entity(tableName = "pending_customer_ops", indices = [Index("status"), Index("customerId")])
+data class PendingCustomerOp(
+    @PrimaryKey(autoGenerate = true) val uid: Long = 0,
+    val localId: String,               // UUID — idempotency key (create/link)
+    val op: String,                    // create | edit | link
+    val customerId: String? = null,    // null for create (server assigns id)
+    val payload: String,               // JSON form data
+    val createdAt: Long = System.currentTimeMillis(),
+    val attempts: Int = 0,
+    val lastError: String? = null,
+    val status: String = CUSTOP_STATUS_PENDING,
+)
+
+@Dao
+interface PendingCustomerOpDao {
+    @Query("SELECT * FROM pending_customer_ops ORDER BY createdAt")
+    suspend fun all(): List<PendingCustomerOp>
+
+    @Query("SELECT COUNT(*) FROM pending_customer_ops WHERE status != 'failed'")
+    suspend fun pendingCount(): Int
+
+    @Query("SELECT * FROM pending_customer_ops WHERE status = 'failed' ORDER BY createdAt")
+    suspend fun failed(): List<PendingCustomerOp>
+
+    @Query("SELECT * FROM pending_customer_ops WHERE status != 'failed' ORDER BY createdAt")
+    suspend fun pending(): List<PendingCustomerOp>
+
+    /** crash recovery — anything marked sending goes back to pending */
+    @Query("UPDATE pending_customer_ops SET status = 'pending' WHERE status = 'sending'")
+    suspend fun resetSending(): Int
+
+    @Query("UPDATE pending_customer_ops SET status = 'pending' WHERE status = 'failed'")
+    suspend fun requeueFailed(): Int
+
+    @Insert
+    suspend fun insert(op: PendingCustomerOp): Long
+
+    @Update
+    suspend fun update(op: PendingCustomerOp)
+
+    @Query("DELETE FROM pending_customer_ops WHERE uid = :uid")
+    suspend fun deleteById(uid: Long)
+
+    @Query("DELETE FROM pending_customer_ops")
+    suspend fun clearAll()
 }
 
 /**

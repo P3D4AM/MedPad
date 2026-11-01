@@ -388,6 +388,19 @@ object CheckinSync {
                         // G-1 (phase 1 / task 2): the server now only returns
                         // ASSIGNED customers — `assigned` mirrors server truth.
                         assigned = true,
+                        // Customer 360 (phase 1) — new profile fields (absent on
+                        // old servers → null; optString's null default). An
+                        // offline-created row keeps its pendingLocalId mapping.
+                        lastName = o.optString("lastName", null),
+                        title = o.optString("title", null),
+                        specialty = o.optString("specialty", null),
+                        managerName = o.optString("managerName", null),
+                        phone2 = o.optString("phone2", null),
+                        district = o.optString("district", null),
+                        postalCode = o.optString("postalCode", null),
+                        notes = o.optString("notes", null),
+                        active = o.optBoolean("active", true),
+                        pendingLocalId = existing?.pendingLocalId,
                     )
                 )
             }
@@ -396,8 +409,10 @@ object CheckinSync {
             // truth — drop local rows that are no longer assigned to this
             // employee (works for both full and incremental syncs because the
             // server always returns the complete assignedIds list).
-            if (assignedIds.isEmpty()) db.doctorDao().clear()
-            else db.doctorDao().keepOnly(assignedIds.toList())
+            // Customer 360: offline-created rows (pendingLocalId set) are
+            // EXEMPT — they are not on the server yet and must survive.
+            if (assignedIds.isEmpty()) db.doctorDao().clearExceptPending()
+            else db.doctorDao().keepOnlyExceptPending(assignedIds.toList())
             lastError = null
             markSessionAlive() // a successful authed call proves the token works
             true

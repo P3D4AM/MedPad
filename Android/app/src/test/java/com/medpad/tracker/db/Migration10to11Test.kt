@@ -100,6 +100,9 @@ class Migration10to11Test {
             // rejects a stray one (MIGRATION_4_5 only creates it on true
             // v4→v5 upgrades, which these fixtures never simulate)
 
+                // Customer 360 — a pre-v14 install has none of it
+                MigrationTestFixtures.stripCustomer360Doctors(raw)
+                MigrationTestFixtures.dropCustomer360Tables(raw)
                 raw.execSQL("PRAGMA user_version = 10")
                 raw.setTransactionSuccessful()
             } finally {

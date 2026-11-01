@@ -76,6 +76,17 @@ class Migration9to10Test {
             try {
                 raw.execSQL("DROP TABLE IF EXISTS doctors_v9")
                 val v9Ddl = sql.replace("`province` TEXT, `city` TEXT, ", "")
+                // Customer 360 — the v14 columns never existed on a v9 install
+                    .replace(", `lastName` TEXT", "")
+                    .replace(", `title` TEXT", "")
+                    .replace(", `specialty` TEXT", "")
+                    .replace(", `managerName` TEXT", "")
+                    .replace(", `phone2` TEXT", "")
+                    .replace(", `district` TEXT", "")
+                    .replace(", `postalCode` TEXT", "")
+                    .replace(", `notes` TEXT", "")
+                    .replace(", `active` INTEGER NOT NULL", "")
+                    .replace(", `pendingLocalId` TEXT", "")
                 assertTrue("downgrade DDL must differ (columns removed)", v9Ddl != sql)
                 raw.execSQL(v9Ddl.replace("CREATE TABLE `doctors`", "CREATE TABLE `doctors_v9`"))
                 raw.execSQL(
@@ -120,6 +131,7 @@ class Migration9to10Test {
             // rejects a stray one (MIGRATION_4_5 only creates it on true
             // v4→v5 upgrades, which these fixtures never simulate)
 
+MigrationTestFixtures.dropCustomer360Tables(raw)
 raw.execSQL("PRAGMA user_version = 9")
                 raw.setTransactionSuccessful()
             } finally {

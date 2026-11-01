@@ -76,6 +76,61 @@ object ApiClient {
     fun customers(since: String? = null): JSONObject =
         exec(req(if (since != null) "/api/app/customers?since=$since" else "/api/app/customers"))
 
+    /**
+     * Customer 360 (phase 1) — the full customer form carried by BOTH the
+     * online create path and the offline pending queue. Only non-blank
+     * optional fields are sent (the server's partial-update semantics keep
+     * absent fields untouched); localId is the OFFLINE-CREATE idempotency
+     * key (the server stores it as Customer.appLocalId and returns the
+     * existing row on replay — a retried queue item can never duplicate).
+     */
+    data class CustomerForm(
+        val name: String,
+        val type: String = "doctor",
+        val address: String = "",
+        val phone: String = "",
+        val lat: Double,
+        val lng: Double,
+        val radius: Double = 150.0,
+        val city: String? = null,
+        val province: String? = null,
+        val lastName: String = "",
+        val title: String = "",
+        val specialty: String = "",
+        val managerName: String = "",
+        val phone2: String = "",
+        val district: String = "",
+        val postalCode: String = "",
+        val notes: String = "",
+    )
+
+    private fun customerFormBody(f: CustomerForm, localId: String?): RequestBody {
+        val body = JSONObject()
+            .put("name", f.name)
+            .put("type", f.type)
+            .put("address", f.address)
+            .put("phone", f.phone)
+            .put("lat", f.lat)
+            .put("lng", f.lng)
+            .put("radius", f.radius)
+        // package 8 — (city, province) pair from the bundled offline dataset;
+        // omitted entirely when no city was picked (old behavior).
+        if (!f.city.isNullOrEmpty() && !f.province.isNullOrEmpty()) {
+            body.put("city", f.city).put("province", f.province)
+        }
+        // Customer 360 — profile fields, only when filled (partial update)
+        if (f.lastName.isNotBlank()) body.put("lastName", f.lastName)
+        if (f.title.isNotBlank()) body.put("title", f.title)
+        if (f.specialty.isNotBlank()) body.put("specialty", f.specialty)
+        if (f.managerName.isNotBlank()) body.put("managerName", f.managerName)
+        if (f.phone2.isNotBlank()) body.put("phone2", f.phone2)
+        if (f.district.isNotBlank()) body.put("district", f.district)
+        if (f.postalCode.isNotBlank()) body.put("postalCode", f.postalCode)
+        if (f.notes.isNotBlank()) body.put("notes", f.notes)
+        localId?.let { body.put("localId", it) }
+        return body.toString().toRequestBody("application/json".toMediaType())
+    }
+
     @Throws(Exception::class)
     fun createCustomer(name: String, lat: Double, lng: Double, address: String, phone: String, type: String, city: String? = null, province: String? = null): JSONObject {
         val body = JSONObject()
@@ -94,6 +149,11 @@ object ApiClient {
             body.toString().toRequestBody("application/json".toMediaType())))
     }
 
+    /** Customer 360 — full-form create (online path + offline queue flush). */
+    @Throws(Exception::class)
+    fun createCustomerFull(form: CustomerForm, localId: String? = null): JSONObject =
+        exec(req("/api/app/customers/create", "POST", customerFormBody(form, localId)))
+
     @Throws(Exception::class)
     fun editCustomer(id: String, name: String, lat: Double, lng: Double, address: String, phone: String, clientUpdatedAt: String, city: String? = null, province: String? = null): JSONObject {
         val body = JSONObject()
@@ -109,6 +169,52 @@ object ApiClient {
             body.put("city", city).put("province", province)
         }
         return exec(req("/api/app/customers/$id", "PUT",
+            body.toString().toRequestBody("application/json".toMediaType())))
+    }
+
+    /** Customer 360 — full-form edit (online path + offline queue flush).
+     *  LWW: `clientUpdatedAt` is the client's known version. */
+    @Throws(Exception::class)
+    fun editCustomerFull(id: String, form: CustomerForm, clientUpdatedAt: String, city: String? = null, province: String? = null): JSONObject {
+        val body = JSONObject()
+            .put("name", form.name)
+            .put("type", form.type)
+            .put("address", form.address)
+            .put("phone", form.phone)
+            .put("lat", form.lat)
+            .put("lng", form.lng)
+            .put("radius", form.radius)
+            .put("updatedAt", clientUpdatedAt)
+        if (city != null && province != null) {
+            body.put("city", city).put("province", province)
+        }
+        if (form.lastName.isNotBlank()) body.put("lastName", form.lastName)
+        if (form.title.isNotBlank()) body.put("title", form.title)
+        if (form.specialty.isNotBlank()) body.put("specialty", form.specialty)
+        if (form.managerName.isNotBlank()) body.put("managerName", form.managerName)
+        if (form.phone2.isNotBlank()) body.put("phone2", form.phone2)
+        if (form.district.isNotBlank()) body.put("district", form.district)
+        if (form.postalCode.isNotBlank()) body.put("postalCode", form.postalCode)
+        if (form.notes.isNotBlank()) body.put("notes", form.notes)
+        return exec(req("/api/app/customers/$id", "PUT",
+            body.toString().toRequestBody("application/json".toMediaType())))
+    }
+
+    /** Customer 360 — the rep's 360 profile (server-enforced: assigned only). */
+    @Throws(Exception::class)
+    fun customerProfile(customerId: String): JSONObject =
+        exec(req("/api/app/customers/$customerId/profile"))
+
+    /** Customer 360 — link a physician to a clinic (both must be assigned
+     *  to this rep — enforced server-side). localId = offline idempotency. */
+    @Throws(Exception::class)
+    fun createCustomerLink(clinicId: String, physicianId: String, note: String, localId: String? = null): JSONObject {
+        val body = JSONObject()
+            .put("clinicId", clinicId)
+            .put("physicianId", physicianId)
+            .put("note", note)
+        localId?.let { body.put("localId", it) }
+        return exec(req("/api/app/customer-links", "POST",
             body.toString().toRequestBody("application/json".toMediaType())))
     }
 
