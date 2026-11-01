@@ -1605,3 +1605,32 @@ Stage Summary:
 - هر ۱۲ مورد مأموریت در ۶ مرحله پیاده، کامیت و تست شد. اندروید ۱۶۸/۱۶۸ با محیط واقعی؛ پنل ۴۲/۴۲ مأموریت + ۴۵۸ چک رگرسیون همه سبز؛ APK امضاشده vCode 18؛ باندل پنل بازساخته و ارتقایافته.
 - وضعیت: **DONE_VERIFIED**. پوش: ۷ کامیت (`4b69fce..9447f6a`) — SHA از GitHub با ls-remote تأیید شد (`9447f6a564c9961b0ac871d0ebd8c1c72e110b93`)؛ main دست‌نخورده. تگ annotated v1.9.13-dev.7 روی `9447f6a` (ls-remote: 34f40c11) → ZIP از خود تگ با مسیرهای مستثنای dev.4/5/6 (۳٬۰۲۶ فایل، ۱۴۴٬۵۲۸٬۹۰۴ بایت؛ رشته‌های نسخه داخل ZIP قبل از انتشار بررسی شد: APP-VERSION/INSTALLER_VER/بنر bat/عنوان README-fa همه dev.7؛ CRLF حفظ ۱۹۲×CRLF/۰×LF؛ VoiceFile در template.db) → Release prerelease (id 430235507) با ۴ asset: APK 8,956,372 بایت (SHA-256 e128de0f…b5b2e0) + ZIP (SHA-256 a3ba4cdf…33fb2) + SHA1SUMS + SHA256SUMS. **دانلود-برگشتی از GitHub: هر دو هش SHA-256 و SHA-1 OK + unzip -t سالم.** https://github.com/P3D4AM/MedPad/releases/tag/v1.9.13-dev.7
 - قدم بعدی: تست میدانی مالک (اعلان قفل، GPS واقعی، «همیشه اجازه» روی OEMها، پخش صداهای قدیمی/جدید) + تصمیم‌های RELEASE-CHECKLIST §۷ (کلید امضای پایدار، انتشار پایدار v1.9.13، typing debt).
+
+---
+
+## Task 58 — فاز ۱: پروندهٔ جامع مشتری (Customer 360) + بازطراحی UI/UX (Nov 1, 2026)
+
+**مأموریت:** فاز اول توسعهٔ ماژول مشتریان — پروندهٔ جامع/یکپارچه (پزشک/کلینیک، خرید، ویزیت) + بازطراحی ظاهر با تم Dark/Light/System. اجرای کامل: کد → تست → بیلد → commit/push روی develop.
+
+**انجام‌شده:**
+
+1. **پنل/سرور (بستهٔ ۱۷ = patches/panel-src-phase6-customer360.patch، ۳۲ فایل):**
+   - Prisma: ستون‌های پروفایل Customer (۹ ستون + active + appLocalId یکتا) + CustomerLink (کلید یکتا clinicId+physicianId) + Purchase/PurchaseItem
+   - instrumentation.ts: migration بوت idempotent — DDL بایت‌معادل prisma db push (راستی‌آزمایی با probe DB)
+   - APIها: /api/customers/[id]/profile (مدیر) · /api/app/customers/[id]/profile (بازاریاب، ۴۰۳ غیرمجاز + ماسک طرف مقابل) · /api/customer-links (+[id]) · /api/app/customer-links (هر دو طرف تخصیص‌یافته) · customers CRUD با ستون‌های جدید + جلوگیری از تکرار (۴۰۹ + force) + خلاصهٔ آخرین ویزیت/خرود در فهرست · stats با روند ۱۴روزه + جمع خرید واقعی + عقب‌افتاده‌ها
+   - create با localId → idempotency ایجاد آفلاین (replay همان ردیف)
+   - UI: globals.css پالت دو-تم (توکن‌ها؛ حذف کامل teal/amber هاردکد) + lib/theme + ThemeToggle + bootstrap بدون فلش + داشبورد سایدباری (≥lg) + تب‌های گرد موبایل + نمای کلی KPI/نمودار واقعی + CustomersTab (جستجو/فیلتر/پروفایل/فرم کامل/غیرفعال‌سازی) + CustomerProfile (۵ تب، خلاصه، Empty State، منبع داده، پخش صوت)
+2. **اندروید:**
+   - Room v14: Doctor +۹ ستون + pendingLocalId · customer_links / customer_profiles / pending_customer_ops (Migration واقعی + تست)
+   - Customers360: صف آفلاین create/edit/link با همان قرارداد دوام صف چک‌این (idempotency، failed با متن فارسی، بازیابی کرش، ادغام ویرایش در CREATE در صف) + کش پرونده با بنر آفلاین + clearAll در تغییر سرور
+   - ApiClient: CustomerForm (data class) + create/edit کامل + profile + link
+   - UI: CustomersActivity (جستجو/چیپ فیلتر/بنر صف/ردیف با نشان نوع-وضعیت) + CustomerProfileActivity (۵ تب + خلاصه + VoiceMiniPlayerHub موجود) + CustomerFormDialog مشترک (فیلدهای وابسته به نوع، نرمال‌سازی ارقام فارسی، اعتبارسنجی تلفن) + کارت «مشتریان من» + DayNight/ values-night + ThemePrefs (روشن/تیره/سیستمی، ذخیره) + AccountDialogs ردیف تم
+   - syncDoctors: پارس ستون‌های جدید + keepOnlyExceptPending (ردیف آفلاین از جاروب تخصیص مستثنا)
+3. **تست/بیلد:** testDebugUnitTest ۱۷۷/۱۷۷ (۹ تست جدید) · assembleDebug موفق (vCode 19) · build-panel ۲۶/۲۶ سخت‌سازی (زنجیرهٔ ۱۸-وصله‌ای؛ CHAIN با phase5-package16 گم‌شده هم اصلاح شد) · test-customer360.sh جدید ۴۶/۴۶ · رگرسیون: mission12 ۴۲/۴۲، remediation ۱۸۰/۱۸۰، functional-core ۳۴/۳۴ · template.db بازسازی
+4. **مستندات:** CUSTOMER360-PHASE1-REPORT-fa.md (ممیزی کامل فنی) + README-fa بخش جدید + PROGRESS §2 + همین Task
+
+**تصمیم‌های فنی:** «مشتری» همان موجودیت Customer فعلی است (توسعه، نه بازسازی) — تفکیک پزشک/کلینیک با type + فیلدهای nullable. خرید فقط به یک مشتری تعلق دارد (بدون دو-شمارش). non-destructive: هیچ قابلیت/داده‌ای حذف نشد. typing-debt پیش‌وجود دست‌نخورده (جز یک alias یک‌خطی).
+
+**موکول به بعد:** اتصال واقعی هلو (آداپتور externalId) · ورود دستی خرید در صورت نیاز · مدیریت ارتباط از اپ (الان فقط ایجاد) · نمودار فروش پس از دادهٔ واقعی · بازطراحی اختصاصی صفحات ثانویهٔ اپ.
+
+**وضعیت:** کد+تست+بیلد DONE؛ پوش به develop در همان سشن (این خط پس از پوش با SHA به‌روز شد — پایین را ببینید).
