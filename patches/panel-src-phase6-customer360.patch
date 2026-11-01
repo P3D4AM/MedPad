@@ -1,0 +1,3878 @@
+--- a/prisma/schema.prisma
++++ b/prisma/schema.prisma
+@@ -79,10 +79,144 @@
+   updatedAt DateTime @updatedAt // LWW sync field (app <-> panel)
+   createdAt DateTime @default(now())
+ 
++  // ── Customer 360 (phase 1) — all nullable/additive: legacy rows keep NULL
++  // and every field is OPTIONAL on the wire, so old app versions and old
++  // panels keep syncing exactly as before.
++  // person (type='doctor'): family name after the given name
++  lastName    String?
++  // person: professional title (e.g. «دکتر»، «متخصص قلب»)
++  title       String?
++  // person: medical specialty
++  specialty   String?
++  // clinic (type='clinic'): the person responsible for purchasing
++  managerName String?
++  // second contact number (person OR clinic)
++  phone2      String?
++  // district / area within the city (free text, nullable)
++  district    String?
++  postalCode  String?
++  // general notes on the customer (the 360 profile's notes tab)
++  notes       String?
++  // logical delete / deactivation. DEFAULT TRUE so every legacy row is
++  // active. Deactivation NEVER cascades history: checkins/visits/voice/
++  // purchases/links all survive (they reference the row, not the flag).
++  active      Boolean  @default(true)
++  // app-side idempotency key for OFFLINE customer creation (pending queue
++  // replay). Unique among NON-NULL values; NULL for panel-created rows.
++  appLocalId  String?  @unique
++
+   checkins    Checkin[]
+   visits      Visit[]
+   assignments Assignment[]
+   plannedVisits PlannedVisit[]
++  // Customer 360 — physician↔clinic links (typed many-to-many; see
++  // CustomerLink) and purchase history (see Purchase)
++  clinicLinks     CustomerLink[]     @relation("LinkClinic")
++  physicianLinks  CustomerLink[]     @relation("LinkPhysician")
++  purchases       Purchase[]
++}
++
++// ── Customer 360 (phase 1) — physician↔clinic MANY-TO-MANY link ──
++//
++// One clinic can have several physicians; one physician can practise at
++// several clinics. Each link row carries its own note + active flag.
++//
++// Design decisions:
++//  * TYPED columns (clinicId / physicianId) instead of an untyped pair: the
++//    server validates clinic.type='clinic' AND physician.type='doctor' on
++//    every write — a link can never silently connect two clinics or two
++//    physicians, and the API never has to guess which side is which.
++//  * @@unique([clinicId, physicianId]) makes duplicate links a database-level
++//    impossibility (a replay races into P2002, not a second row). Re-linking
++//    a removed pair reactivates the SAME row (see routes: upsert semantics).
++//  * FKs are CASCADE on both sides — deleting a customer cleans its links
++//    but NEVER its visits/voice/purchases (those FKs stay as they are).
++//  * ACCESS: the link itself grants nothing. App-side profile/link reads
++//    only surface counterparts that are ALSO assigned to the requesting rep
++//    (see /api/app/customers/[id]/profile) — a link can never be used to
++//    bypass the assignment-based access control.
++model CustomerLink {
++  id          String   @id @default(cuid())
++  clinicId    String
++  clinic      Customer @relation("LinkClinic", fields: [clinicId], references: [id], onDelete: Cascade)
++  physicianId String
++  physician   Customer @relation("LinkPhysician", fields: [physicianId], references: [id], onDelete: Cascade)
++  note        String?
++  active      Boolean  @default(true)
++  createdAt   DateTime @default(now())
++  updatedAt   DateTime @updatedAt
++
++  @@unique([clinicId, physicianId])
++  @@index([physicianId])
++}
++
++// ── Customer 360 (phase 1) — purchase history (STRUCTURE ONLY) ──
++//
++// This phase creates the DATA MODEL + UI + aggregation, ready for a future
++// Holoo ERP connection. NO real Holoo API call is made from this codebase —
++// data will arrive through a later sync adapter that writes here.
++//
++// Design decisions:
++//  * source marks the ORIGIN of every record ('manual' | 'holoo'). Nothing
++//    is ever displayed as a real sale without its source — test/imported
++//    data is identifiable by construction.
++//  * externalId (Holoo record id) is kept SEPARATE from the internal cuid
++//    and UNIQUE among non-null values — the future sync adapter can upsert
++//    by it without touching internal ids. invoiceNo is the human-facing
++//    external invoice number (not necessarily unique in the source system).
++//  * customerId pins EVERY purchase to exactly ONE customer (a clinic OR a
++//    physician) — a purchase can never be counted twice in the financial
++//    summary. The two-level model question "who bought?" is answered by
++//    this column, and the profile UI labels the owner explicitly.
++//  * Invoice-level fields (date, paymentStatus, discount, notes) live on
++//    Purchase; product lines live on PurchaseItem (CASCADE delete with the
++//    invoice). qty/unitPrice/total/discount per line.
++//  * The financial summary (total, 30/90/365-day windows, order count,
++//    average, last, max) is computed from these tables on read — see
++//    /api/customers/[id]/profile. No summary is ever fabricated: an empty
++//    table renders an explicit empty state.
++model Purchase {
++  id            String    @id @default(cuid())
++  customerId    String
++  customer      Customer  @relation(fields: [customerId], references: [id])
++  // origin of the record — 'manual' (entered by a human) | 'holoo' (synced
++  // from the Holoo ERP). Displayed with the record; never hidden.
++  source        String    @default("manual")
++  // Holoo-side stable record id (sync adapter's upsert key). NULL on manual.
++  externalId    String?   @unique
++  // human-facing external invoice number (NOT guaranteed unique upstream)
++  invoiceNo     String?
++  date          DateTime
++  // paid | unpaid | partial | null(unknown) — free text is rejected
++  paymentStatus String?
++  discount      Float?
++  notes         String?
++  // when the (future) Holoo adapter last confirmed this row
++  syncedAt      DateTime  @default(now())
++  createdAt     DateTime  @default(now())
++  updatedAt     DateTime  @updatedAt
++
++  items PurchaseItem[]
++
++  @@index([customerId, date])
++  @@index([externalId])
++}
++
++model PurchaseItem {
++  id          String   @id @default(cuid())
++  purchaseId  String
++  purchase    Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
++  // Holoo-side product id (NULL when the source has none)
++  productId   String?
++  productName String
++  productCode String?
++  brand       String?
++  qty         Float    @default(1)
++  unitPrice   Float    @default(0)
++  total       Float    @default(0)
++  discount    Float?
++
++  @@index([purchaseId])
+ }
+ 
+ model Assignment {
+--- a/src/app/api/app/customer-links/route.ts
++++ b/src/app/api/app/customer-links/route.ts
+@@ -0,0 +1,60 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { appEmployee } from '@/lib/auth'
++
++/**
++ * Customer 360 (phase 1) — a rep links a physician to a clinic (app side).
++ *
++ * ACCESS RULES (mission §9 — server-enforced):
++ *  * BOTH customers must be ASSIGNED to the authenticated rep. A link is a
++ *    relation BETWEEN two customers the rep can already legitimately see;
++ *    it can never be used to reach a customer outside the rep's scope.
++ *  * Type rules match the admin route: clinicId → type='clinic',
++ *    physicianId → type='doctor'.
++ *  * Idempotent by the unique (clinicId, physicianId): an existing row is
++ *    reactivated + its note updated — a replay of an OFFLINE-queued link op
++ *    (crash mid-sync, retry) can never create a duplicate.
++ */
++export async function POST(req: Request) {
++  const emp = await appEmployee(req)
++  if (!emp) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  const b = await req.json().catch(() => null) as {
++    clinicId?: string; physicianId?: string; note?: string; localId?: string
++  } | null
++  if (!b?.clinicId || !b?.physicianId) {
++    return NextResponse.json({ ok: false, error: 'کلینیک و پزشک هر دو لازم است' }, { status: 400 })
++  }
++  if (b.clinicId === b.physicianId) {
++    return NextResponse.json({ ok: false, error: 'یک مشتری نمی‌تواند با خودش مرتبط شود' }, { status: 400 })
++  }
++  const note = typeof b.note === 'string' && b.note.trim() ? b.note.trim().slice(0, 500) : null
++
++  const [clinic, physician, assignedCount] = await Promise.all([
++    db.customer.findUnique({ where: { id: b.clinicId }, select: { id: true, name: true, type: true } }),
++    db.customer.findUnique({ where: { id: b.physicianId }, select: { id: true, name: true, type: true } }),
++    db.assignment.count({
++      where: { employeeId: emp.id, customerId: { in: [b.clinicId, b.physicianId] } },
++    }),
++  ])
++  if (!clinic || clinic.type !== 'clinic') {
++    return NextResponse.json({ ok: false, error: 'طرف «کلینیک» باید از نوع کلینیک باشد' }, { status: 400 })
++  }
++  if (!physician || physician.type !== 'doctor') {
++    return NextResponse.json({ ok: false, error: 'طرف «پزشک» باید از نوع پزشک باشد' }, { status: 400 })
++  }
++  // BOTH sides must be in the rep's assigned set (count returns 2 only then)
++  if (assignedCount < 2) {
++    return NextResponse.json(
++      { ok: false, error: 'هر دو مشتری باید به شما اختصاص داده شده باشند' },
++      { status: 403 },
++    )
++  }
++
++  const row = await db.customerLink.upsert({
++    where: { clinicId_physicianId: { clinicId: b.clinicId, physicianId: b.physicianId } },
++    create: { clinicId: b.clinicId, physicianId: b.physicianId, note, active: true },
++    update: { note, active: true },
++    include: { clinic: { select: { id: true, name: true } }, physician: { select: { id: true, name: true } } },
++  })
++  return NextResponse.json({ ok: true, link: row })
++}
+--- a/src/app/api/app/customers/[id]/profile/route.ts
++++ b/src/app/api/app/customers/[id]/profile/route.ts
+@@ -0,0 +1,119 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { appEmployee } from '@/lib/auth'
++import { purchaseSummary } from '@/lib/customer360'
++
++/**
++ * Customer 360 (phase 1) — the REP's customer profile (app side).
++ *
++ * ACCESS CONTROL (mission §9, enforced SERVER-side, never by hiding UI):
++ *  * the customer must be ASSIGNED to the authenticated employee — any
++ *    other id answers 403 with the same Persian text as the edit route
++ *    (changing the id in the request must not reveal another rep's data);
++ *  * LINKED counterparts are surfaced ONLY when they are ALSO assigned to
++ *    this rep — a physician↔clinic link can never be used to bypass the
++ *    assignment-based access control (counterparts not assigned here are
++ *    counted but their identity is masked out).
++ *
++ * Content mirrors the admin profile minus admin-only context (assignment
++ * management, other reps' employee usernames):
++ *  * customer row (profile fields included);
++ *  * masked links (assigned-only counterparts);
++ *  * REAL purchase summary + purchase list (an empty history is explicit
++ *    zeros/nulls — never fabricated);
++ *  * visit history with rep names, notes, voice file ids/paths (audio
++ *    playback goes through the EXISTING token-authenticated media route).
++ */
++export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
++  const emp = await appEmployee(req)
++  if (!emp) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  const { id } = await ctx.params
++
++  const customer = await db.customer.findUnique({ where: { id } })
++  if (!customer) return NextResponse.json({ ok: false, error: 'پیدا نشد' }, { status: 404 })
++
++  const assigned = await db.assignment.findFirst({ where: { employeeId: emp.id, customerId: id } })
++  if (!assigned) {
++    return NextResponse.json(
++      { ok: false, error: 'این مشتری به شما اختصاص داده نشده است' },
++      { status: 403 },
++    )
++  }
++
++  // the set of customers THIS rep may see through a link
++  const mine = new Set(
++    (await db.assignment.findMany({ where: { employeeId: emp.id }, select: { customerId: true } }))
++      .map((a) => a.customerId),
++  )
++  const mask = (c: { id: string; name: string; type: string; city: string | null; phone: string | null; active: boolean }) =>
++    mine.has(c.id)
++      ? { visible: true as const, id: c.id, name: c.name, type: c.type, city: c.city, phone: c.phone, active: c.active }
++      : { visible: false as const, id: c.id, name: null, type: c.type, city: null, phone: null, active: c.active }
++
++  const counterpartSelect = {
++    select: { id: true, name: true, type: true, city: true, phone: true, active: true },
++  }
++
++  const [linksAsClinic, linksAsPhysician, summary, purchases, visits] = await Promise.all([
++    db.customerLink.findMany({
++      where: { clinicId: id, active: true },
++      include: { physician: counterpartSelect },
++      orderBy: { createdAt: 'desc' },
++    }),
++    db.customerLink.findMany({
++      where: { physicianId: id, active: true },
++      include: { clinic: counterpartSelect },
++      orderBy: { createdAt: 'desc' },
++    }),
++    purchaseSummary(id),
++    db.purchase.findMany({
++      where: { customerId: id },
++      include: { items: true },
++      orderBy: { date: 'desc' },
++      take: 50,
++    }),
++    db.visit.findMany({
++      where: { customerId: id },
++      include: {
++        employee: { select: { id: true, name: true } },
++        checkin: {
++          select: {
++            id: true, note: true, createdAt: true,
++            _count: { select: { noteVersions: true } },
++            voiceFiles: { select: { id: true, path: true }, orderBy: { seq: 'asc' } },
++          },
++        },
++        checkout: {
++          select: {
++            id: true, note: true, createdAt: true,
++            _count: { select: { noteVersions: true } },
++            voiceFiles: { select: { id: true, path: true }, orderBy: { seq: 'asc' } },
++          },
++        },
++        plannedVisit: { select: { id: true, scheduledAt: true, priority: true, status: true } },
++      },
++      orderBy: { startAt: 'desc' },
++      take: 50,
++    }),
++  ])
++
++  return NextResponse.json({
++    ok: true,
++    customer,
++    links: {
++      physicians: linksAsClinic.map((l) => ({
++        id: l.id, note: l.note, createdAt: l.createdAt,
++        counterpart: mask(l.physician),
++      })),
++      clinics: linksAsPhysician.map((l) => ({
++        id: l.id, note: l.note, createdAt: l.createdAt,
++        counterpart: mask(l.clinic),
++      })),
++    },
++    purchaseSummary: summary,
++    purchases,
++    visits,
++    serverTime: new Date().toISOString(),
++    purchaseSourceNote: 'اطلاعات خرید پس از اتصال به سامانهٔ هلو نمایش داده می‌شود',
++  })
++}
+--- a/src/app/api/app/customers/[id]/route.ts
++++ b/src/app/api/app/customers/[id]/route.ts
+@@ -3,6 +3,7 @@
+ import { appEmployee } from '@/lib/auth'
+ import { isValidLatLng } from '@/lib/geo'
+ import { resolveCustomerCity } from '@/lib/customer-city'
++import { pickCustomer360App } from '@/lib/customer360'
+ 
+ /**
+  * App edits a customer — Last-Writer-Wins (LWW):
+@@ -22,6 +23,9 @@
+     lat?: number; lng?: number; radius?: number
+     city?: string; province?: string // package 8 — offline dataset pair
+     updatedAt?: string // client's known version
++    // Customer 360 (phase 1) — profile fields (active is panel-only)
++    lastName?: string; title?: string; specialty?: string; managerName?: string
++    phone2?: string; district?: string; postalCode?: string; notes?: string
+   } | null
+ 
+   const current = await db.customer.findUnique({ where: { id } })
+@@ -63,6 +67,9 @@
+   }
+   if ('clear' in city) { data.city = null; data.province = null }
+   else if ('city' in city) { data.city = city.city; data.province = city.province }
++  // Customer 360 — profile fields (app-writable subset; `active` stays a
++  // panel-only lifecycle decision — see pickCustomer360App)
++  Object.assign(data, pickCustomer360App(b))
+   const row = await db.customer.update({ where: { id }, data })
+   return NextResponse.json({ ok: true, customer: row })
+ }
+--- a/src/app/api/app/customers/create/route.ts
++++ b/src/app/api/app/customers/create/route.ts
+@@ -4,6 +4,7 @@
+ import { isValidLatLng } from '@/lib/geo'
+ import { emitEvent } from '@/lib/emit'
+ import { resolveCustomerCity } from '@/lib/customer-city'
++import { pickCustomer360App, findCustomerDuplicate } from '@/lib/customer360'
+ 
+ /** App creates a new customer (sales rep adds doctor/pharmacy) — no delete allowed */
+ export async function POST(req: Request) {
+@@ -13,15 +14,45 @@
+     name?: string; type?: string; address?: string; phone?: string
+     lat?: number; lng?: number; radius?: number; clientId?: string
+     city?: string; province?: string // package 8 — offline dataset pair
++    // Customer 360 (phase 1): profile fields + OFFLINE-CREATE idempotency key
++    lastName?: string; title?: string; specialty?: string; managerName?: string
++    phone2?: string; district?: string; postalCode?: string; notes?: string
++    localId?: string
+   } | null
+   if (!b?.name || !isValidLatLng(Number(b.lat), Number(b.lng))) {
+     return NextResponse.json({ ok: false, error: 'نام و موقعیت لازم است' }, { status: 400 })
+   }
++  // Customer 360 — OFFLINE-CREATE idempotency: a replay of the same
++  // pending-queue item (crash mid-sync, retry) returns the row it created
++  // the first time instead of a duplicate. localId is stored on the row
++  // (Customer.appLocalId, unique among non-NULL).
++  const localId = typeof b.localId === 'string' && b.localId.trim() ? b.localId.trim() : null
++  if (localId) {
++    const existing = await db.customer.findUnique({ where: { appLocalId: localId } })
++    if (existing) {
++      return NextResponse.json({ ok: true, customer: existing, assigned: false, replay: true })
++    }
++  }
+   // package 8 — same offline-dataset validation as the panel path
+   const city = resolveCustomerCity(b.city, b.province)
+   if ('error' in city) {
+     return NextResponse.json({ ok: false, error: city.error }, { status: 400 })
+   }
++  // Customer 360 — duplicate prevention (advisory 409; the app shows the
++  // existing row's identity and the rep decides whether to retry anyway —
++  // there is no force flag on the app path to keep the flow simple, a
++  // duplicate warning aborts the queued op with a readable reason)
++  const dup = await findCustomerDuplicate({
++    name: b.name,
++    type: b.type || 'doctor',
++    phone: b.phone,
++  })
++  if (dup) {
++    return NextResponse.json(
++      { ok: false, error: `مشتری «${dup.name}» از قبل ثبت شده است`, duplicate: dup },
++      { status: 409 },
++    )
++  }
+   const row = await db.customer.create({
+     data: {
+       name: b.name,
+@@ -32,6 +63,8 @@
+       lat: Number(b.lat),
+       lng: Number(b.lng),
+       radius: Number(b.radius) || 150,
++      ...(localId ? { appLocalId: localId } : {}),
++      ...pickCustomer360App(b),
+     },
+   })
+   // mission 12 / item 1 (Nov 2026): NO automatic assignment for the creator.
+--- a/src/app/api/customer-links/[id]/route.ts
++++ b/src/app/api/customer-links/[id]/route.ts
+@@ -0,0 +1,49 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { isAdmin } from '@/lib/auth'
++
++/**
++ * Customer 360 (phase 1) — link lifecycle (ADMIN side).
++ *
++ *  PUT { note?, active? } — edit a link's note or toggle its active flag.
++ *  DELETE — remove the link row entirely (pure relation, no history is
++ *  attached to it; deactivation via PUT keeps it for the record instead).
++ */
++export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const { id } = await ctx.params
++  const b = await req.json().catch(() => null) as { note?: string; active?: boolean } | null
++  const data: Record<string, unknown> = {}
++  if (b?.note !== undefined) {
++    data.note = typeof b.note === 'string' && b.note.trim() ? b.note.trim().slice(0, 500) : null
++  }
++  if (typeof b?.active === 'boolean') data.active = b.active
++  if (!Object.keys(data).length) {
++    return NextResponse.json({ ok: false, error: 'چیزی برای تغییر داده نشد' }, { status: 400 })
++  }
++  try {
++    const row = await db.customerLink.update({
++      where: { id },
++      data,
++      include: { clinic: { select: { id: true, name: true } }, physician: { select: { id: true, name: true } } },
++    })
++    return NextResponse.json({ ok: true, link: row })
++  } catch {
++    return NextResponse.json({ ok: false, error: 'ارتباط پیدا نشد' }, { status: 404 })
++  }
++}
++
++export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const { id } = await ctx.params
++  try {
++    await db.customerLink.delete({ where: { id } })
++    return NextResponse.json({ ok: true })
++  } catch {
++    return NextResponse.json({ ok: false, error: 'ارتباط پیدا نشد' }, { status: 404 })
++  }
++}
+--- a/src/app/api/customer-links/route.ts
++++ b/src/app/api/customer-links/route.ts
+@@ -0,0 +1,57 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { isAdmin } from '@/lib/auth'
++import { customerTypeFa } from '@/lib/customer360'
++
++/**
++ * Customer 360 (phase 1) — physician↔clinic link management (ADMIN side).
++ *
++ * POST { clinicId, physicianId, note? }
++ *  * TYPE-CHECKED: clinicId must reference type='clinic' and physicianId
++ *    type='doctor' (mission §3.1-c: contact/address of a person and a
++ *    center must never be merged into one record — and a link must never
++ *    connect two entities of the same kind).
++ *  * Idempotent by the DB's unique (clinicId, physicianId): an existing
++ *    row (active or not) is REACTIVATED and its note updated — a replay
++ *    can never create a second link.
++ */
++export async function POST(req: Request) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const b = await req.json().catch(() => null) as {
++    clinicId?: string; physicianId?: string; note?: string
++  } | null
++  if (!b?.clinicId || !b?.physicianId) {
++    return NextResponse.json({ ok: false, error: 'کلینیک و پزشک هر دو لازم است' }, { status: 400 })
++  }
++  if (b.clinicId === b.physicianId) {
++    return NextResponse.json({ ok: false, error: 'یک مشتری نمی‌تواند با خودش مرتبط شود' }, { status: 400 })
++  }
++  const note = typeof b.note === 'string' && b.note.trim() ? b.note.trim().slice(0, 500) : null
++
++  const [clinic, physician] = await Promise.all([
++    db.customer.findUnique({ where: { id: b.clinicId }, select: { id: true, name: true, type: true } }),
++    db.customer.findUnique({ where: { id: b.physicianId }, select: { id: true, name: true, type: true } }),
++  ])
++  if (!clinic || clinic.type !== 'clinic') {
++    return NextResponse.json(
++      { ok: false, error: `طرف «کلینیک» باید از نوع کلینیک باشد${clinic ? ` — «${clinic.name}» ${customerTypeFa(clinic.type)} است` : ' — کلینیک پیدا نشد'}` },
++      { status: 400 },
++    )
++  }
++  if (!physician || physician.type !== 'doctor') {
++    return NextResponse.json(
++      { ok: false, error: `طرف «پزشک» باید از نوع پزشک باشد${physician ? ` — «${physician.name}» ${customerTypeFa(physician.type)} است` : ' — پزشک پیدا نشد'}` },
++      { status: 400 },
++    )
++  }
++
++  const row = await db.customerLink.upsert({
++    where: { clinicId_physicianId: { clinicId: b.clinicId, physicianId: b.physicianId } },
++    create: { clinicId: b.clinicId, physicianId: b.physicianId, note, active: true },
++    update: { note, active: true },
++    include: { clinic: { select: { id: true, name: true } }, physician: { select: { id: true, name: true } } },
++  })
++  return NextResponse.json({ ok: true, link: row })
++}
+--- a/src/app/api/customers/[id]/profile/route.ts
++++ b/src/app/api/customers/[id]/profile/route.ts
+@@ -0,0 +1,110 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { isAdmin } from '@/lib/auth'
++import { purchaseSummary } from '@/lib/customer360'
++
++/**
++ * Customer 360 (phase 1) — the admin's complete customer profile.
++ *
++ * One endpoint, everything the profile page needs (no N+1 from the client):
++ *  * the customer row with assignments (reps) and counts;
++ *  * physician↔clinic links BOTH ways, each with the counterpart's basic
++ *    identity (id/name/type/city/phone);
++ *  * the REAL financial summary (Purchase/PurchaseItem aggregates — an
++ *    empty history yields zeros/nulls, never fabricated numbers);
++ *  * the purchase list with items (newest first, capped to keep the
++ *    payload honest — the UI paginates client-side);
++ *  * the visit history (real Visit rows: start/end/employee/deviation +
++ *    the linked check-in's note + voice files, newest first, capped).
++ *
++ * Every record carries its ORIGIN (purchase.source, checkin editor history
++ * counts) — nothing is displayed as a real sale without its source.
++ */
++export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const { id } = await ctx.params
++  const customer = await db.customer.findUnique({
++    where: { id },
++    include: {
++      assignments: { include: { employee: { select: { id: true, name: true, username: true, active: true } } } },
++      _count: { select: { checkins: true, visits: true, plannedVisits: true, purchases: true } },
++    },
++  })
++  if (!customer) return NextResponse.json({ ok: false, error: 'پیدا نشد' }, { status: 404 })
++
++  const counterpart = {
++    select: {
++      id: true, name: true, type: true, city: true, province: true,
++      phone: true, active: true,
++    },
++  }
++
++  const [linksAsClinic, linksAsPhysician, summary, purchases, visits] = await Promise.all([
++    db.customerLink.findMany({
++      where: { clinicId: id },
++      include: { physician: counterpart },
++      orderBy: { createdAt: 'desc' },
++    }),
++    db.customerLink.findMany({
++      where: { physicianId: id },
++      include: { clinic: counterpart },
++      orderBy: { createdAt: 'desc' },
++    }),
++    purchaseSummary(id),
++    db.purchase.findMany({
++      where: { customerId: id },
++      include: { items: true },
++      orderBy: { date: 'desc' },
++      take: 200,
++    }),
++    db.visit.findMany({
++      where: { customerId: id },
++      include: {
++        employee: { select: { id: true, name: true, username: true } },
++        checkin: {
++          select: {
++            id: true, kind: true, note: true, createdAt: true,
++            lat: true, lng: true, distanceM: true, outOfRadius: true, locationMissing: true,
++            _count: { select: { noteVersions: true } },
++            voiceFiles: { select: { id: true, path: true }, orderBy: { seq: 'asc' } },
++          },
++        },
++        checkout: {
++          select: {
++            id: true, note: true, createdAt: true,
++            _count: { select: { noteVersions: true } },
++            voiceFiles: { select: { id: true, path: true }, orderBy: { seq: 'asc' } },
++          },
++        },
++        plannedVisit: { select: { id: true, scheduledAt: true, priority: true, status: true } },
++      },
++      orderBy: { startAt: 'desc' },
++      take: 100,
++    }),
++  ])
++
++  return NextResponse.json({
++    ok: true,
++    customer,
++    links: {
++      // this customer IS the clinic — physicians practising here
++      physicians: linksAsClinic.map((l) => ({
++        id: l.id, note: l.note, active: l.active, createdAt: l.createdAt,
++        counterpart: l.physician,
++      })),
++      // this customer IS the physician — clinics they practise at
++      clinics: linksAsPhysician.map((l) => ({
++        id: l.id, note: l.note, active: l.active, createdAt: l.createdAt,
++        counterpart: l.clinic,
++      })),
++    },
++    purchaseSummary: summary,
++    purchases,
++    visits,
++    // explicit provenance banner for the purchase tab (mission §4.3: the
++    // source of every record is visible; no real Holoo sync exists yet)
++    purchaseSourceNote: 'اتصال به سامانهٔ هلو در فاز بعدی برقرار می‌شود — هیچ دادهٔ فروش واقعی هم‌اکنون وارد نمی‌شود',
++  })
++}
+--- a/src/app/api/customers/[id]/route.ts
++++ b/src/app/api/customers/[id]/route.ts
+@@ -3,6 +3,7 @@
+ import { isAdmin } from '@/lib/auth'
+ import { isValidLatLng } from '@/lib/geo'
+ import { resolveCustomerCity } from '@/lib/customer-city'
++import { pickCustomer360, findCustomerDuplicate, customerTypeFa } from '@/lib/customer360'
+ 
+ /** PUT — edit customer (panel side; bumps updatedAt for LWW sync to app) */
+ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }) {
+@@ -14,6 +15,11 @@
+     name?: string; type?: string; address?: string; phone?: string
+     lat?: number; lng?: number; radius?: number
+     city?: string; province?: string // package 8 — offline dataset pair
++    // Customer 360 profile fields (all optional)
++    lastName?: string; title?: string; specialty?: string; managerName?: string
++    phone2?: string; district?: string; postalCode?: string; notes?: string
++    active?: boolean
++    force?: boolean // duplicate acknowledged by the admin
+   } | null
+   const data: Record<string, unknown> = { updatedAt: new Date() } // LWW bump
+   if (b?.name !== undefined) data.name = b.name
+@@ -33,10 +39,36 @@
+   }
+   if ('clear' in city) { data.city = null; data.province = null }
+   else if ('city' in city) { data.city = city.city; data.province = city.province }
++  // Customer 360 — profile fields + duplicate prevention on rename
++  Object.assign(data, pickCustomer360(b))
++  if (!b?.force && (b?.name !== undefined || b?.phone !== undefined)) {
++    const dup = await findCustomerDuplicate({
++      name: String(b?.name ?? ''),
++      type: String(b?.type ?? 'doctor'),
++      phone: b?.phone ?? null,
++      excludeId: id,
++    })
++    if (dup) {
++      return NextResponse.json(
++        {
++          ok: false,
++          error: `${customerTypeFa(dup.type)} «${dup.name}» از قبل ثبت شده است${dup.phone ? ` (تلفن ${dup.phone})` : ''} — اگر مطمئنید دوباره ذخیره کنید`,
++          duplicate: dup,
++        },
++        { status: 409 },
++      )
++    }
++  }
+   const row = await db.customer.update({ where: { id }, data })
+   return NextResponse.json({ ok: true, customer: row })
+ }
+ 
++/**
++ * DELETE — hard delete, existing semantics (409 when real history exists).
++ * Customer 360 note: DEACTIVATION (active=false via PUT) is the preferred,
++ * history-preserving path; hard delete remains for the no-history case so
++ * an accidental registration can still be cleaned up.
++ */
+ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
+   if (!(await isAdmin())) {
+     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
+@@ -47,17 +79,21 @@
+   // unhandled FK error (500). Refuse with a clear, actionable 409 instead.
+   // (Checkin.customerId is optional → SetNull, so plain check-in history does
+   // NOT block deletion; assignments cascade as before.)
+-  const [visits, planned] = await Promise.all([
++  // Customer 360: Purchase/PurchaseItem/CustomerLink also keep history —
++  // Purchase RESTRICTs like Visit, links cascade (they are pure relations).
++  const [visits, planned, purchases] = await Promise.all([
+     db.visit.count({ where: { customerId: id } }),
+     db.plannedVisit.count({ where: { customerId: id } }),
++    db.purchase.count({ where: { customerId: id } }),
+   ])
+-  if (visits > 0 || planned > 0) {
++  if (visits > 0 || planned > 0 || purchases > 0) {
+     return NextResponse.json(
+       {
+         ok: false,
+-        error: `این مشتری سابقهٔ بازدید دارد (${visits} ویزیت و ${planned} برنامهٔ بازدید) و حذفش ممکن نیست — سوابق واقعی حفظ می‌شوند`,
++        error: `این مشتری سابقهٔ واقعی دارد (${visits} ویزیت، ${planned} برنامهٔ بازدید، ${purchases} خرید) و حذفش ممکن نیست — برای غیرفعال‌سازی از ویرایش مشتری استفاده کنید`,
+         visits,
+         planned,
++        purchases,
+       },
+       { status: 409 },
+     )
+--- a/src/app/api/customers/route.ts
++++ b/src/app/api/customers/route.ts
+@@ -3,7 +3,16 @@
+ import { isAdmin } from '@/lib/auth'
+ import { isValidLatLng } from '@/lib/geo'
+ import { resolveCustomerCity } from '@/lib/customer-city'
++import { pickCustomer360, findCustomerDuplicate, customerTypeFa } from '@/lib/customer360'
+ 
++/**
++ * Customers list (admin). Customer-360 additions:
++ *  * every row now carries the new profile fields + `active` (legacy rows
++ *    default to active);
++ *  * `lastVisitAt` + a compact purchase summary per customer so the list
++ *    can show «آخرین بازدید» and «آخرین خرید» without N+1 requests (three
++ *    groupBy/aggregate passes over the whole table — fine at MedPad scale).
++ */
+ export async function GET() {
+   if (!(await isAdmin())) {
+     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
+@@ -15,7 +24,33 @@
+     },
+     orderBy: { createdAt: 'asc' },
+   })
+-  return NextResponse.json({ ok: true, customers: rows })
++  // last visit per customer (Visit.startAt of the newest visit, any rep)
++  const visits = await db.visit.groupBy({
++    by: ['customerId'],
++    _max: { startAt: true },
++  })
++  const lastVisit = new Map(visits.map((v) => [v.customerId, v._max.startAt?.toISOString() ?? null]))
++  // last purchase per customer (real Purchase rows only)
++  const purchases = await db.purchase.findMany({
++    select: { customerId: true, date: true, discount: true, items: { select: { total: true } } },
++    orderBy: { date: 'desc' },
++  })
++  const lastPurchase = new Map<string, string | null>()
++  const purchaseTotals = new Map<string, number>()
++  for (const p of purchases) {
++    if (!lastPurchase.has(p.customerId)) lastPurchase.set(p.customerId, p.date.toISOString())
++    const gross = p.items.reduce((s, it) => s + (it.total || 0), 0) - (p.discount || 0)
++    purchaseTotals.set(p.customerId, (purchaseTotals.get(p.customerId) ?? 0) + gross)
++  }
++  return NextResponse.json({
++    ok: true,
++    customers: rows.map((c) => ({
++      ...c,
++      lastVisitAt: lastVisit.get(c.id) ?? null,
++      purchaseTotal: purchaseTotals.get(c.id) ?? 0,
++      lastPurchaseAt: lastPurchase.get(c.id) ?? null,
++    })),
++  })
+ }
+ 
+ export async function POST(req: Request) {
+@@ -26,6 +61,11 @@
+     name?: string; type?: string; address?: string; phone?: string
+     lat?: number; lng?: number; radius?: number
+     city?: string; province?: string // package 8 — offline dataset pair
++    // Customer 360 profile fields (all optional)
++    lastName?: string; title?: string; specialty?: string; managerName?: string
++    phone2?: string; district?: string; postalCode?: string; notes?: string
++    active?: boolean
++    force?: boolean // duplicate acknowledged by the admin
+   } | null
+   if (!b?.name || !isValidLatLng(Number(b.lat), Number(b.lng))) {
+     return NextResponse.json({ ok: false, error: 'نام و موقعیت روی نقشه لازم است' }, { status: 400 })
+@@ -35,6 +75,26 @@
+   if ('error' in city) {
+     return NextResponse.json({ ok: false, error: city.error }, { status: 400 })
+   }
++  // Customer 360 — duplicate prevention: same (type, name) or same
++  // (type, phone) already exists → 409 with the existing row's identity,
++  // unless the admin explicitly acknowledged (force=true).
++  if (!b.force) {
++    const dup = await findCustomerDuplicate({
++      name: b.name,
++      type: b.type || 'doctor',
++      phone: b.phone,
++    })
++    if (dup) {
++      return NextResponse.json(
++        {
++          ok: false,
++          error: `${customerTypeFa(dup.type)} «${dup.name}» از قبل ثبت شده است${dup.phone ? ` (تلفن ${dup.phone})` : ''} — اگر مطمئنید دوباره ذخیره کنید`,
++          duplicate: dup,
++        },
++        { status: 409 },
++      )
++    }
++  }
+   const row = await db.customer.create({
+     data: {
+       name: b.name,
+@@ -45,6 +105,7 @@
+       lat: Number(b.lat),
+       lng: Number(b.lng),
+       radius: Number(b.radius) || 150,
++      ...pickCustomer360(b),
+     },
+   })
+   return NextResponse.json({ ok: true, customer: row })
+--- a/src/app/api/stats/route.ts
++++ b/src/app/api/stats/route.ts
+@@ -2,30 +2,120 @@
+ import { db } from '@/lib/db'
+ import { isAdmin } from '@/lib/auth'
+ 
++/**
++ * Dashboard stats (admin). Customer-360 additions — every number comes from
++ * REAL rows only; an absent dataset yields explicit zeros (the UI renders
++ * honest empty states, never fabricated trends):
++ *  * activeCustomers / unassignedCustomers (assignment decisions pending)
++ *  * todayVisits — real Visit rows started today
++ *  * checkinTrend — last 14 days of check-in counts (activity chart)
++ *  * purchaseTotal / purchaseCount — real Purchase rows (empty until the
++ *    future Holoo adapter writes them)
++ *  * recentVisits — latest real visits with rep + customer names
++ *  * overduePlans — scheduled plans whose window already passed
++ */
+ export async function GET() {
+   if (!(await isAdmin())) {
+     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
+   }
+-  const [employees, customers, openVisits] = await Promise.all([
++  const [employees, customers, openVisits, activeCustomers] = await Promise.all([
+     db.employee.count({ where: { active: true } }),
+     db.customer.count(),
+     db.visit.count({ where: { open: true } }),
++    db.customer.count({ where: { active: true } }),
+   ])
+   const startOfDay = new Date()
+   startOfDay.setHours(0, 0, 0, 0)
+-  const todayCheckins = await db.checkin.count({
+-    where: { kind: 'checkin', createdAt: { gte: startOfDay } },
+-  })
++  const [todayCheckins, todayVisits, unassigned] = await Promise.all([
++    db.checkin.count({ where: { kind: 'checkin', createdAt: { gte: startOfDay } } }),
++    db.visit.count({ where: { startAt: { gte: startOfDay } } }),
++    db.customer.count({ where: { assignments: { none: {} } } }),
++  ])
+   const last7 = new Date(Date.now() - 7 * 24 * 3600 * 1000)
+   const weekCheckins = await db.checkin.count({
+     where: { kind: 'checkin', createdAt: { gte: last7 } },
+   })
++
++  // 14-day check-in trend (activity chart) — bucketed in JS from one query;
++  // a day with zero check-ins shows as a real 0, not a gap.
++  const trendStart = new Date(Date.now() - 13 * 24 * 3600 * 1000)
++  trendStart.setHours(0, 0, 0, 0)
++  const trendRows = await db.checkin.findMany({
++    where: { kind: 'checkin', createdAt: { gte: trendStart } },
++    select: { createdAt: true },
++  })
++  const dayKey = (d: Date) => {
++    const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), day = String(d.getDate()).padStart(2, '0')
++    return `${y}-${m}-${day}`
++  }
++  const buckets = new Map<string, number>()
++  for (let i = 13; i >= 0; i--) {
++    const d = new Date(Date.now() - i * 24 * 3600 * 1000)
++    buckets.set(dayKey(d), 0)
++  }
++  for (const r of trendRows) {
++    const k = dayKey(r.createdAt)
++    if (buckets.has(k)) buckets.set(k, (buckets.get(k) ?? 0) + 1)
++  }
++  const checkinTrend = [...buckets.entries()].map(([day, count]) => ({ day, count }))
++
++  // real purchase totals (zero until the Holoo adapter exists)
++  const [purchaseRows, purchaseCount] = await Promise.all([
++    db.purchase.findMany({ select: { date: true, discount: true, items: { select: { total: true } } } }),
++    db.purchase.count(),
++  ])
++  const purchaseTotal = purchaseRows.reduce(
++    (s, p) => s + p.items.reduce((x, it) => x + (it.total || 0), 0) - (p.discount || 0),
++    0,
++  )
++
++  const [recentVisits, overduePlans] = await Promise.all([
++    db.visit.findMany({
++      orderBy: { startAt: 'desc' },
++      take: 6,
++      include: {
++        employee: { select: { name: true } },
++        customer: { select: { name: true, type: true } },
++      },
++    }),
++    db.plannedVisit.findMany({
++      where: { status: 'scheduled', scheduledAt: { lt: new Date() } },
++      orderBy: { scheduledAt: 'desc' },
++      take: 6,
++      include: {
++        employee: { select: { name: true } },
++        customer: { select: { name: true } },
++      },
++    }),
++  ])
++
+   return NextResponse.json({
+     ok: true,
+     employees,
+     customers,
++    activeCustomers,
++    unassignedCustomers: unassigned,
+     openVisits,
+     todayCheckins,
++    todayVisits,
+     weekCheckins,
++    checkinTrend,
++    purchaseTotal,
++    purchaseCount,
++    recentVisits: recentVisits.map((v) => ({
++      id: v.id,
++      startAt: v.startAt.toISOString(),
++      endAt: v.endAt?.toISOString() ?? null,
++      open: v.open,
++      employeeName: v.employee.name,
++      customerName: v.customer.name,
++      customerType: v.customer.type,
++    })),
++    overduePlans: overduePlans.map((p) => ({
++      id: p.id,
++      scheduledAt: p.scheduledAt.toISOString(),
++      employeeName: p.employee.name,
++      customerName: p.customer.name,
++    })),
+   })
+ }
+--- a/src/app/globals.css
++++ b/src/app/globals.css
+@@ -3,6 +3,22 @@
+ 
+ @custom-variant dark (&:is(.dark *));
+ 
++/* ── MedPad Design System (Customer-360 / UI-UX phase 1, Nov 2026) ──
++   A single palette drives BOTH themes. Dark is the flagship "deep-space
++   navy" (reference design): never pure black, layered surfaces, blue
++   primary + violet accent, status colors reserved for MEANING. Light is
++   the matching daylight set: soft cool-white background, white cards,
++   SAME brand hues — not an inverted dark theme.
++
++   Tokens (hex):
++     dark  : bg #0B1020 · surface #111827 · card #151E32 · raised #1C2940
++             border #26344D · primary #3B82F6 · accent #8B5CF6
++             success #10B981 · warning #F59E0B · danger #EF4444
++             text #F1F5F9 · muted #94A3B8
++     light : bg #F4F7FB · surface #FFFFFF · card #FFFFFF · raised #F1F5F9
++             border #E2E8F0 · primary #2563EB · accent #7C3AED
++             success #059669 · warning #D97706 · danger #DC2626
++             text #0F172A · muted #64748B                                             */
+ @theme inline {
+   --color-background: var(--background);
+   --color-foreground: var(--foreground);
+@@ -37,6 +53,14 @@
+   --color-popover: var(--popover);
+   --color-card-foreground: var(--card-foreground);
+   --color-card: var(--card);
++  --color-raised: var(--raised);
++  --color-brand: var(--brand);
++  --color-brand-foreground: var(--brand-foreground);
++  --color-brand2: var(--brand2);
++  --color-success: var(--success);
++  --color-success-foreground: var(--success-foreground);
++  --color-warning: var(--warning);
++  --color-warning-foreground: var(--warning-foreground);
+   --radius-sm: calc(var(--radius) - 4px);
+   --radius-md: calc(var(--radius) - 2px);
+   --radius-lg: var(--radius);
+@@ -44,72 +68,91 @@
+ }
+ 
+ :root {
+-  --radius: 0.625rem;
+-  --background: oklch(1 0 0);
+-  --foreground: oklch(0.145 0 0);
+-  --card: oklch(1 0 0);
+-  --card-foreground: oklch(0.145 0 0);
+-  --popover: oklch(1 0 0);
+-  --popover-foreground: oklch(0.145 0 0);
+-  --primary: oklch(0.205 0 0);
+-  --primary-foreground: oklch(0.985 0 0);
+-  --secondary: oklch(0.97 0 0);
+-  --secondary-foreground: oklch(0.205 0 0);
+-  --muted: oklch(0.97 0 0);
+-  --muted-foreground: oklch(0.556 0 0);
+-  --accent: oklch(0.97 0 0);
+-  --accent-foreground: oklch(0.205 0 0);
+-  --destructive: oklch(0.577 0.245 27.325);
+-  --border: oklch(0.922 0 0);
+-  --input: oklch(0.922 0 0);
+-  --ring: oklch(0.708 0 0);
+-  --chart-1: oklch(0.646 0.222 41.116);
+-  --chart-2: oklch(0.6 0.118 184.704);
+-  --chart-3: oklch(0.398 0.07 227.392);
+-  --chart-4: oklch(0.828 0.189 84.429);
+-  --chart-5: oklch(0.769 0.188 70.08);
+-  --sidebar: oklch(0.985 0 0);
+-  --sidebar-foreground: oklch(0.145 0 0);
+-  --sidebar-primary: oklch(0.205 0 0);
+-  --sidebar-primary-foreground: oklch(0.985 0 0);
+-  --sidebar-accent: oklch(0.97 0 0);
+-  --sidebar-accent-foreground: oklch(0.205 0 0);
+-  --sidebar-border: oklch(0.922 0 0);
+-  --sidebar-ring: oklch(0.708 0 0);
++  --radius: 0.75rem;
++  /* light theme — soft daylight, same brand hues as dark */
++  --background: #f4f7fb;
++  --foreground: #0f172a;
++  --card: #ffffff;
++  --card-foreground: #0f172a;
++  --raised: #f1f5f9;           /* slightly sunken/elevated neutral surface */
++  --popover: #ffffff;
++  --popover-foreground: #0f172a;
++  --primary: #2563eb;
++  --primary-foreground: #ffffff;
++  --brand: #2563eb;
++  --brand-foreground: #ffffff;
++  --brand2: #7c3aed;
++  --secondary: #eef2f7;
++  --secondary-foreground: #0f172a;
++  --muted: #eef2f7;
++  --muted-foreground: #64748b;
++  --accent: #f1f5f9;
++  --accent-foreground: #0f172a;
++  --destructive: #dc2626;
++  --success: #059669;
++  --success-foreground: #ffffff;
++  --warning: #d97706;
++  --warning-foreground: #ffffff;
++  --border: #e2e8f0;
++  --input: #dbe3ee;
++  --ring: #2563eb;
++  --chart-1: #2563eb;          /* brand blue */
++  --chart-2: #7c3aed;          /* violet     */
++  --chart-3: #059669;          /* emerald    */
++  --chart-4: #d97706;          /* amber      */
++  --chart-5: #db2777;          /* pink       */
++  --sidebar: #ffffff;
++  --sidebar-foreground: #0f172a;
++  --sidebar-primary: #2563eb;
++  --sidebar-primary-foreground: #ffffff;
++  --sidebar-accent: #f1f5f9;
++  --sidebar-accent-foreground: #0f172a;
++  --sidebar-border: #e2e8f0;
++  --sidebar-ring: #2563eb;
+ }
+ 
+ .dark {
+-  --background: oklch(0.145 0 0);
+-  --foreground: oklch(0.985 0 0);
+-  --card: oklch(0.205 0 0);
+-  --card-foreground: oklch(0.985 0 0);
+-  --popover: oklch(0.205 0 0);
+-  --popover-foreground: oklch(0.985 0 0);
+-  --primary: oklch(0.922 0 0);
+-  --primary-foreground: oklch(0.205 0 0);
+-  --secondary: oklch(0.269 0 0);
+-  --secondary-foreground: oklch(0.985 0 0);
+-  --muted: oklch(0.269 0 0);
+-  --muted-foreground: oklch(0.708 0 0);
+-  --accent: oklch(0.269 0 0);
+-  --accent-foreground: oklch(0.985 0 0);
+-  --destructive: oklch(0.704 0.191 22.216);
+-  --border: oklch(1 0 0 / 10%);
+-  --input: oklch(1 0 0 / 15%);
+-  --ring: oklch(0.556 0 0);
+-  --chart-1: oklch(0.488 0.243 264.376);
+-  --chart-2: oklch(0.696 0.17 162.48);
+-  --chart-3: oklch(0.769 0.188 70.08);
+-  --chart-4: oklch(0.627 0.265 303.9);
+-  --chart-5: oklch(0.645 0.246 16.439);
+-  --sidebar: oklch(0.205 0 0);
+-  --sidebar-foreground: oklch(0.985 0 0);
+-  --sidebar-primary: oklch(0.488 0.243 264.376);
+-  --sidebar-primary-foreground: oklch(0.985 0 0);
+-  --sidebar-accent: oklch(0.269 0 0);
+-  --sidebar-accent-foreground: oklch(0.985 0 0);
+-  --sidebar-border: oklch(1 0 0 / 10%);
+-  --sidebar-ring: oklch(0.556 0 0);
++  /* dark theme — the flagship "deep-space navy" (reference design).
++     Backgrounds are NEVER pure black: layered navy surfaces. */
++  --background: #0b1020;
++  --foreground: #f1f5f9;
++  --card: #151e32;
++  --card-foreground: #f1f5f9;
++  --raised: #1c2940;
++  --popover: #151e32;
++  --popover-foreground: #f1f5f9;
++  --primary: #3b82f6;
++  --primary-foreground: #ffffff;
++  --brand: #3b82f6;
++  --brand-foreground: #ffffff;
++  --brand2: #8b5cf6;
++  --secondary: #1c2940;
++  --secondary-foreground: #f1f5f9;
++  --muted: #1c2940;
++  --muted-foreground: #94a3b8;
++  --accent: #1c2940;
++  --accent-foreground: #f1f5f9;
++  --destructive: #ef4444;
++  --success: #10b981;
++  --success-foreground: #ffffff;
++  --warning: #f59e0b;
++  --warning-foreground: #0b1020;
++  --border: #26344d;
++  --input: #26344d;
++  --ring: #3b82f6;
++  --chart-1: #3b82f6;
++  --chart-2: #8b5cf6;
++  --chart-3: #10b981;
++  --chart-4: #f59e0b;
++  --chart-5: #ec4899;
++  --sidebar: #111827;
++  --sidebar-foreground: #f1f5f9;
++  --sidebar-primary: #3b82f6;
++  --sidebar-primary-foreground: #ffffff;
++  --sidebar-accent: #1c2940;
++  --sidebar-accent-foreground: #f1f5f9;
++  --sidebar-border: #26344d;
++  --sidebar-ring: #3b82f6;
+ }
+ 
+ @layer base {
+@@ -118,16 +161,37 @@
+   }
+   body {
+     @apply bg-background text-foreground;
++    /* subtle brand wash at the very top of the app shell (both themes) */
++    background-image: linear-gradient(180deg, color-mix(in oklab, var(--primary) 6%, transparent) 0, transparent 340px);
++    background-attachment: fixed;
+   }
+ }
+ 
+ /* ── MedPad panel extras ─────────────────────────────── */
+ .leaflet-container { font-family: inherit; }
+ .mp-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+-.mp-scroll::-webkit-scrollbar-thumb { background: #c4b5a4; border-radius: 8px; }
++.mp-scroll::-webkit-scrollbar-thumb { background: color-mix(in oklab, var(--muted-foreground) 35%, transparent); border-radius: 8px; }
+ .mp-scroll::-webkit-scrollbar-track { background: transparent; }
+ audio { border-radius: 8px; }
+ 
++/* number typography: money/counts stay LTR + tabular, inside RTL sentences */
++.num { direction: ltr; unicode-bidi: embed; font-variant-numeric: tabular-nums; }
++
++/* KPI icon chip — the reference design's tinted rounded square */
++.icon-chip {
++  display: inline-flex; align-items: center; justify-content: center;
++  width: 2.5rem; height: 2.5rem; border-radius: 0.75rem;
++  background: color-mix(in oklab, var(--chip, var(--primary)) 14%, transparent);
++  color: var(--chip, var(--primary));
++}
++
++/* gentle enter animation for cards/sections (mission §6 — subtle motion) */
++@keyframes mp-rise {
++  from { opacity: 0; transform: translateY(6px); }
++  to { opacity: 1; transform: none; }
++}
++.mp-rise { animation: mp-rise .28s ease-out both; }
++
+ /* ── v1.9.13-dev.2 (user report #3): mobile usability ──
+    1) 16px form controls on phones — iOS Safari auto-zooms into any
+       focused input rendered below 16px, which makes the whole page
+--- a/src/app/layout.tsx
++++ b/src/app/layout.tsx
+@@ -1,6 +1,7 @@
+ import type { Metadata, Viewport } from "next";
+ import "./globals.css";
+ import { Toaster } from "@/components/ui/toaster";
++import { THEME_BOOTSTRAP } from "@/lib/theme";
+ 
+ export const metadata: Metadata = {
+   title: "MedPad — سیستم کنترل کارمندها",
+@@ -12,7 +13,10 @@
+ export const viewport: Viewport = {
+   width: "device-width",
+   initialScale: 1,
+-  themeColor: "#0f766e",
++  themeColor: [
++    { media: "(prefers-color-scheme: dark)", color: "#0B1020" },
++    { media: "(prefers-color-scheme: light)", color: "#F4F7FB" },
++  ],
+ };
+ 
+ export default function RootLayout({
+@@ -29,6 +33,9 @@
+             ISPs) kept the page WHITE / "loading" forever. Local file =
+             offline-safe, instant, no external dependency. */}
+         <link rel="stylesheet" href="/fonts/vazirmatn.css" />
++        {/* theme bootstrap — applies the stored Light/Dark/System choice
++            BEFORE first paint (no white flash on a dark preference) */}
++        <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }} />
+       </head>
+       <body className="antialiased bg-background text-foreground font-sans">
+         {children}
+--- a/src/app/page.tsx
++++ b/src/app/page.tsx
+@@ -27,7 +27,7 @@
+   if (authed === null || !cfg) {
+     return (
+       <div className="min-h-screen flex items-center justify-center">
+-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-teal-600 border-t-transparent" />
++        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+       </div>
+     )
+   }
+--- a/src/components/panel/AudioPlayer.tsx
++++ b/src/components/panel/AudioPlayer.tsx
+@@ -191,7 +191,7 @@
+           data-testid={`audio-pause-${tid}`}
+           className="rounded p-1 hover:bg-muted"
+         >
+-          <Pause className="h-4 w-4 text-teal-700" />
++          <Pause className="h-4 w-4 text-primary" />
+         </button>
+       ) : (
+         <button
+@@ -200,7 +200,7 @@
+           data-testid={`audio-play-${tid}`}
+           className="rounded p-1 hover:bg-muted"
+         >
+-          <Play className="h-4 w-4 text-teal-700" />
++          <Play className="h-4 w-4 text-primary" />
+         </button>
+       )}
+       <button
+@@ -215,7 +215,7 @@
+         onClick={cycleRate}
+         title="سرعت پخش"
+         data-testid={`audio-speed-${tid}`}
+-        className="rounded px-1 py-0.5 text-xs font-medium text-teal-700 hover:bg-muted"
++        className="rounded px-1 py-0.5 text-xs font-medium text-primary hover:bg-muted"
+       >
+         {RATE_LABELS[rateIdx]}
+       </button>
+@@ -228,7 +228,7 @@
+         onChange={(e) => seek(parseFloat(e.target.value))}
+         title="جابه‌جایی"
+         data-testid={`audio-seek-${tid}`}
+-        className="h-1 w-20 accent-teal-600"
++        className="h-1 w-20 accent-primary"
+         disabled={!duration}
+       />
+       <span
+--- a/src/components/panel/CheckinsTab.tsx
++++ b/src/components/panel/CheckinsTab.tsx
+@@ -98,7 +98,7 @@
+               key={k}
+               onClick={() => setKind(k)}
+               className={`px-3 py-1.5 text-sm transition-colors ${
+-                kind === k ? 'bg-teal-600 text-white' : 'bg-background hover:bg-muted'
++                kind === k ? 'bg-primary text-white' : 'bg-background hover:bg-muted'
+               }`}
+             >
+               {label}
+@@ -123,11 +123,11 @@
+             <div key={r.id} className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center">
+               <div className="flex items-center gap-2 min-w-[150px]">
+                 {r.kind === 'checkin' ? (
+-                  <Badge className="bg-teal-600 hover:bg-teal-700 gap-1">
++                  <Badge className="bg-primary hover:bg-primary/90 gap-1">
+                     <LogIn className="h-3 w-3" /> چک‌این
+                   </Badge>
+                 ) : (
+-                  <Badge className="bg-amber-600 hover:bg-amber-700 gap-1">
++                  <Badge className="bg-warning hover:bg-warning/90 gap-1">
+                     <LogOut className="h-3 w-3" /> چک‌اوت
+                   </Badge>
+                 )}
+@@ -148,7 +148,7 @@
+                   variant="outline"
+                   className={`shrink-0 ${
+                     r.outOfRadius
+-                      ? 'bg-amber-100 text-amber-800'
++                      ? 'bg-warning/15 text-warning'
+                       : 'bg-emerald-50 text-emerald-700'
+                   }`}
+                   title={r.outOfRadius ? 'فاصله بیشتر از شعاع مجاز مشتری' : 'فاصله از مشتری'}
+@@ -205,7 +205,7 @@
+                   r.voicePath && <AudioPlayer src={`/api/media/${r.voicePath}`} tid={r.id} />
+                 )}
+                 {(r.voiceFiles?.length ?? 0) > 0 || r.voicePath ? (
+-                  <Mic className="h-4 w-4 text-teal-600 shrink-0" />
++                  <Mic className="h-4 w-4 text-primary shrink-0" />
+                 ) : null}
+                 {/* phase 2 / §2 — version history */}
+                 {(r.noteVersionCount ?? 0) > 0 && (
+--- a/src/components/panel/CityPicker.tsx
++++ b/src/components/panel/CityPicker.tsx
+@@ -61,7 +61,7 @@
+             className="h-8 w-full justify-between font-normal"
+           >
+             <span className="flex min-w-0 items-center gap-1.5">
+-              <MapPinIcon className="h-3.5 w-3.5 shrink-0 text-teal-600" />
++              <MapPinIcon className="h-3.5 w-3.5 shrink-0 text-primary" />
+               {city ? (
+                 <span className="truncate">
+                   {city}
+--- a/src/components/panel/CustomerProfile.tsx
++++ b/src/components/panel/CustomerProfile.tsx
+@@ -0,0 +1,620 @@
++'use client'
++
++import { useCallback, useEffect, useMemo, useState } from 'react'
++import { Badge } from '@/components/ui/badge'
++import { Button } from '@/components/ui/button'
++import { Input } from '@/components/ui/input'
++import { Label } from '@/components/ui/label'
++import { Card, CardContent } from '@/components/ui/card'
++import { ScrollArea } from '@/components/ui/scroll-area'
++import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
++import {
++  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
++} from '@/components/ui/dialog'
++import {
++  Briefcase, Building2, CalendarCheck, DoorOpen, Link2, MapPin, Package,
++  Pencil, Phone, RefreshCw, Stethoscope, Unlink, UserRound,
++} from 'lucide-react'
++import AudioPlayer from './AudioPlayer'
++import type { Customer, Employee } from '@/lib/types'
++import { faDate, faDateTime, faTime } from '@/lib/realtime'
++
++/**
++ * Customer 360 (phase 1) — the admin's complete customer profile.
++ *
++ * Structure (mission §6.2, reference design):
++ *   header   — identity, type, status, contact, city/district, reps, map
++ *   summary  — total purchase · order count · last purchase · last visit
++ *   tabs     — اطلاعات پایه | پزشکان/کلینیک‌ها | سوابق خرید | تاریخچه ویزیت | یادداشت‌ها
++ *
++ * Everything renders REAL data with explicit empty states:
++ *  * purchases carry their SOURCE (manual/holoo) — until the future Holoo
++ *    adapter writes rows, the tab shows the honest «اتصال برقرار نشده» note;
++ *  * visits come from real Visit/Checkin rows (notes, edit-history badges,
++ *    per-file voice players through the EXISTING token-authenticated route);
++ *  * links are the typed physician↔clinic many-to-many, managed here.
++ */
++
++interface PurchaseItem { id: string; productName: string; productCode?: string | null; brand?: string | null; qty: number; unitPrice: number; total: number; discount?: number | null }
++interface Purchase {
++  id: string; source: string; externalId?: string | null; invoiceNo?: string | null
++  date: string; paymentStatus?: string | null; discount?: number | null; notes?: string | null
++  items: PurchaseItem[]
++}
++interface LinkRow {
++  id: string; note?: string | null; active?: boolean; createdAt: string
++  counterpart: { id: string; name: string; type: string; city?: string | null; phone?: string | null; active?: boolean }
++}
++interface VisitRow {
++  id: string; startAt: string; endAt?: string | null; open: boolean; deviationMin?: number | null
++  employee: { id: string; name: string }
++  checkin?: {
++    id: string; note?: string | null; createdAt: string
++    _count?: { noteVersions: number }
++    voiceFiles?: { id: string; path: string }[]
++  } | null
++  checkout?: {
++    id: string; note?: string | null; createdAt: string
++    _count?: { noteVersions: number }
++    voiceFiles?: { id: string; path: string }[]
++  } | null
++  plannedVisit?: { id: string; scheduledAt: string; priority: string; status: string } | null
++}
++interface ProfileData {
++  ok: boolean
++  customer: Customer & {
++    lastName?: string | null; title?: string | null; specialty?: string | null
++    managerName?: string | null; phone2?: string | null; district?: string | null
++    postalCode?: string | null; notes?: string | null; active?: boolean
++    _count?: { checkins: number; visits: number; plannedVisits: number; purchases: number }
++  }
++  links: { physicians: LinkRow[]; clinics: LinkRow[] }
++  purchaseSummary: {
++    total: number; last30: number; last90: number; last365: number
++    orderCount: number; avgOrder: number | null; lastPurchaseAt: string | null; maxOrder: number | null
++  }
++  purchases: Purchase[]
++  visits: VisitRow[]
++  purchaseSourceNote: string
++}
++
++const fa = (n: number) => n.toLocaleString('fa-IR')
++const typeFa = (t: string) => t === 'doctor' ? 'پزشک' : t === 'pharmacy' ? 'داروخانه' : t === 'clinic' ? 'کلینیک' : 'سایر'
++const paymentFa = (p?: string | null) => p === 'paid' ? 'پرداخت‌شده' : p === 'unpaid' ? 'پرداخت‌نشده' : p === 'partial' ? 'پرداخت جزئی' : null
++const purchaseNet = (p: Purchase) => p.items.reduce((s, it) => s + (it.total || 0), 0) - (p.discount || 0)
++
++function visitDurationMin(v: VisitRow): number | null {
++  if (!v.endAt) return null
++  const ms = new Date(v.endAt).getTime() - new Date(v.startAt).getTime()
++  return ms > 0 ? Math.round(ms / 60000) : null
++}
++
++export default function CustomerProfile({
++  customerId, onClose, onEdit, onPickOnMap,
++}: {
++  customerId: string
++  onClose: () => void
++  onEdit?: (c: ProfileData['customer']) => void
++  onPickOnMap?: (c: ProfileData['customer']) => void
++}) {
++  const [data, setData] = useState<ProfileData | null>(null)
++  const [loading, setLoading] = useState(true)
++  const [period, setPeriod] = useState<'all' | '365' | '90' | '30'>('all')
++  // link dialog state
++  const [linkOpen, setLinkOpen] = useState(false)
++  const [linkNote, setLinkNote] = useState('')
++  const [linkTarget, setLinkTarget] = useState<string>('')
++  const [candidates, setCandidates] = useState<Customer[]>([])
++  const [linkBusy, setLinkBusy] = useState(false)
++
++  const load = useCallback(async () => {
++    setLoading(true)
++    try {
++      const res = await fetch(`/api/customers/${customerId}/profile`, { cache: 'no-store' })
++      const d = await res.json()
++      if (d.ok) setData(d)
++    } finally {
++      setLoading(false)
++    }
++  }, [customerId])
++
++  useEffect(() => { load() }, [load])
++
++  // candidates for a NEW link: physicians (when customer is a clinic) or
++  // clinics (when customer is a physician) — everything else is excluded
++  // up front so the dialog cannot even offer an invalid pair.
++  useEffect(() => {
++    if (!linkOpen || !data) return
++    const want = data.customer.type === 'clinic' ? 'doctor' : 'clinic'
++    fetch('/api/customers', { cache: 'no-store' })
++      .then((r) => r.json())
++      .then((d) => {
++        if (!d.ok) return
++        const linked = new Set(
++          (want === 'doctor' ? data.links.physicians : data.links.clinics).map((l) => l.counterpart.id),
++        )
++        setCandidates(
++          (d.customers as Customer[]).filter((c) => c.type === want && c.id !== data.customer.id && !linked.has(c.id)),
++        )
++      })
++      .catch(() => {})
++  }, [linkOpen, data])
++
++  async function createLink() {
++    if (!linkTarget || !data) return
++    setLinkBusy(true)
++    try {
++      const isClinic = data.customer.type === 'clinic'
++      const body = isClinic
++        ? { clinicId: data.customer.id, physicianId: linkTarget, note: linkNote }
++        : { clinicId: linkTarget, physicianId: data.customer.id, note: linkNote }
++      const res = await fetch('/api/customer-links', {
++        method: 'POST',
++        headers: { 'content-type': 'application/json' },
++        body: JSON.stringify(body),
++      })
++      const d = await res.json().catch(() => null)
++      if (res.ok && d?.ok) {
++        setLinkOpen(false); setLinkNote(''); setLinkTarget('')
++        await load()
++      } else {
++        alert(d?.error || 'خطا در ایجاد ارتباط')
++      }
++    } finally {
++      setLinkBusy(false)
++    }
++  }
++
++  async function removeLink(id: string) {
++    if (!confirm('این ارتباط حذف شود؟ (سوابق بازدید و خرید هر دو طرف دست‌نخورده می‌مانند)')) return
++    const res = await fetch(`/api/customer-links/${id}`, { method: 'DELETE' })
++    if (res.ok) await load()
++  }
++
++  const filteredPurchases = useMemo(() => {
++    if (!data) return []
++    if (period === 'all') return data.purchases
++    const cutoff = Date.now() - Number(period) * 24 * 3600 * 1000
++    return data.purchases.filter((p) => new Date(p.date).getTime() >= cutoff)
++  }, [data, period])
++
++  if (loading && !data) {
++    return (
++      <div className="flex h-64 items-center justify-center">
++        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
++      </div>
++    )
++  }
++  if (!data?.ok || !data.customer) {
++    return (
++      <div className="flex h-64 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
++        پرونده بارگذاری نشد
++        <Button variant="outline" size="sm" onClick={load}><RefreshCw className="h-4 w-4" /> تلاش دوباره</Button>
++      </div>
++    )
++  }
++
++  const c = data.customer
++  const isClinic = c.type === 'clinic'
++  const fullName = [c.name, c.lastName].filter(Boolean).join(' ')
++  const summary = data.purchaseSummary
++  const repNames = (c.assignments ?? []).map((a) => a.employee.name)
++  const lastVisitAt = data.visits[0]?.startAt ?? null
++
++  return (
++    <div className="space-y-4">
++      {/* ── profile header ── */}
++      <Card className="border/60 overflow-hidden">
++        <div className="h-1.5 bg-gradient-to-l from-primary via-brand2 to-primary/40" />
++        <CardContent className="p-4 sm:p-5">
++          <div className="flex flex-wrap items-start gap-4">
++            <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-xl font-black text-white ${isClinic ? 'bg-gradient-to-br from-primary to-brand2' : 'bg-gradient-to-br from-brand2 to-chart-5'}`}>
++              {fullName.slice(0, 2)}
++            </div>
++            <div className="min-w-0 flex-1">
++              <div className="flex flex-wrap items-center gap-2">
++                <h2 className="text-lg font-extrabold leading-tight">{fullName}</h2>
++                <Badge variant="secondary">{typeFa(c.type)}</Badge>
++                {c.active === false && <Badge variant="destructive">غیرفعال</Badge>}
++                {(!c.assignments || c.assignments.length === 0) && <Badge className="bg-warning/15 text-warning">بدون تخصیص</Badge>}
++              </div>
++              <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
++                {c.title && <span>{c.title}{c.specialty ? ` — ${c.specialty}` : ''}</span>}
++                {c.phone && <span className="flex items-center gap-1"><Phone className="h-3 w-3" /><span className="num" dir="ltr">{c.phone}</span></span>}
++                {c.phone2 && <span className="flex items-center gap-1"><Phone className="h-3 w-3" /><span className="num" dir="ltr">{c.phone2}</span></span>}
++                {c.managerName && <span>مسئول خرید: {c.managerName}</span>}
++                {(c.city || c.district) && (
++                  <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{[c.city, c.district].filter(Boolean).join('، ')}</span>
++                )}
++                {repNames.length > 0 && <span>مدرپ: {repNames.join('، ')}</span>}
++              </div>
++              {c.address && <p className="mt-1 text-xs text-muted-foreground">{c.address}</p>}
++            </div>
++            <div className="flex shrink-0 flex-wrap gap-1.5">
++              {onPickOnMap && (
++                <Button variant="outline" size="sm" onClick={() => onPickOnMap(c)}>
++                  <MapPin className="h-4 w-4 text-primary" /> موقعیت
++                </Button>
++              )}
++              {onEdit && (
++                <Button variant="outline" size="sm" onClick={() => onEdit(c)}>
++                  <Pencil className="h-4 w-4 text-primary" /> ویرایش
++                </Button>
++              )}
++              <Button variant="outline" size="sm" onClick={load} disabled={loading}>
++                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
++              </Button>
++            </div>
++          </div>
++        </CardContent>
++      </Card>
++
++      {/* ── summary cards (REAL aggregates; explicit empties) ── */}
++      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
++        {[
++          { label: 'مجموع خرید', value: summary.orderCount ? fa(Math.round(summary.total)) : '—', icon: Package, chip: 'primary' },
++          { label: 'تعداد سفارش', value: fa(summary.orderCount), icon: Briefcase, chip: 'brand2' },
++          { label: 'آخرین خرید', value: summary.lastPurchaseAt ? faDate(summary.lastPurchaseAt) : '—', icon: CalendarCheck, chip: 'chart-4' },
++          { label: 'آخرین ویزیت', value: lastVisitAt ? faDateTime(lastVisitAt) : '—', icon: DoorOpen, chip: 'success' },
++        ].map((s) => (
++          <Card key={s.label} className="border/60">
++            <CardContent className="p-4">
++              <span className="icon-chip" style={{ ['--chip' as string]: `var(--${s.chip})` }}>
++                <s.icon className="h-5 w-5" />
++              </span>
++              <p className="mt-2.5 truncate text-lg font-extrabold leading-none">{s.value}</p>
++              <p className="mt-1 text-xs text-muted-foreground">{s.label}</p>
++            </CardContent>
++          </Card>
++        ))}
++      </div>
++
++      {/* ── tabs ── */}
++      <Tabs defaultValue="info" dir="rtl">
++        <TabsList className="flex w-full flex-wrap justify-start gap-1 h-auto bg-muted/60 p-1">
++          <TabsTrigger value="info" className="rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm">اطلاعات پایه</TabsTrigger>
++          <TabsTrigger value="links" className="rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm">
++            {isClinic ? 'پزشکان این کلینیک' : 'کلینیک‌های این پزشک'}
++            {(isClinic ? data.links.physicians : data.links.clinics).length > 0 && (
++              <span className="mr-1 rounded-full bg-primary/15 px-1.5 text-[10px] text-primary">
++                {fa((isClinic ? data.links.physicians : data.links.clinics).length)}
++              </span>
++            )}
++          </TabsTrigger>
++          <TabsTrigger value="purchases" className="rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm">سوابق خرید</TabsTrigger>
++          <TabsTrigger value="visits" className="rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm">
++            تاریخچه ویزیت
++            {data.visits.length > 0 && (
++              <span className="mr-1 rounded-full bg-primary/15 px-1.5 text-[10px] text-primary">{fa(data.visits.length)}</span>
++            )}
++          </TabsTrigger>
++          <TabsTrigger value="notes" className="rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm">یادداشت‌ها</TabsTrigger>
++        </TabsList>
++
++        {/* tab: basic info */}
++        <TabsContent value="info" className="mt-3">
++          <Card className="border/60">
++            <CardContent className="p-4">
++              <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
++                {[
++                  ['نام', c.name],
++                  ['نام خانوادگی', c.lastName],
++                  ['نوع مشتری', typeFa(c.type)],
++                  ['عنوان حرفه‌ای', c.title],
++                  ['تخصص', c.specialty],
++                  ['مسئول خرید', c.managerName],
++                  ['تلفن اصلی', c.phone],
++                  ['تلفن دوم', c.phone2],
++                  ['استان', c.province],
++                  ['شهر', c.city],
++                  ['منطقه', c.district],
++                  ['کد پستی', c.postalCode],
++                  ['آدرس', c.address],
++                  ['شعاع جغرافیایی', c.radius ? `${fa(c.radius)} متر` : null],
++                ].filter(([, v]) => v !== null && v !== undefined && String(v).length > 0).map(([k, v]) => (
++                  <div key={String(k)}>
++                    <dt className="text-[11px] text-muted-foreground">{k}</dt>
++                    <dd className="mt-0.5 break-words text-sm font-medium">{String(v)}</dd>
++                  </div>
++                ))}
++                <div>
++                  <dt className="text-[11px] text-muted-foreground">تاریخ ثبت</dt>
++                  <dd className="mt-0.5 text-sm font-medium">{faDateTime(c.createdAt)}</dd>
++                </div>
++                <div>
++                  <dt className="text-[11px] text-muted-foreground">آخرین به‌روزرسانی (LWW)</dt>
++                  <dd className="mt-0.5 text-sm font-medium">{faDateTime(c.updatedAt)}</dd>
++                </div>
++              </dl>
++            </CardContent>
++          </Card>
++        </TabsContent>
++
++        {/* tab: links (physician ↔ clinic many-to-many) */}
++        <TabsContent value="links" className="mt-3">
++          <Card className="border/60">
++            <CardContent className="p-4">
++              <div className="mb-3 flex items-center justify-between gap-2">
++                <p className="text-xs text-muted-foreground">
++                  {isClinic ? 'پزشک‌هایی که در این کلینیک فعالیت می‌کنند' : 'کلینیک‌هایی که این پزشک در آن‌ها فعالیت می‌کند'}
++                  {' — '}یک پزشک می‌تواند در چند کلینیک و یک کلینیک چند پزشک داشته باشد.
++                </p>
++                <Button size="sm" className="bg-primary hover:bg-primary/90" onClick={() => setLinkOpen(true)}>
++                  <Link2 className="h-4 w-4" /> {isClinic ? 'افزودن پزشک' : 'افزودن کلینیک'}
++                </Button>
++              </div>
++              <ScrollArea className="max-h-72 rounded-lg">
++                <div className="divide-y mp-scroll">
++                  {(isClinic ? data.links.physicians : data.links.clinics).length === 0 && (
++                    <p className="p-6 text-center text-sm text-muted-foreground">
++                      {isClinic ? 'هنوز پزشکی به این کلینیک متصل نشده است' : 'هنوز کلینیکی برای این پزشک ثبت نشده است'}
++                    </p>
++                  )}
++                  {(isClinic ? data.links.physicians : data.links.clinics).map((l) => (
++                    <div key={l.id} className="flex items-center gap-3 p-3">
++                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand2/15 text-brand2">
++                        {isClinic ? <Stethoscope className="h-4 w-4" /> : <Building2 className="h-4 w-4" />}
++                      </span>
++                      <div className="min-w-0 flex-1">
++                        <p className="truncate text-sm font-medium">{l.counterpart.name}</p>
++                        <p className="text-xs text-muted-foreground">
++                          {typeFa(l.counterpart.type)}
++                          {l.counterpart.city ? ` — ${l.counterpart.city}` : ''}
++                          {l.note ? ` — ${l.note}` : ''}
++                        </p>
++                      </div>
++                      {l.counterpart.active === false && <Badge variant="secondary">غیرفعال</Badge>}
++                      <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" title="حذف ارتباط" onClick={() => removeLink(l.id)}>
++                        <Unlink className="h-4 w-4" />
++                      </Button>
++                    </div>
++                  ))}
++                </div>
++              </ScrollArea>
++            </CardContent>
++          </Card>
++        </TabsContent>
++
++        {/* tab: purchases */}
++        <TabsContent value="purchases" className="mt-3 space-y-3">
++          {/* honest provenance banner — mission §4.3 */}
++          <div className="rounded-xl border border-dashed bg-muted/40 px-4 py-2.5 text-xs text-muted-foreground">
++            <Package className="ml-1 inline h-3.5 w-3.5" />
++            {data.purchaseSourceNote} — منبع هر رکورد کنار آن نمایش داده می‌شود.
++          </div>
++
++          <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
++            {[
++              ['مجموع کل', summary.total], ['۳۰ روز اخیر', summary.last30],
++              ['۹۰ روز اخیر', summary.last90], ['یک سال اخیر', summary.last365],
++            ].map(([k, v]) => (
++              <Card key={String(k)} className="border/60">
++                <CardContent className="p-3">
++                  <p className="num text-base font-extrabold leading-none">
++                    {summary.orderCount ? fa(Math.round(Number(v))) : '—'}
++                  </p>
++                  <p className="mt-1 text-[11px] text-muted-foreground">{String(k)}</p>
++                </CardContent>
++              </Card>
++            ))}
++            <Card className="border/60">
++              <CardContent className="p-3">
++                <p className="num text-base font-extrabold leading-none">
++                  {summary.avgOrder !== null ? fa(Math.round(summary.avgOrder)) : '—'}
++                </p>
++                <p className="mt-1 text-[11px] text-muted-foreground">میانگین هر سفارش</p>
++              </CardContent>
++            </Card>
++          </div>
++
++          <div className="flex flex-wrap items-center gap-1.5">
++            {([['all', 'همه'], ['365', 'یک سال'], ['90', '۹۰ روز'], ['30', '۳۰ روز']] as const).map(([k, label]) => (
++              <button
++                key={k}
++                onClick={() => setPeriod(k)}
++                className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
++                  period === k ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:bg-muted'
++                }`}
++              >
++                {label}
++              </button>
++            ))}
++          </div>
++
++          {filteredPurchases.length === 0 ? (
++            <Card className="border/60">
++              <CardContent className="flex flex-col items-center gap-2 p-8 text-center text-sm text-muted-foreground">
++                <Package className="h-8 w-8 opacity-30" />
++                {data.purchases.length === 0
++                  ? 'هنوز خریدی برای این مشتری ثبت نشده است'
++                  : 'در این بازه زمانی خریدی ثبت نشده است'}
++              </CardContent>
++            </Card>
++          ) : (
++            <div className="space-y-2">
++              {filteredPurchases.map((p) => (
++                <Card key={p.id} className="border/60">
++                  <CardContent className="p-4">
++                    <div className="flex flex-wrap items-center gap-2">
++                      <span className="icon-chip" style={{ ['--chip' as string]: 'var(--chart-4)' }}>
++                        <Package className="h-4 w-4" />
++                      </span>
++                      <span className="text-sm font-bold">{faDate(p.date)}</span>
++                      {p.invoiceNo && <Badge variant="secondary">فاکتور <span className="num" dir="ltr">{p.invoiceNo}</span></Badge>}
++                      {paymentFa(p.paymentStatus) && (
++                        <Badge className={p.paymentStatus === 'paid' ? 'bg-success/15 text-success' : p.paymentStatus === 'unpaid' ? 'bg-destructive/15 text-destructive' : 'bg-warning/15 text-warning'}>
++                          {paymentFa(p.paymentStatus)}
++                        </Badge>
++                      )}
++                      <Badge variant="outline">{p.source === 'holoo' ? 'هلو' : 'دستی'}</Badge>
++                      <span className="num mr-auto text-sm font-extrabold">{fa(Math.round(purchaseNet(p)))}</span>
++                    </div>
++                    {(p.notes || p.discount) && (
++                      <p className="mt-1.5 text-xs text-muted-foreground">
++                        {p.notes}
++                        {p.discount ? `${p.notes ? ' — ' : ''}تخفیف فاکتور: ${fa(p.discount)}` : ''}
++                      </p>
++                    )}
++                    {p.items.length > 0 && (
++                      <div className="mt-2 overflow-x-auto">
++                        <table className="w-full text-xs">
++                          <thead>
++                            <tr className="border-b text-muted-foreground">
++                              <th className="py-1.5 pr-2 text-right font-medium">محصول</th>
++                              <th className="py-1.5 text-right font-medium">کد</th>
++                              <th className="py-1.5 text-right font-medium">برند</th>
++                              <th className="py-1.5 text-right font-medium">تعداد</th>
++                              <th className="py-1.5 text-right font-medium">قیمت واحد</th>
++                              <th className="py-1.5 text-right font-medium">مبلغ کل</th>
++                            </tr>
++                          </thead>
++                          <tbody>
++                            {p.items.map((it) => (
++                              <tr key={it.id} className="border-b last:border-0">
++                                <td className="py-1.5 pr-2 font-medium">{it.productName}</td>
++                                <td className="py-1.5" dir="ltr">{it.productCode || '—'}</td>
++                                <td className="py-1.5">{it.brand || '—'}</td>
++                                <td className="num py-1.5">{fa(it.qty)}</td>
++                                <td className="num py-1.5">{fa(it.unitPrice)}</td>
++                                <td className="num py-1.5 font-bold">{fa(it.total)}</td>
++                              </tr>
++                            ))}
++                          </tbody>
++                        </table>
++                      </div>
++                    )}
++                  </CardContent>
++                </Card>
++              ))}
++            </div>
++          )}
++        </TabsContent>
++
++        {/* tab: visit history (REAL visits, newest first) */}
++        <TabsContent value="visits" className="mt-3">
++          <Card className="border/60">
++            <CardContent className="p-0">
++              <ScrollArea className="max-h-[60vh] rounded-lg">
++                <div className="divide-y mp-scroll">
++                  {data.visits.length === 0 && (
++                    <p className="p-8 text-center text-sm text-muted-foreground">هنوز ویزیتی برای این مشتری ثبت نشده است</p>
++                  )}
++                  {data.visits.map((v) => {
++                    const dur = visitDurationMin(v)
++                    const notes = [v.checkin?.note, v.checkout?.note].filter(Boolean)
++                    const voices = [
++                      ...(v.checkin?.voiceFiles ?? []).map((f) => ({ f, when: v.checkin!.createdAt })),
++                      ...(v.checkout?.voiceFiles ?? []).map((f) => ({ f, when: v.checkout!.createdAt })),
++                    ]
++                    const edited = (v.checkin?._count?.noteVersions ?? 0) + (v.checkout?._count?.noteVersions ?? 0) > 0
++                    return (
++                      <div key={v.id} className="p-4">
++                        <div className="flex flex-wrap items-center gap-2">
++                          <span className="icon-chip" style={{ ['--chip' as string]: 'var(--success)' }}>
++                            <DoorOpen className="h-4 w-4" />
++                          </span>
++                          <span className="text-sm font-bold">{faDate(v.startAt)}</span>
++                          <span className="text-xs text-muted-foreground">
++                            {faTime(v.startAt)}{v.endAt ? ` تا ${faTime(v.endAt)}` : ''}
++                          </span>
++                          <Badge variant="secondary">{v.employee.name}</Badge>
++                          {v.open
++                            ? <Badge className="bg-success/15 text-success">در جریان</Badge>
++                            : dur !== null && <Badge variant="secondary">{fa(dur)} دقیقه</Badge>}
++                          {v.plannedVisit && <Badge variant="outline">برنامه‌دار</Badge>}
++                          {v.deviationMin != null && (
++                            <Badge variant="outline" className={v.deviationMin > 0 ? 'border-warning/50 text-warning' : ''}>
++                              {v.deviationMin > 0 ? `${fa(v.deviationMin)} دقیقه تأخیر` : `${fa(Math.abs(v.deviationMin))} دقیقه زودتر`}
++                            </Badge>
++                          )}
++                        </div>
++                        {notes.length > 0 && (
++                          <div className="mt-2 space-y-1 text-sm">
++                            {notes.map((n, i) => (
++                              <p key={i} className="whitespace-pre-wrap text-foreground/90">
++                                {n}
++                                {edited && <span className="mr-1.5 align-middle text-[10px] text-muted-foreground">(ویرایش‌شده)</span>}
++                              </p>
++                            ))}
++                          </div>
++                        )}
++                        {voices.length > 0 && (
++                          <div className="mt-2 space-y-1.5">
++                            {voices.map(({ f }) => (
++                              <AudioPlayer key={f.id} src={`/api/media/${f.path}`} tid={`cp-${f.id}`} />
++                            ))}
++                          </div>
++                        )}
++                      </div>
++                    )
++                  })}
++                </div>
++              </ScrollArea>
++            </CardContent>
++          </Card>
++        </TabsContent>
++
++        {/* tab: notes */}
++        <TabsContent value="notes" className="mt-3">
++          <Card className="border/60">
++            <CardContent className="p-4">
++              {c.notes ? (
++                <p className="whitespace-pre-wrap text-sm leading-6">{c.notes}</p>
++              ) : (
++                <p className="p-6 text-center text-sm text-muted-foreground">
++                  یادداشتی برای این مشتری ثبت نشده — از «ویرایش» می‌توانید اضافه کنید
++                </p>
++              )}
++              {onEdit && (
++                <Button variant="outline" size="sm" className="mt-3" onClick={() => onEdit(c)}>
++                  <Pencil className="h-4 w-4 text-primary" /> ویرایش یادداشت
++                </Button>
++              )}
++            </CardContent>
++          </Card>
++        </TabsContent>
++      </Tabs>
++
++      {/* link dialog */}
++      <Dialog open={linkOpen} onOpenChange={(o) => !o && setLinkOpen(false)}>
++        <DialogContent dir="rtl" className="sm:max-w-md">
++          <DialogHeader>
++            <DialogTitle>{isClinic ? 'افزودن پزشک به این کلینیک' : 'اتصال این پزشک به کلینیک'}</DialogTitle>
++          </DialogHeader>
++          <div className="grid gap-3">
++            <div className="space-y-1">
++              <Label>{isClinic ? 'پزشک' : 'کلینیک'}</Label>
++              <select
++                value={linkTarget}
++                onChange={(e) => setLinkTarget(e.target.value)}
++                className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm"
++              >
++                <option value="">— انتخاب کنید —</option>
++                {candidates.map((cand) => (
++                  <option key={cand.id} value={cand.id}>
++                    {cand.name}{cand.city ? ` (${cand.city})` : ''}
++                  </option>
++                ))}
++              </select>
++              {candidates.length === 0 && (
++                <p className="text-xs text-muted-foreground">
++                  {isClinic ? 'پزشک دیگری ثبت نشده است' : 'کلینیک دیگری ثبت نشده است'}
++                </p>
++              )}
++            </div>
++            <div className="space-y-1">
++              <Label>توضیح ارتباط (اختیاری)</Label>
++              <Input value={linkNote} onChange={(e) => setLinkNote(e.target.value)} placeholder="مثلاً: شنبه‌ها و دوشنبه‌ها" />
++            </div>
++          </div>
++          <DialogFooter>
++            <Button variant="outline" onClick={() => setLinkOpen(false)}>انصراف</Button>
++            <Button className="bg-primary hover:bg-primary/90" onClick={createLink} disabled={linkBusy || !linkTarget}>
++              {linkBusy ? 'در حال ذخیره…' : 'ایجاد ارتباط'}
++            </Button>
++          </DialogFooter>
++        </DialogContent>
++      </Dialog>
++    </div>
++  )
++}
+--- a/src/components/panel/CustomersTab.tsx
++++ b/src/components/panel/CustomersTab.tsx
+@@ -1,6 +1,6 @@
+ 'use client'
+ 
+-import { useCallback, useEffect, useState } from 'react'
++import { useCallback, useEffect, useMemo, useState } from 'react'
+ import { Button } from '@/components/ui/button'
+ import { Input } from '@/components/ui/input'
+ import { Label } from '@/components/ui/label'
+@@ -15,23 +15,51 @@
+ } from '@/components/ui/dialog'
+ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+ import { Checkbox } from '@/components/ui/checkbox'
+-import { Layers, MapPin, Pencil, Plus, RefreshCw, StickyNote, X } from 'lucide-react'
++import {
++  ArrowRight, CalendarCheck, Layers, MapPin, Package, Pencil, Plus, RefreshCw, Search, StickyNote, Unlink, UserRound, X,
++} from 'lucide-react'
+ import MapViewClient, { type MapPoint } from './MapViewClient'
+ import CityPicker from './CityPicker'
++import CustomerProfile from './CustomerProfile'
+ import type { Customer, Employee } from '@/lib/types'
+-import { faDateTime } from '@/lib/realtime'
++import { faDate, faDateTime } from '@/lib/realtime'
+ import { findIranCity } from '@/lib/iran-cities'
+ 
++/** Customer row as served by GET /api/customers (Customer-360 extension). */
++interface CustomerRow extends Customer {
++  lastName?: string | null
++  title?: string | null
++  specialty?: string | null
++  managerName?: string | null
++  phone2?: string | null
++  district?: string | null
++  postalCode?: string | null
++  notes?: string | null
++  active?: boolean
++  lastVisitAt?: string | null
++  purchaseTotal?: number
++  lastPurchaseAt?: string | null
++}
++
+ const emptyForm = {
+   name: '',
++  lastName: '',
+   type: 'doctor',
++  title: '',
++  specialty: '',
++  managerName: '',
+   address: '',
+   phone: '',
++  phone2: '',
+   city: '', // package 8 — offline dataset (city, province) pair
+   province: '',
++  district: '',
++  postalCode: '',
++  notes: '',
+   lat: 0,
+   lng: 0,
+   radius: 150,
++  active: true,
+ }
+ 
+ // package 7 — result of a bulk assign/unassign (exact counters, no false
+@@ -45,15 +73,24 @@
+   failed?: { employeeName?: string; customerName?: string; reason: string }[]
+ }
+ 
++const typeFa = (t: string) => (t === 'doctor' ? 'پزشک' : t === 'pharmacy' ? 'داروخانه' : t === 'clinic' ? 'کلینیک' : 'سایر')
++
+ export default function CustomersTab({ refreshKey }: { refreshKey: number }) {
+-  const [rows, setRows] = useState<Customer[]>([])
++  const [rows, setRows] = useState<CustomerRow[]>([])
+   const [loading, setLoading] = useState(true)
+-  const [selected, setSelected] = useState<Customer | null>(null)
+-  const [editing, setEditing] = useState<Customer | null>(null)
++  const [selected, setSelected] = useState<CustomerRow | null>(null)
++  const [profileId, setProfileId] = useState<string | null>(null)
++  const [editing, setEditing] = useState<CustomerRow | null>(null)
+   const [creating, setCreating] = useState(false)
+   const [form, setForm] = useState(emptyForm)
+   const [pickMode, setPickMode] = useState<{ customerId: string; name: string } | null>(null)
+   const [saving, setSaving] = useState(false)
++  // Customer 360 — search + filters (mission §6.1)
++  const [query, setQuery] = useState('')
++  const [fType, setFType] = useState<string>('all')
++  const [fActive, setFActive] = useState<string>('all')
++  const [fEmp, setFEmp] = useState<string>('all')
++  const [fCity, setFCity] = useState<string>('all')
+   // package 7 — bulk select + bulk dialog + result
+   const [selectMode, setSelectMode] = useState(false)
+   const [checked, setChecked] = useState<Set<string>>(new Set())
+@@ -85,11 +122,35 @@
+     load()
+   }, [load, refreshKey])
+ 
+-  // mission 12 / item 1 — unassigned customers get a DISTINCT slate marker
+-  // (assigned stay teal): the admin sees at a glance which customers still
+-  // need an assignment decision. The popup also names the state.
++  // Customer 360 — live client-side search/filter (name/clinic/phone + city
++  // + rep + active). The dataset is the full customer list; filtering here
++  // keeps one source of truth and instant feedback.
++  const cities = useMemo(() => {
++    const s = new Set<string>()
++    rows.forEach((r) => r.city && s.add(r.city))
++    return [...s].sort((a, b) => a.localeCompare(b, 'fa'))
++  }, [rows])
++
++  const filtered = useMemo(() => {
++    const q = query.trim().replace(/\s+/g, ' ')
++    return rows.filter((r) => {
++      if (fType !== 'all' && r.type !== fType) return false
++      if (fActive === 'active' && r.active === false) return false
++      if (fActive === 'inactive' && r.active !== false) return false
++      if (fEmp !== 'all' && !(r.assignments ?? []).some((a) => a.employee.id === fEmp)) return false
++      if (fCity !== 'all' && r.city !== fCity) return false
++      if (!q) return true
++      const hay = [r.name, r.lastName, r.phone, r.phone2, r.address, r.city, r.district, r.specialty]
++        .filter(Boolean).join(' ')
++      return hay.includes(q)
++    })
++  }, [rows, query, fType, fActive, fEmp, fCity])
++
++  // mission 12 / item 1 — unassigned customers get a DISTINCT marker
++  // (assigned stay primary blue): the admin sees at a glance which customers
++  // still need an assignment decision. The popup also names the state.
+   const unassignedCount = rows.filter((c) => !c.assignments || c.assignments.length === 0).length
+-  const points: MapPoint[] = rows.map((c) => ({
++  const points: MapPoint[] = filtered.map((c) => ({
+     id: c.id,
+     name: c.name,
+     lat: c.lat,
+@@ -99,18 +160,27 @@
+     unassigned: !c.assignments || c.assignments.length === 0,
+   }))
+ 
+-  function openEdit(c: Customer) {
++  function openEdit(c: CustomerRow) {
+     setEditing(c)
+     setForm({
+       name: c.name,
++      lastName: c.lastName || '',
+       type: c.type,
++      title: c.title || '',
++      specialty: c.specialty || '',
++      managerName: c.managerName || '',
+       address: c.address || '',
+       phone: c.phone || '',
++      phone2: c.phone2 || '',
+       city: c.city || '',
+       province: c.province || '',
++      district: c.district || '',
++      postalCode: c.postalCode || '',
++      notes: c.notes || '',
+       lat: c.lat,
+       lng: c.lng,
+       radius: c.radius,
++      active: c.active !== false,
+     })
+   }
+ 
+@@ -158,20 +228,29 @@
+     setFocus({ lat: target.lat, lng: target.lng, zoom: 14, key: Date.now() })
+   }
+ 
+-  async function save() {
++  /** Save with the Customer-360 duplicate protocol: a 409 asks the admin
++   *  (modal with the existing row's identity); confirming re-sends with
++   *  force=true. Everything else surfaces verbatim. */
++  async function save(force = false) {
+     setSaving(true)
+     try {
+       const url = creating ? '/api/customers' : `/api/customers/${editing!.id}`
+       const res = await fetch(url, {
+         method: creating ? 'POST' : 'PUT',
+         headers: { 'content-type': 'application/json' },
+-        body: JSON.stringify(form),
++        body: JSON.stringify({ ...form, force }),
+       })
+-      const data = await res.json()
++      const data = await res.json().catch(() => ({ ok: false, error: 'پاسخ نامعتبر سرور' }))
+       if (data.ok) {
+         setEditing(null)
+         setCreating(false)
+         await load()
++      } else if (res.status === 409 && data.duplicate && !force) {
++        if (confirm(`${data.error}\n\nبا وجود این ذخیره شود؟`)) {
++          setSaving(false)
++          await save(true)
++          return
++        }
+       } else {
+         alert(data.error || 'خطا در ذخیره')
+       }
+@@ -233,6 +312,23 @@
+     }
+   }
+ 
++  // ── PROFILE MODE — the full-width Customer-360 dossier ──
++  if (profileId) {
++    return (
++      <div className="space-y-3">
++        <Button variant="ghost" size="sm" onClick={() => setProfileId(null)}>
++          <ArrowRight className="h-4 w-4" /> بازگشت به فهرست
++        </Button>
++        <CustomerProfile
++          customerId={profileId}
++          onClose={() => setProfileId(null)}
++          onEdit={(c) => { const row = rows.find((r) => r.id === c.id) ?? null; if (row) { setProfileId(null); openEdit(row) } }}
++          onPickOnMap={(c) => { setProfileId(null); setPickMode({ customerId: c.id, name: c.name }); setFocus({ lat: c.lat, lng: c.lng, zoom: 15, key: Date.now() }) }}
++        />
++      </div>
++    )
++  }
++
+   return (
+     <div className="grid gap-4 lg:grid-cols-[1fr_420px]">
+       {/* Map + pick hint */}
+@@ -248,7 +344,7 @@
+           close. */}
+       <div className="isolate space-y-2">
+         {pickMode && (
+-          <div className="rounded-lg bg-amber-100 text-amber-900 px-3 py-2 text-sm">
++          <div className="rounded-lg bg-warning/15 px-3 py-2 text-sm text-warning-foreground">
+             روی نقشه کلیک کنید تا موقعیت «{pickMode.name}» جابه‌جا شود
+             <Button variant="ghost" size="sm" className="mr-2 h-7" onClick={() => setPickMode(null)}>
+               لغو
+@@ -257,15 +353,15 @@
+         )}
+         {/* mission 12 / item 1 — map legend: the unassigned state is visible
+             and explained, never just a different colour the admin must guess */}
+-        <div className="flex items-center gap-3 text-xs text-muted-foreground">
++        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+           <span className="flex items-center gap-1">
+-            <span className="inline-block h-2.5 w-2.5 rounded-full bg-teal-700" /> تخصیص‌یافته
++            <span className="inline-block h-2.5 w-2.5 rounded-full bg-primary" /> تخصیص‌یافته
+           </span>
+           <span className="flex items-center gap-1">
+-            <span className="inline-block h-2.5 w-2.5 rounded-full bg-slate-500" /> بدون تخصیص
++            <span className="inline-block h-2.5 w-2.5 rounded-full bg-muted-foreground/60" /> بدون تخصیص
+           </span>
+           {unassignedCount > 0 && (
+-            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-900">
++            <span className="rounded bg-warning/15 px-1.5 py-0.5 text-warning-foreground">
+               {unassignedCount.toLocaleString('fa-IR')} مشتری در انتظار تخصیص
+             </span>
+           )}
+@@ -310,10 +406,59 @@
+ 
+       {/* List */}
+       <div className="space-y-2">
++        {/* Customer 360 — search + filter bar */}
++        <div className="space-y-2 rounded-xl border bg-card p-2.5">
++          <div className="relative">
++            <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
++            <Input
++              value={query}
++              onChange={(e) => setQuery(e.target.value)}
++              placeholder="جستجو: نام پزشک / کلینیک / تلفن / شهر…"
++              className="h-9 pr-8 pl-9"
++            />
++            {query && (
++              <button onClick={() => setQuery('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" aria-label="پاک کردن جستجو">
++                <X className="h-3.5 w-3.5" />
++              </button>
++            )}
++          </div>
++          <div className="flex flex-wrap gap-1.5 text-xs">
++            <select value={fType} onChange={(e) => setFType(e.target.value)} className="h-8 rounded-lg border border-input bg-background px-2 text-xs" aria-label="نوع مشتری">
++              <option value="all">همهٔ انواع</option>
++              <option value="doctor">پزشک</option>
++              <option value="clinic">کلینیک</option>
++              <option value="pharmacy">داروخانه</option>
++              <option value="other">سایر</option>
++            </select>
++            <select value={fActive} onChange={(e) => setFActive(e.target.value)} className="h-8 rounded-lg border border-input bg-background px-2 text-xs" aria-label="وضعیت">
++              <option value="all">فعال و غیرفعال</option>
++              <option value="active">فقط فعال</option>
++              <option value="inactive">فقط غیرفعال</option>
++            </select>
++            <select value={fEmp} onChange={(e) => setFEmp(e.target.value)} className="h-8 max-w-36 rounded-lg border border-input bg-background px-2 text-xs" aria-label="مدرپ">
++              <option value="all">همهٔ مدرپ‌ها</option>
++              {employees.map((e) => (
++                <option key={e.id} value={e.id}>{e.name}</option>
++              ))}
++            </select>
++            {cities.length > 0 && (
++              <select value={fCity} onChange={(e) => setFCity(e.target.value)} className="h-8 max-w-32 rounded-lg border border-input bg-background px-2 text-xs" aria-label="شهر">
++                <option value="all">همهٔ شهرها</option>
++                {cities.map((ct) => (
++                  <option key={ct} value={ct}>{ct}</option>
++                ))}
++              </select>
++            )}
++            <span className="ml-auto self-center text-[11px] text-muted-foreground">
++              {filtered.length.toLocaleString('fa-IR')} از {rows.length.toLocaleString('fa-IR')}
++            </span>
++          </div>
++        </div>
++
+         <div className="flex items-center gap-2 flex-wrap">
+           {!selectMode ? (
+             <>
+-              <Button size="sm" className="bg-teal-600 hover:bg-teal-700" onClick={openCreate}>
++              <Button size="sm" className="bg-primary hover:bg-primary/90" onClick={openCreate}>
+                 <Plus className="h-4 w-4" /> مشتری جدید
+               </Button>
+               <Button variant="outline" size="sm" onClick={() => { setSelectMode(true); setChecked(new Set()) }} title="انتخاب چند مشتری برای عملیات گروهی">
+@@ -322,15 +467,12 @@
+               <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+                 <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+               </Button>
+-              <span className="text-sm text-muted-foreground mr-auto">
+-                {rows.length.toLocaleString('fa-IR')} مشتری
+-              </span>
+             </>
+           ) : (
+             <>
+               <Button
+                 size="sm"
+-                className="bg-teal-600 hover:bg-teal-700"
++                className="bg-primary hover:bg-primary/90"
+                 disabled={checked.size === 0}
+                 onClick={() => openBulk('assign')}
+               >
+@@ -348,8 +490,8 @@
+               <Button
+                 variant="ghost"
+                 size="sm"
+-                onClick={() => setChecked(new Set(rows.map((r) => r.id)))}
+-                disabled={rows.length === 0}
++                onClick={() => setChecked(new Set(filtered.map((r) => r.id)))}
++                disabled={filtered.length === 0}
+               >
+                 انتخاب همه
+               </Button>
+@@ -368,17 +510,22 @@
+             </>
+           )}
+         </div>
+-        <ScrollArea className="h-[62vh] rounded-xl border">
++        <ScrollArea className="h-[56vh] rounded-xl border">
+           <div className="divide-y mp-scroll">
+-            {rows.map((c) => (
++            {filtered.length === 0 && (
++              <p className="p-8 text-center text-sm text-muted-foreground">
++                {rows.length === 0 ? 'هنوز مشتری‌ای ثبت نشده است' : 'نتیجه‌ای با این جستجو/فیلترها یافت نشد'}
++              </p>
++            )}
++            {filtered.map((c) => (
+               <div
+                 key={c.id}
+-                onClick={() => (selectMode ? toggleChecked(c.id) : setSelected(c))}
+-                className={`p-3 cursor-pointer transition-colors hover:bg-muted/60 ${
++                onClick={() => (selectMode ? toggleChecked(c.id) : setProfileId(c.id))}
++                className={`cursor-pointer p-3 transition-colors hover:bg-muted/60 ${
+                   selectMode && checked.has(c.id)
+-                    ? 'bg-teal-50'
++                    ? 'bg-primary/10'
+                     : selected?.id === c.id
+-                      ? 'bg-teal-50'
++                      ? 'bg-primary/10'
+                       : ''
+                 }`}
+               >
+@@ -391,14 +538,17 @@
+                       aria-label={`انتخاب ${c.name}`}
+                     />
+                   )}
+-                  <Badge variant="secondary" className="shrink-0">
+-                    {c.type === 'doctor' ? 'پزشک' : c.type === 'pharmacy' ? 'داروخانه' : c.type === 'clinic' ? 'کلینیک' : 'سایر'}
+-                  </Badge>
++                  <Badge variant="secondary" className="shrink-0">{typeFa(c.type)}</Badge>
+                   {/* mission 12 / item 1 — explicit unassigned state on the row */}
+                   {(!c.assignments || c.assignments.length === 0) && (
+-                    <Badge className="shrink-0 bg-amber-100 text-amber-900 hover:bg-amber-100">بدون تخصیص</Badge>
++                    <Badge className="shrink-0 bg-warning/15 text-warning-foreground hover:bg-warning/15">بدون تخصیص</Badge>
+                   )}
+-                  <span className="font-medium flex-1">{c.name}</span>
++                  {c.active === false && (
++                    <Badge variant="destructive" className="shrink-0">غیرفعال</Badge>
++                  )}
++                  <span className="flex-1 truncate font-medium">
++                    {c.name}{c.lastName ? ` ${c.lastName}` : ''}
++                  </span>
+                   {c.city && (
+                     <span className="hidden shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground sm:inline" title={c.province || undefined}>
+                       {c.city}
+@@ -414,7 +564,7 @@
+                     }}
+                     title="جابه‌جایی روی نقشه"
+                   >
+-                    <MapPin className="h-4 w-4 text-amber-600" />
++                    <MapPin className="h-4 w-4 text-primary" />
+                   </Button>
+                   <Button
+                     variant="ghost"
+@@ -426,28 +576,42 @@
+                     }}
+                     title="ویرایش"
+                   >
+-                    <Pencil className="h-4 w-4 text-teal-600" />
++                    <Pencil className="h-4 w-4 text-primary" />
+                   </Button>
+                 </div>
+-                {c.address && <p className="mt-1 text-xs text-muted-foreground">{c.address}</p>}
++                {(c.address || c.specialty) && (
++                  <p className="mt-1 truncate text-xs text-muted-foreground">
++                    {c.specialty ? `${c.specialty} — ` : ''}{c.address || ''}
++                  </p>
++                )}
+                 <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
+-                  {c.city && <span>شهر: {c.city}{c.province ? ` (${c.province})` : ''}</span>}
+-                  <span>شعاع: {c.radius} متر</span>
++                  {c.lastVisitAt && (
++                    <span className="flex items-center gap-1">
++                      <CalendarCheck className="h-3 w-3 text-success" />
++                      آخرین ویزیت: {faDate(c.lastVisitAt)}
++                    </span>
++                  )}
++                  {c.lastPurchaseAt && (
++                    <span className="flex items-center gap-1">
++                      <Package className="h-3 w-3 text-chart-4" />
++                      آخرین خرید: {faDate(c.lastPurchaseAt)}
++                    </span>
++                  )}
++                  <span>چک‌این‌ها: {(c._count?.checkins ?? 0).toLocaleString('fa-IR')}</span>
+                   {c.assignments && c.assignments.length > 0 && (
+                     <span>
+-                      کارمندان: {c.assignments.map((a) => a.employee.name).join('، ')}
++                      مدرپ: {c.assignments.map((a) => a.employee.name).join('، ')}
+                     </span>
+                   )}
+-                  {c._count && <span>چک‌این‌ها: {c._count.checkins}</span>}
+                 </div>
+               </div>
+             ))}
+           </div>
+         </ScrollArea>
+-        {selected && (
++        {selected && !selectMode && (
+           <p className="text-xs text-muted-foreground flex items-center gap-1">
+             <StickyNote className="h-3 w-3" />
+-            آخرین به‌روزرسانی: {faDateTime(selected.updatedAt)} — همین مقدار مبنای سینک LWW با اپ است
++            آخرین به‌روزرسانی: {faDateTime(selected.updatedAt)} — همین مقدار مبنای سینک LWW با اپ است — برای پروندهٔ کامل روی مشتری کلیک کنید
+           </p>
+         )}
+       </div>
+@@ -518,7 +682,7 @@
+               انصراف
+             </Button>
+             <Button
+-              className={bulkAction === 'assign' ? 'bg-teal-600 hover:bg-teal-700' : 'bg-destructive hover:bg-destructive'}
++              className={bulkAction === 'assign' ? 'bg-primary hover:bg-primary/90' : 'bg-destructive hover:bg-destructive'}
+               onClick={runBulk}
+               disabled={bulkBusy || (!bulkAll && bulkEmps.size === 0)}
+             >
+@@ -552,11 +716,11 @@
+                 </>
+               )}
+               {bulkResult.failed && bulkResult.failed.length > 0 && (
+-                <div className="rounded-lg border border-red-300 bg-red-50 p-2">
+-                  <p className="font-medium text-red-700">
++                <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-2">
++                  <p className="font-medium text-destructive">
+                     ⚠ {bulkResult.failed.length.toLocaleString('fa-IR')} مورد با خطا مواجه شد:
+                   </p>
+-                  <ul className="mt-1 list-disc pr-4 text-xs text-red-700">
++                  <ul className="mt-1 list-disc pr-4 text-xs text-destructive">
+                     {bulkResult.failed.slice(0, 10).map((f, i) => (
+                       <li key={i}>
+                         {f.employeeName ? `${f.employeeName} ← ` : ''}
+@@ -580,20 +744,26 @@
+         </DialogContent>
+       </Dialog>
+ 
+-      {/* Edit / Create dialog */}
++      {/* Edit / Create dialog — Customer-360 extended form */}
+       <Dialog open={editing !== null || creating} onOpenChange={(o) => !o && (setEditing(null), setCreating(false))}>
+-        <DialogContent dir="rtl" className="sm:max-w-md">
++        <DialogContent dir="rtl" className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+           <DialogHeader>
+             <DialogTitle>{creating ? 'افزودن مشتری' : 'ویرایش مشتری'}</DialogTitle>
+           </DialogHeader>
+           <div className="grid gap-3">
+-            <div className="space-y-1">
+-              <Label>نام</Label>
+-              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
++            <div className="grid grid-cols-2 gap-3">
++              <div className="space-y-1">
++                <Label>نام *</Label>
++                <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
++              </div>
++              <div className="space-y-1">
++                <Label>نام خانوادگی</Label>
++                <Input value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} placeholder="فقط برای پزشک" />
++              </div>
+             </div>
+             <div className="grid grid-cols-2 gap-3">
+               <div className="space-y-1">
+-                <Label>نوع</Label>
++                <Label>نوع *</Label>
+                 <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v })}>
+                   <SelectTrigger>
+                     <SelectValue />
+@@ -611,21 +781,56 @@
+                 <Input dir="ltr" className="text-left" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+               </div>
+             </div>
++            {/* person-only fields */}
++            {form.type === 'doctor' && (
++              <div className="grid grid-cols-2 gap-3">
++                <div className="space-y-1">
++                  <Label>عنوان حرفه‌ای</Label>
++                  <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="مثلاً دکتر" />
++                </div>
++                <div className="space-y-1">
++                  <Label>تخصص</Label>
++                  <Input value={form.specialty} onChange={(e) => setForm({ ...form, specialty: e.target.value })} placeholder="مثلاً قلب" />
++                </div>
++              </div>
++            )}
++            {/* clinic-only field */}
++            {form.type === 'clinic' && (
++              <div className="space-y-1">
++                <Label>مسئول خرید</Label>
++                <Input value={form.managerName} onChange={(e) => setForm({ ...form, managerName: e.target.value })} />
++              </div>
++            )}
++            <div className="space-y-1">
++              <Label>تلفن دوم</Label>
++              <Input dir="ltr" className="text-left" value={form.phone2} onChange={(e) => setForm({ ...form, phone2: e.target.value })} />
++            </div>
+             <div className="space-y-1">
+               <Label>آدرس</Label>
+               <Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+             </div>
+-            {/* package 8 — offline searchable city picker ((city, province) pair) */}
+-            <div className="space-y-1">
+-              <Label>شهر</Label>
+-              <CityPicker city={form.city} province={form.province} onChange={onCityChange} />
+-              {creating && form.city && (
+-                <p className="text-[11px] leading-4 text-muted-foreground">
+-                  مختصات فعلی تقریبی مرکز «{form.city}» است — برای دقت، روی نقشه کلیک کنید.
+-                </p>
+-              )}
++            <div className="grid grid-cols-2 gap-3">
++              {/* package 8 — offline searchable city picker ((city, province) pair) */}
++              <div className="space-y-1">
++                <Label>شهر</Label>
++                <CityPicker city={form.city} province={form.province} onChange={onCityChange} />
++              </div>
++              <div className="space-y-1">
++                <Label>منطقه</Label>
++                <Input value={form.district} onChange={(e) => setForm({ ...form, district: e.target.value })} />
++              </div>
+             </div>
+-            <div className="grid grid-cols-3 gap-3">
++            <div className="grid grid-cols-2 gap-3">
++              <div className="space-y-1">
++                <Label>کد پستی</Label>
++                <Input dir="ltr" className="text-left" value={form.postalCode} onChange={(e) => setForm({ ...form, postalCode: e.target.value })} />
++              </div>
++              <div className="space-y-1">
++                <Label>شعاع (متر)</Label>
++                <Input dir="ltr" className="text-left" type="number" value={form.radius} onChange={(e) => setForm({ ...form, radius: parseInt(e.target.value || '150', 10) })} />
++              </div>
++            </div>
++            <div className="grid grid-cols-2 gap-3">
+               <div className="space-y-1">
+                 <Label>عرض (lat)</Label>
+                 <Input dir="ltr" className="text-left" type="number" step="any" value={form.lat} onChange={(e) => setForm({ ...form, lat: parseFloat(e.target.value) })} />
+@@ -634,17 +839,37 @@
+                 <Label>طول (lng)</Label>
+                 <Input dir="ltr" className="text-left" type="number" step="any" value={form.lng} onChange={(e) => setForm({ ...form, lng: parseFloat(e.target.value) })} />
+               </div>
+-              <div className="space-y-1">
+-                <Label>شعاع (متر)</Label>
+-                <Input dir="ltr" className="text-left" type="number" value={form.radius} onChange={(e) => setForm({ ...form, radius: parseInt(e.target.value || '150', 10) })} />
+-              </div>
+             </div>
++            <div className="space-y-1">
++              <Label>یادداشت‌های مشتری</Label>
++              <Input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="یادداشت عمومی پروندهٔ مشتری" />
++            </div>
++            {/* edit-only: logical deactivate (history NEVER touched) */}
++            {editing && (
++              <label className="flex items-center gap-2 rounded-lg border bg-muted/40 p-2.5 text-sm">
++                <Checkbox
++                  checked={form.active}
++                  onCheckedChange={(v) => setForm({ ...form, active: v === true })}
++                />
++                <span>
++                  مشتری فعال است
++                  <span className="block text-xs text-muted-foreground">
++                    غیرفعال‌سازی فقط نمایش را محدود می‌کند — سوابق بازدید، خرید و فایل‌های صوتی همیشه محفوظ می‌مانند
++                  </span>
++                </span>
++              </label>
++            )}
++            {creating && form.city && (
++              <p className="text-[11px] leading-4 text-muted-foreground">
++                مختصات فعلی تقریبی مرکز «{form.city}» است — برای دقت، روی نقشه کلیک کنید.
++              </p>
++            )}
+             <Button
+               variant="outline"
+               size="sm"
+               onClick={enterPickMode}
+             >
+-              <MapPin className="h-4 w-4 text-amber-600" />
++              <MapPin className="h-4 w-4 text-primary" />
+               انتخاب موقعیت با کلیک روی نقشه
+             </Button>
+           </div>
+@@ -652,7 +877,7 @@
+             <Button variant="outline" onClick={() => (setEditing(null), setCreating(false))}>
+               انصراف
+             </Button>
+-            <Button className="bg-teal-600 hover:bg-teal-700" onClick={save} disabled={saving}>
++            <Button className="bg-primary hover:bg-primary/90" onClick={() => save()} disabled={saving}>
+               {saving ? 'در حال ذخیره…' : 'ذخیره'}
+             </Button>
+           </DialogFooter>
+--- a/src/components/panel/Dashboard.tsx
++++ b/src/components/panel/Dashboard.tsx
+@@ -14,8 +14,8 @@
+   DialogTitle,
+ } from '@/components/ui/dialog'
+ import {
++  Activity,
+   ClipboardList,
+-  Bell,
+   CalendarCheck,
+   CalendarClock,
+   DoorOpen,
+@@ -24,6 +24,7 @@
+   Navigation,
+   RadioTower,
+   Settings,
++  Users,
+ } from 'lucide-react'
+ import OverviewTab from './OverviewTab'
+ import CheckinsTab from './CheckinsTab'
+@@ -36,6 +37,8 @@
+ import CityPicker from './CityPicker'
+ // package 5 / phase 5-C — the panel's notification center (persisted bell)
+ import NotificationsBell from './NotificationsBell'
++// UI/UX redesign — theme switcher (Light / Dark / System, persisted)
++import ThemeToggle from './ThemeToggle'
+ import type { Checkin, PanelConfigInfo, RealtimeEvent } from '@/lib/types'
+ import {
+   browserNotify,
+@@ -46,16 +49,16 @@
+ 
+ type TabKey = 'overview' | 'plans' | 'checkins' | 'customers' | 'employees' | 'tracking' | 'events'
+ 
+-const TABS: { key: TabKey; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+-  { key: 'overview', label: 'نمای کلی', icon: RadioTower },
++const TABS: { key: TabKey; label: string; short: string; icon: React.ComponentType<{ className?: string }> }[] = [
++  { key: 'overview', label: 'نمای کلی', short: 'نمای کلی', icon: RadioTower },
+   // phase 2 / task 1 — planned field visits
+-  { key: 'plans', label: 'برنامهٔ بازدیدها', icon: CalendarClock },
+-  { key: 'checkins', label: 'چک‌این‌ها', icon: CalendarCheck },
+-  { key: 'customers', label: 'مشتریان', icon: DoorOpen },
+-  { key: 'employees', label: 'کارمندان', icon: LogOut },
++  { key: 'plans', label: 'برنامهٔ بازدیدها', short: 'برنامه‌ها', icon: CalendarClock },
++  { key: 'checkins', label: 'چک‌این‌ها', short: 'چک‌این‌ها', icon: CalendarCheck },
++  { key: 'customers', label: 'مدیریت مشتریان', short: 'مشتریان', icon: DoorOpen },
++  { key: 'employees', label: 'کارمندان', short: 'کارمندان', icon: Users },
+   // phase 3 — background location + live panel status
+-  { key: 'tracking', label: 'وضعیت زنده', icon: Navigation },
+-  { key: 'events', label: 'گزارش رویدادها', icon: ClipboardList },
++  { key: 'tracking', label: 'وضعیت زنده', short: 'وضعیت زنده', icon: Navigation },
++  { key: 'events', label: 'گزارش رویدادها', short: 'رویدادها', icon: ClipboardList },
+ ]
+ 
+ export default function Dashboard({ cfg, onLogout }: { cfg: PanelConfigInfo; onLogout: () => void }) {
+@@ -176,88 +179,158 @@
+     }
+   }
+ 
++  const activeTab = TABS.find((t) => t.key === tab)
++
+   return (
+-    <div className="min-h-screen flex flex-col bg-gradient-to-b from-teal-50/60 to-background">
+-      {/* Header — v1.9.13-dev.2 (user report #3): fully responsive on phones.
+-          The old single non-wrapping flex row was ~426px wide on a 390px
+-          screen — it pushed the whole page into horizontal scrolling, which
+-          also threw every fixed-position dialog/popover off-center. */}
+-      <header className="sticky top-0 z-40 border-b bg-background/85 backdrop-blur">
+-        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2.5 sm:px-4 sm:py-3">
+-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-teal-600 font-bold text-white">
++    <div className="flex min-h-screen">
++      {/* ── Sidebar (desktop ≥lg) — RTL: pinned RIGHT, matching the
++            reference CRM design. Mobile keeps the top pill tabs below. ── */}
++      <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-l bg-sidebar lg:flex">
++        <div className="flex items-center gap-3 px-5 pb-4 pt-6">
++          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-brand2 text-lg font-black text-white shadow-lg">
+             M
+           </div>
+-          <div className="min-w-0 flex-1">
+-            <h1 className="truncate text-base font-bold leading-tight">MedPad — کنترل کارمندها</h1>
+-            <p className="truncate text-xs text-muted-foreground">
+-              نسخه پنل {cfg.panelVersion} • نسخه اپ {cfg.apkVersion}
+-            </p>
+-          </div>
+-          <Badge
+-            variant="secondary"
+-            className={`gap-1 ${connected ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-600'}`}
+-          >
+-            <span
+-              className={`h-2 w-2 rounded-full ${connected ? 'bg-emerald-500 animate-pulse' : 'bg-gray-400'}`}
+-            />
+-            <span className="hidden sm:inline">{connected ? 'Real-time متصل' : 'در حال اتصال…'}</span>
+-            <span className="sm:hidden">{connected ? 'متصل' : '…'}</span>
+-          </Badge>
+-          <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">
+-            <Button variant="ghost" size="icon" title="مرکز دانلود" onClick={() => window.open('/downloads.html', '_blank')}>
+-              <Download className="h-4 w-4" />
+-            </Button>
+-            <Button variant="ghost" size="icon" title="تنظیمات" onClick={() => setShowSettings(true)}>
+-              <Settings className="h-4 w-4" />
+-            </Button>
+-            {/* package 5 / phase 5-C — persisted notification center: list +
+-                unread badge + mark one/all; refreshSignal makes realtime
+-                events trigger a refetch (H4); expired sessions surface
+-                explicitly (H3). The base "browser permission" bell below is
+-                a different, complementary feature (Notification API grant). */}
+-            <NotificationsBell refreshSignal={refreshKey} onSessionExpired={logout} />
+-            <Button variant="ghost" size="icon" title="اعلان‌های مرورگر" onClick={requestNotifyPermission}>
+-              <Bell className="h-4 w-4" />
+-            </Button>
+-            <Button variant="ghost" size="sm" onClick={logout}>
+-              خروج
+-            </Button>
++          <div className="min-w-0">
++            <div className="text-base font-extrabold leading-tight">MedPad</div>
++            <div className="text-[11px] text-muted-foreground">سیستم مدیریت فروش میدانی</div>
+           </div>
+         </div>
+-        {/* Tabs */}
+-        <div className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-3 pb-2 sm:px-4" style={{ WebkitOverflowScrolling: 'touch' }}>
++
++        <nav className="mp-scroll flex-1 space-y-1 overflow-y-auto px-3">
+           {TABS.map((t) => (
+             <button
+               key={t.key}
+               onClick={() => setTab(t.key)}
+-              className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition-colors ${
+-                tab === t.key ? 'bg-teal-600 text-white shadow-sm' : 'hover:bg-muted text-muted-foreground'
++              className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
++                tab === t.key
++                  ? 'bg-primary text-primary-foreground shadow-md'
++                  : 'text-muted-foreground hover:bg-sidebar-accent hover:text-foreground'
+               }`}
+             >
+-              <t.icon className="h-4 w-4" />
++              <t.icon className="h-[18px] w-[18px]" />
+               {t.label}
++              {tab === t.key && <span className="mr-auto h-1.5 w-1.5 rounded-full bg-primary-foreground/80" />}
+             </button>
+           ))}
++        </nav>
++
++        <div className="space-y-3 border-t px-4 py-4">
++          <div className="flex items-center justify-between">
++            <span className="text-[11px] text-muted-foreground">نمایش</span>
++            <ThemeToggle compact />
++          </div>
++          <div className="flex items-center justify-between text-[11px] text-muted-foreground">
++            <span>نسخهٔ پنل</span>
++            <span className="num" dir="ltr">{cfg.panelVersion}</span>
++          </div>
++          <div className="flex items-center justify-between text-[11px] text-muted-foreground">
++            <span>نسخهٔ اپ</span>
++            <span className="num" dir="ltr">{cfg.apkVersion}</span>
++          </div>
++          <Button variant="outline" size="sm" className="w-full justify-start gap-2" onClick={logout}>
++            <LogOut className="h-4 w-4" />
++            خروج
++          </Button>
+         </div>
+-      </header>
++      </aside>
++
++      {/* ── Main column ── */}
++      <div className="flex min-w-0 flex-1 flex-col">
++        {/* Topbar — v1.9.13-dev.2 (user report #3) responsive shell kept:
++            wrapping flex rows, nothing wider than the viewport on phones. */}
++        <header className="sticky top-0 z-40 border-b bg-background/85 backdrop-blur">
++          <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2.5 sm:px-4 sm:py-3">
++            {/* mobile logo */}
++            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-brand2 font-bold text-white lg:hidden">
++              M
++            </div>
++            <div className="min-w-0 flex-1">
++              <h1 className="truncate text-base font-bold leading-tight">
++                MedPad <span className="text-muted-foreground">— {activeTab?.label}</span>
++              </h1>
++              <p className="truncate text-xs text-muted-foreground lg:hidden">
++                نسخهٔ پنل {cfg.panelVersion} • نسخهٔ اپ {cfg.apkVersion}
++              </p>
++            </div>
++            <Badge
++              variant="secondary"
++              className={`gap-1 ${connected ? 'bg-success/15 text-success' : 'bg-muted text-muted-foreground'}`}
++            >
++              <span
++                className={`h-2 w-2 rounded-full ${connected ? 'bg-success animate-pulse' : 'bg-muted-foreground/50'}`}
++              />
++              <span className="hidden sm:inline">{connected ? 'Real-time متصل' : 'در حال اتصال…'}</span>
++              <span className="sm:hidden">{connected ? 'متصل' : '…'}</span>
++            </Badge>
++            <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">
++              <Button variant="ghost" size="icon" title="مرکز دانلود" onClick={() => window.open('/downloads.html', '_blank')}>
++                <Download className="h-4 w-4" />
++              </Button>
++              <Button variant="ghost" size="icon" title="تنظیمات" onClick={() => setShowSettings(true)}>
++                <Settings className="h-4 w-4" />
++              </Button>
++              {/* package 5 / phase 5-C — persisted notification center: list +
++                  unread badge + mark one/all; refreshSignal makes realtime
++                  events trigger a refetch (H4); expired sessions surface
++                  explicitly (H3). */}
++              <NotificationsBell refreshSignal={refreshKey} onSessionExpired={logout} />
++              <Button variant="ghost" size="icon" title="اعلان‌های مرورگر" onClick={requestNotifyPermission}>
++                <Activity className="h-4 w-4" />
++              </Button>
++              {/* theme switcher — hidden on phones (the sidebar has it on
++                  desktop; mobile gets it in the tabs row) */}
++              <span className="hidden lg:flex">
++                <ThemeToggle compact />
++              </span>
++              <Button variant="ghost" size="sm" className="lg:hidden" onClick={logout}>
++                خروج
++              </Button>
++            </div>
++          </div>
++          {/* Tabs — horizontal pills on < lg (phones + tablets) */}
++          <div className="mx-auto flex max-w-7xl items-center gap-2 overflow-x-auto px-3 pb-2 sm:px-4" style={{ WebkitOverflowScrolling: 'touch' }}>
++            <div className="flex flex-1 gap-1.5 overflow-x-auto">
++              {TABS.map((t) => (
++                <button
++                  key={t.key}
++                  onClick={() => setTab(t.key)}
++                  className={`flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
++                    tab === t.key
++                      ? 'bg-primary text-primary-foreground shadow-sm'
++                      : 'bg-card text-muted-foreground hover:bg-muted hover:text-foreground'
++                  }`}
++                >
++                  <t.icon className="h-4 w-4" />
++                  {t.short}
++                </button>
++              ))}
++            </div>
++            <span className="lg:hidden">
++              <ThemeToggle compact />
++            </span>
++          </div>
++        </header>
++
++        {/* Live event ticker */}
++        {live.length > 0 && <div className="bg-warning/10 border-b px-4 py-1 text-xs">{faDateTime(live[0].createdAt)}</div>}
+ 
+-      {/* Live event ticker */}
+-      {live.length > 0 && <div className="bg-amber-50 border-b px-4 py-1 text-xs">{faDateTime(live[0].createdAt)}</div>}
++        {/* Content */}
++        <main className="mx-auto w-full max-w-7xl flex-1 p-3 sm:p-4 lg:p-6">
++          <div key={tab} className="mp-rise">
++            {tab === 'overview' && <OverviewTab refreshKey={refreshKey} onNavigate={(k) => setTab(k as TabKey)} />}
++            {tab === 'plans' && <PlansTab refreshKey={refreshKey} />}
++            {tab === 'checkins' && <CheckinsTab refreshKey={refreshKey} />}
++            {tab === 'customers' && <CustomersTab refreshKey={refreshKey} />}
++            {tab === 'employees' && <EmployeesTab refreshKey={refreshKey} />}
++            {tab === 'tracking' && <TrackingTab refreshKey={refreshKey} />}
++            {tab === 'events' && <EventsTab refreshKey={refreshKey} />}
++          </div>
++        </main>
+ 
+-      {/* Content */}
+-      <main className="mx-auto w-full max-w-7xl flex-1 p-3 sm:p-4">
+-        {tab === 'overview' && <OverviewTab refreshKey={refreshKey} />}
+-        {tab === 'plans' && <PlansTab refreshKey={refreshKey} />}
+-        {tab === 'checkins' && <CheckinsTab refreshKey={refreshKey} />}
+-        {tab === 'customers' && <CustomersTab refreshKey={refreshKey} />}
+-        {tab === 'employees' && <EmployeesTab refreshKey={refreshKey} />}
+-        {tab === 'tracking' && <TrackingTab refreshKey={refreshKey} />}
+-        {tab === 'events' && <EventsTab refreshKey={refreshKey} />}
+-      </main>
+-
+-      <footer className="mt-auto border-t bg-background/60 py-3 text-center text-xs text-muted-foreground">
+-        MedPad v{cfg.panelVersion} — سیستم کنترل کارمندها با گزارش صوتی و اعلان لحظه‌ای
+-      </footer>
++        <footer className="mt-auto border-t bg-background/60 py-3 text-center text-xs text-muted-foreground">
++          MedPad v{cfg.panelVersion} — سیستم کنترل کارمندها با گزارش صوتی و اعلان لحظه‌ای
++        </footer>
++      </div>
+ 
+       {/* G-2: admin settings dialog (app-token TTL) */}
+       <Dialog open={showSettings} onOpenChange={setShowSettings}>
+@@ -374,7 +447,7 @@
+             <Button variant="outline" onClick={() => setShowSettings(false)}>
+               انصراف
+             </Button>
+-            <Button className="bg-teal-600 hover:bg-teal-700" onClick={saveSettings} disabled={savingSettings}>
++            <Button className="bg-primary hover:bg-primary/90" onClick={saveSettings} disabled={savingSettings}>
+               ذخیره
+             </Button>
+           </DialogFooter>
+--- a/src/components/panel/EmployeesTab.tsx
++++ b/src/components/panel/EmployeesTab.tsx
+@@ -264,12 +264,12 @@
+     <div className="space-y-4">
+       {/* package 6 — assignment requests from the reps */}
+       {(pendingReqs.length > 0 || reqShowAll) && (
+-        <div className="rounded-xl border bg-amber-50/50">
++        <div className="rounded-xl border bg-warning/10/50">
+           <div className="flex items-center gap-2 border-b px-3 py-2 flex-wrap">
+-            <Inbox className="h-4 w-4 text-amber-600" />
++            <Inbox className="h-4 w-4 text-warning" />
+             <span className="text-sm font-medium">درخواست‌های تخصیص مشتری</span>
+             {pendingReqs.length > 0 && (
+-              <Badge className="bg-amber-500 hover:bg-amber-500">
++              <Badge className="bg-warning/100 hover:bg-warning/100">
+                 {pendingReqs.length.toLocaleString('fa-IR')} در انتظار
+               </Badge>
+             )}
+@@ -298,7 +298,7 @@
+                       {r.customer ? `«${r.customer.name}»` : 'مشتری حذف‌شده'}
+                     </span>
+                     {r.status === 'pending' ? (
+-                      <Badge variant="outline" className="border-amber-500 text-amber-700">در انتظار</Badge>
++                      <Badge variant="outline" className="border-warning text-warning">در انتظار</Badge>
+                     ) : r.status === 'approved' ? (
+                       <Badge variant="outline" className="border-emerald-500 text-emerald-700">تأییدشده</Badge>
+                     ) : (
+@@ -339,7 +339,7 @@
+       )}
+ 
+       <div className="flex items-center gap-2 flex-wrap">
+-        <Button size="sm" className="bg-teal-600 hover:bg-teal-700" onClick={() => setAdding(true)}>
++        <Button size="sm" className="bg-primary hover:bg-primary/90" onClick={() => setAdding(true)}>
+           <UserPlus className="h-4 w-4" /> کارمند جدید
+         </Button>
+         <Button variant="outline" size="sm" onClick={openAudit}>
+@@ -407,7 +407,7 @@
+                     setAssignCus('')
+                   }}
+                 >
+-                  <Link2 className="h-4 w-4 text-teal-600" /> انتساب مشتری
++                  <Link2 className="h-4 w-4 text-primary" /> انتساب مشتری
+                 </Button>
+               </div>
+               {e.assignments && e.assignments.length > 0 && (
+@@ -467,7 +467,7 @@
+             <Button variant="outline" onClick={() => setAdding(false)}>
+               انصراف
+             </Button>
+-            <Button className="bg-teal-600 hover:bg-teal-700" onClick={addEmployee} disabled={saving}>
++            <Button className="bg-primary hover:bg-primary/90" onClick={addEmployee} disabled={saving}>
+               ذخیره
+             </Button>
+           </DialogFooter>
+@@ -508,7 +508,7 @@
+             <Button variant="outline" onClick={() => setEditEmp(null)}>
+               انصراف
+             </Button>
+-            <Button className="bg-teal-600 hover:bg-teal-700" onClick={saveEdit} disabled={saving}>
++            <Button className="bg-primary hover:bg-primary/90" onClick={saveEdit} disabled={saving}>
+               ذخیره
+             </Button>
+           </DialogFooter>
+@@ -538,7 +538,7 @@
+             <Button variant="outline" onClick={() => setPassEmp(null)}>
+               انصراف
+             </Button>
+-            <Button className="bg-teal-600 hover:bg-teal-700" onClick={savePassword} disabled={saving || !passForm.password}>
++            <Button className="bg-primary hover:bg-primary/90" onClick={savePassword} disabled={saving || !passForm.password}>
+               تغییر رمز
+             </Button>
+           </DialogFooter>
+@@ -633,7 +633,7 @@
+             <Button variant="outline" onClick={() => setAssignEmp(null)}>
+               انصراف
+             </Button>
+-            <Button className="bg-teal-600 hover:bg-teal-700" onClick={addAssignment} disabled={saving || !assignCus}>
++            <Button className="bg-primary hover:bg-primary/90" onClick={addAssignment} disabled={saving || !assignCus}>
+               <Plus className="h-4 w-4" /> انتساب
+             </Button>
+           </DialogFooter>
+--- a/src/components/panel/LoginScreen.tsx
++++ b/src/components/panel/LoginScreen.tsx
+@@ -34,10 +34,10 @@
+   }
+ 
+   return (
+-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-teal-50 via-background to-amber-50 p-4">
++    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/10 via-background to-accent/10 p-4">
+       <Card className="w-full max-w-sm shadow-lg">
+         <CardHeader className="text-center">
+-          <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-2xl bg-teal-600 text-white">
++          <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-white">
+             <ShieldCheck className="h-8 w-8" />
+           </div>
+           <CardTitle className="text-xl">پنل مدیریت MedPad</CardTitle>
+@@ -75,7 +75,7 @@
+             {error && (
+               <p className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2">{error}</p>
+             )}
+-            <Button type="submit" className="w-full bg-teal-600 hover:bg-teal-700" disabled={busy}>
++            <Button type="submit" className="w-full bg-primary hover:bg-primary/90" disabled={busy}>
+               <LogIn className="ml-2 h-4 w-4" />
+               {busy ? 'در حال ورود…' : 'ورود به پنل'}
+             </Button>
+--- a/src/components/panel/NotificationsBell.tsx
++++ b/src/components/panel/NotificationsBell.tsx
+@@ -69,7 +69,7 @@
+ 
+ function KindIcon({ kind }: { kind: string }) {
+   const Icon = KIND_ICON[kind] ?? Info // unknown kinds degrade gracefully, never break the list
+-  return <Icon className="mt-0.5 h-4 w-4 shrink-0 text-teal-700" />
++  return <Icon className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+ }
+ 
+ export default function NotificationsBell({
+@@ -223,7 +223,7 @@
+       <PopoverContent align="end" dir="rtl" className="w-[min(92vw,24rem)] p-0">
+         <div className="flex items-center justify-between border-b px-3 py-2">
+           <div className="flex items-center gap-1.5 text-sm font-bold">
+-            <BellRing className="h-4 w-4 text-teal-700" />
++            <BellRing className="h-4 w-4 text-primary" />
+             مرکز اعلان‌ها
+           </div>
+           <Button
+@@ -232,7 +232,7 @@
+             data-testid="bell-mark-all"
+             onClick={markAll}
+             disabled={!hasUnread || markingAll || status === 'expired'}
+-            className="h-7 px-2 text-xs text-teal-700 hover:text-teal-800"
++            className="h-7 px-2 text-xs text-primary hover:text-primary"
+           >
+             {markingAll ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+             همه خوانده شد
+@@ -250,7 +250,7 @@
+             <div data-testid="bell-session-expired" className="px-3 py-6 text-center">
+               <p className="text-sm">نشست شما منقضی شده است.</p>
+               <p className="mt-1 text-xs text-muted-foreground">برای مشاهدهٔ اعلان‌ها دوباره وارد شوید.</p>
+-              <Button data-testid="bell-relogin" size="sm" onClick={onSessionExpired} className="mt-3 bg-teal-600 hover:bg-teal-700">
++              <Button data-testid="bell-relogin" size="sm" onClick={onSessionExpired} className="mt-3 bg-primary hover:bg-primary/90">
+                 ورود مجدد
+               </Button>
+             </div>
+@@ -290,7 +290,7 @@
+                   <li
+                     key={n.id}
+                     data-testid={`bell-item-${n.id}`}
+-                    className={`flex gap-2 border-b px-3 py-2 last:border-b-0 ${isUnread ? 'bg-teal-50/50' : 'opacity-70'}`}
++                    className={`flex gap-2 border-b px-3 py-2 last:border-b-0 ${isUnread ? 'bg-primary/10/50' : 'opacity-70'}`}
+                   >
+                     <KindIcon kind={n.kind} />
+                     <div className="min-w-0 flex-1">
+@@ -303,7 +303,7 @@
+                             aria-label="علامت‌گذاری به‌عنوان خوانده‌شده"
+                             onClick={() => markOne(n.id)}
+                             disabled={marking}
+-                            className="mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-teal-700 disabled:opacity-50"
++                            className="mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-primary disabled:opacity-50"
+                           >
+                             {marking ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                           </button>
+--- a/src/components/panel/OverviewTab.tsx
++++ b/src/components/panel/OverviewTab.tsx
+@@ -1,15 +1,29 @@
+ 'use client'
+ 
+ import { useEffect, useState } from 'react'
+-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+ import { Badge } from '@/components/ui/badge'
++import { Button } from '@/components/ui/button'
++import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+ import { ScrollArea } from '@/components/ui/scroll-area'
+ import {
++  Area,
++  AreaChart,
++  CartesianGrid,
++  ResponsiveContainer,
++  Tooltip,
++  XAxis,
++  YAxis,
++} from 'recharts'
++import {
+   Briefcase,
+   CalendarCheck,
++  CalendarClock,
+   DoorOpen,
+   MapPin,
++  Package,
+   Radar,
++  TrendingUp,
++  UserX,
+   Users,
+ } from 'lucide-react'
+ import { faDateTime } from '@/lib/realtime'
+@@ -17,9 +31,17 @@
+ interface Stats {
+   employees: number
+   customers: number
++  activeCustomers?: number
++  unassignedCustomers?: number
+   openVisits: number
+   todayCheckins: number
++  todayVisits?: number
+   weekCheckins: number
++  checkinTrend?: { day: string; count: number }[]
++  purchaseTotal?: number
++  purchaseCount?: number
++  recentVisits?: { id: string; startAt: string; endAt: string | null; open: boolean; employeeName: string; customerName: string; customerType: string }[]
++  overduePlans?: { id: string; scheduledAt: string; employeeName: string; customerName: string }[]
+ }
+ 
+ interface Notif {
+@@ -31,7 +53,41 @@
+   employee?: { name: string }
+ }
+ 
+-export default function OverviewTab({ refreshKey }: { refreshKey: number }) {
++const fmt = (n: number | undefined) => (n === undefined ? '…' : n.toLocaleString('fa-IR'))
++
++/** KPI card — the reference design: tinted icon chip, big tabular value,
++ *  muted label, click navigates to the related tab. */
++function Kpi({
++  label, value, icon: Icon, chip, onClick,
++}: {
++  label: string; value: string; icon: React.ComponentType<{ className?: string }>; chip: string; onClick?: () => void
++}) {
++  const body = (
++    <CardContent className="p-4">
++      <div className="flex items-start justify-between gap-2">
++        <span className="icon-chip" style={{ ['--chip' as string]: `var(--${chip})` }}>
++          <Icon className="h-5 w-5" />
++        </span>
++      </div>
++      <p className="num mt-3 text-2xl font-extrabold leading-none">{value}</p>
++      <p className="mt-1.5 text-xs text-muted-foreground">{label}</p>
++    </CardContent>
++  )
++  if (!onClick) return <Card className="border/60">{body}</Card>
++  return (
++    <Card className="border/60 transition-shadow hover:shadow-md" role="button" tabIndex={0} onClick={onClick} onKeyDown={(e) => e.key === 'Enter' && onClick()}>
++      {body}
++    </Card>
++  )
++}
++
++export default function OverviewTab({
++  refreshKey,
++  onNavigate,
++}: {
++  refreshKey: number
++  onNavigate?: (tab: string) => void
++}) {
+   const [stats, setStats] = useState<Stats | null>(null)
+   const [notifs, setNotifs] = useState<Notif[]>([])
+ 
+@@ -46,70 +102,189 @@
+       .catch(() => {})
+   }, [refreshKey])
+ 
+-  const cards = [
+-    { label: 'کارمندان فعال', value: stats?.employees, icon: Users, color: 'text-teal-600 bg-teal-50' },
+-    { label: 'مشتریان', value: stats?.customers, icon: Briefcase, color: 'text-sky-600 bg-sky-50' },
+-    { label: 'ویزیت‌های در جریان', value: stats?.openVisits, icon: DoorOpen, color: 'text-amber-600 bg-amber-50' },
+-    { label: 'چک‌این امروز', value: stats?.todayCheckins, icon: CalendarCheck, color: 'text-emerald-600 bg-emerald-50' },
+-    { label: 'چک‌این ۷ روز اخیر', value: stats?.weekCheckins, icon: Radar, color: 'text-violet-600 bg-violet-50' },
+-  ]
++  const trend = stats?.checkinTrend ?? []
++  const chartData = trend.map((t) => ({
++    ...t,
++    label: new Date(t.day).toLocaleDateString('fa-IR', { month: 'numeric', day: 'numeric' }),
++  }))
++  const hasPurchases = (stats?.purchaseCount ?? 0) > 0
+ 
+   return (
+     <div className="space-y-4">
+-      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+-        {cards.map((c, i) => (
+-          <Card key={c.label} className={`border/60 ${i === cards.length - 1 ? 'col-span-2 md:col-span-1' : ''}`}>
+-            <CardContent className="p-4">
+-              <div className={`mx-auto mb-2 flex h-9 w-9 items-center justify-center rounded-xl ${c.color}`}>
+-                <c.icon className="h-5 w-5" />
++      {/* KPI row — every number is a REAL count from /api/stats */}
++      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
++        <Kpi label="مشتریان فعال" value={fmt(stats?.activeCustomers ?? stats?.customers)} icon={Briefcase} chip="primary" onClick={() => onNavigate?.('customers')} />
++        <Kpi label="مدرپ‌های فعال" value={fmt(stats?.employees)} icon={Users} chip="brand2" onClick={() => onNavigate?.('employees')} />
++        <Kpi label="ویزیت‌های امروز" value={fmt(stats?.todayVisits ?? stats?.todayCheckins)} icon={CalendarCheck} chip="success" onClick={() => onNavigate?.('checkins')} />
++        <Kpi label="ویزیت‌های در جریان" value={fmt(stats?.openVisits)} icon={DoorOpen} chip="warning" />
++        <Kpi label="در انتظار تخصیص" value={fmt(stats?.unassignedCustomers ?? 0)} icon={UserX} chip="warning" onClick={() => onNavigate?.('customers')} />
++        <Kpi
++          label={hasPurchases ? 'مجموع خرید (ثبت‌شده)' : 'خریدها (متصل نشده)'}
++          value={hasPurchases ? fmt(stats?.purchaseTotal) : '—'}
++          icon={Package}
++          chip="chart-5"
++        />
++      </div>
++
++      <div className="grid gap-4 lg:grid-cols-3">
++        {/* Activity chart — REAL check-in counts of the last 14 days */}
++        <Card className="border/60 lg:col-span-2">
++          <CardHeader className="pb-2">
++            <CardTitle className="flex items-center gap-2 text-base">
++              <TrendingUp className="h-4 w-4 text-primary" />
++              روند فعالیت — چک‌این‌های ۱۴ روز اخیر
++            </CardTitle>
++          </CardHeader>
++          <CardContent>
++            <div className="h-56" dir="ltr">
++              <ResponsiveContainer width="100%" height="100%">
++                <AreaChart data={chartData} margin={{ top: 8, right: 8, bottom: 0, left: -18 }}>
++                  <defs>
++                    <linearGradient id="mpTrend" x1="0" y1="0" x2="0" y2="1">
++                      <stop offset="0%" stopColor="var(--primary)" stopOpacity={0.35} />
++                      <stop offset="100%" stopColor="var(--primary)" stopOpacity={0.02} />
++                    </linearGradient>
++                  </defs>
++                  <CartesianGrid strokeDasharray="3 6" stroke="var(--border)" vertical={false} />
++                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }} tickLine={false} axisLine={false} />
++                  <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }} tickLine={false} axisLine={false} />
++                  <Tooltip
++                    contentStyle={{
++                      background: 'var(--popover)', border: '1px solid var(--border)',
++                      borderRadius: 12, color: 'var(--foreground)', fontSize: 12, direction: 'rtl',
++                    }}
++                    formatter={(v) => [`${Number(v).toLocaleString('fa-IR')} چک‌این`, '']}
++                  />
++                  <Area type="monotone" dataKey="count" stroke="var(--primary)" strokeWidth={2.5} fill="url(#mpTrend)" dot={{ r: 3, fill: 'var(--primary)', strokeWidth: 0 }} activeDot={{ r: 5 }} />
++                </AreaChart>
++              </ResponsiveContainer>
++            </div>
++          </CardContent>
++        </Card>
++
++        {/* Overdue plans — REAL scheduled-but-past plans */}
++        <Card className="border/60">
++          <CardHeader className="pb-2">
++            <CardTitle className="flex items-center gap-2 text-base">
++              <CalendarClock className="h-4 w-4 text-warning" />
++              برنامه‌های عقب‌افتاده
++            </CardTitle>
++          </CardHeader>
++          <CardContent className="p-0">
++            <ScrollArea className="h-56 rounded-lg">
++              <div className="divide-y mp-scroll">
++                {(stats?.overduePlans ?? []).length === 0 && (
++                  <p className="p-6 text-center text-sm text-muted-foreground">برنامهٔ عقب‌افتاده‌ای وجود ندارد</p>
++                )}
++                {(stats?.overduePlans ?? []).map((p) => (
++                  <div key={p.id} className="flex items-start gap-2 p-3 text-sm">
++                    <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-warning" />
++                    <div className="flex-1">
++                      <p className="font-medium">{p.customerName}</p>
++                      <p className="text-xs text-muted-foreground">{p.employeeName} — {faDateTime(p.scheduledAt)}</p>
++                    </div>
++                  </div>
++                ))}
+               </div>
+-              <p className="text-center text-2xl font-bold">
+-                {c.value === undefined ? '…' : c.value.toLocaleString('fa-IR')}
+-              </p>
+-              <p className="text-center text-xs text-muted-foreground">{c.label}</p>
+-            </CardContent>
+-          </Card>
+-        ))}
++            </ScrollArea>
++          </CardContent>
++        </Card>
+       </div>
+ 
+-      <Card>
+-        <CardHeader className="pb-2">
+-          <CardTitle className="text-base flex items-center gap-2">
+-            <Radar className="h-4 w-4 text-amber-600" />
+-            آخرین رویدادهای اپ (نوتیفیکیشن‌ها)
+-          </CardTitle>
+-        </CardHeader>
+-        <CardContent>
+-          <ScrollArea className="h-[40vh] rounded-lg">
+-            <div className="divide-y mp-scroll">
+-              {notifs.length === 0 && (
+-                <p className="p-6 text-center text-sm text-muted-foreground">
+-                  هنوز رویدادی ثبت نشده — وقتی مدرپ وارد محدوده مشتری شود یا مشتری به او اختصاص یابد، اینجا نمایش داده می‌شود
+-                </p>
+-              )}
+-              {notifs.map((n) => (
+-                <div key={n.id} className="flex items-start gap-2 p-3">
+-                  <Badge
+-                    variant="secondary"
+-                    className={`shrink-0 ${
+-                      n.kind === 'proximity' ? 'bg-amber-100 text-amber-800' : 'bg-teal-100 text-teal-800'
+-                    }`}
+-                  >
+-                    {n.kind === 'proximity' ? 'حضور' : 'اختصاص'}
+-                  </Badge>
+-                  <div className="flex-1 text-sm">
+-                    <p>
+-                      {n.employee?.name ? `${n.employee.name}: ` : ''}
+-                      {n.body}
+-                    </p>
+-                    <p className="text-xs text-muted-foreground">{faDateTime(n.createdAt)}</p>
++      <div className="grid gap-4 lg:grid-cols-2">
++        {/* Latest REAL visits */}
++        <Card className="border/60">
++          <CardHeader className="pb-2">
++            <CardTitle className="flex items-center gap-2 text-base">
++              <DoorOpen className="h-4 w-4 text-primary" />
++              آخرین ویزیت‌ها
++            </CardTitle>
++          </CardHeader>
++          <CardContent className="p-0">
++            <ScrollArea className="h-64 rounded-lg">
++              <div className="divide-y mp-scroll">
++                {(stats?.recentVisits ?? []).length === 0 && (
++                  <p className="p-6 text-center text-sm text-muted-foreground">هنوز ویزیتی ثبت نشده است</p>
++                )}
++                {(stats?.recentVisits ?? []).map((v) => (
++                  <div key={v.id} className="flex items-center gap-3 p-3">
++                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
++                      {v.employeeName.slice(0, 2)}
++                    </span>
++                    <div className="min-w-0 flex-1 text-sm">
++                      <p className="truncate font-medium">{v.customerName}</p>
++                      <p className="text-xs text-muted-foreground">{v.employeeName} — {faDateTime(v.startAt)}</p>
++                    </div>
++                    {v.open ? (
++                      <Badge className="shrink-0 bg-success/15 text-success">در جریان</Badge>
++                    ) : (
++                      <Badge variant="secondary" className="shrink-0">پایان‌یافته</Badge>
++                    )}
+                   </div>
+-                </div>
+-              ))}
+-            </div>
+-          </ScrollArea>
+-        </CardContent>
+-      </Card>
++                ))}
++              </div>
++            </ScrollArea>
++          </CardContent>
++        </Card>
++
++        {/* App notification feed (existing real feed) */}
++        <Card className="border/60">
++          <CardHeader className="pb-2">
++            <CardTitle className="flex items-center gap-2 text-base">
++              <Radar className="h-4 w-4 text-warning" />
++              آخرین رویدادهای اپ (نوتیفیکیشن‌ها)
++            </CardTitle>
++          </CardHeader>
++          <CardContent className="p-0">
++            <ScrollArea className="h-64 rounded-lg">
++              <div className="divide-y mp-scroll">
++                {notifs.length === 0 && (
++                  <p className="p-6 text-center text-sm text-muted-foreground">
++                    هنوز رویدادی ثبت نشده — وقتی مدرپ وارد محدوده مشتری شود یا مشتری به او اختصاص یابد، اینجا نمایش داده می‌شود
++                  </p>
++                )}
++                {notifs.map((n) => (
++                  <div key={n.id} className="flex items-start gap-2 p-3">
++                    <Badge
++                      variant="secondary"
++                      className={`shrink-0 ${
++                        n.kind === 'proximity' ? 'bg-warning/15 text-warning' : 'bg-primary/10 text-primary'
++                      }`}
++                    >
++                      {n.kind === 'proximity' ? 'حضور' : 'اختصاص'}
++                    </Badge>
++                    <div className="flex-1 text-sm">
++                      <p>
++                        {n.employee?.name ? `${n.employee.name}: ` : ''}
++                        {n.body}
++                      </p>
++                      <p className="text-xs text-muted-foreground">{faDateTime(n.createdAt)}</p>
++                    </div>
++                  </div>
++                ))}
++              </div>
++            </ScrollArea>
++          </CardContent>
++        </Card>
++      </div>
++
++      {/* geo shortcut — the customers map lives one click away */}
++      {onNavigate && (
++        <div className="flex flex-wrap gap-2">
++          <Button variant="outline" size="sm" onClick={() => onNavigate('customers')}>
++            <MapPin className="h-4 w-4 text-primary" />
++            نقشه و مدیریت مشتریان
++          </Button>
++          <Button variant="outline" size="sm" onClick={() => onNavigate('plans')}>
++            <CalendarClock className="h-4 w-4 text-primary" />
++            برنامه‌های بازدید
++          </Button>
++          <Button variant="outline" size="sm" onClick={() => onNavigate('tracking')}>
++            <Radar className="h-4 w-4 text-primary" />
++            وضعیت زندهٔ مدرپ‌ها
++          </Button>
++        </div>
++      )}
+     </div>
+   )
+ }
+--- a/src/components/panel/PlansTab.tsx
++++ b/src/components/panel/PlansTab.tsx
+@@ -51,10 +51,10 @@
+  */
+ 
+ const STATUS_META: Record<PlanStatus, { label: string; cls: string }> = {
+-  scheduled: { label: 'برنامه‌ریزی‌شده', cls: 'bg-teal-600 hover:bg-teal-700' },
++  scheduled: { label: 'برنامه‌ریزی‌شده', cls: 'bg-primary hover:bg-primary/90' },
+   done: { label: 'انجام‌شده', cls: 'bg-emerald-600 hover:bg-emerald-700' },
+   cancelled: { label: 'لغوشده', cls: 'bg-gray-400 hover:bg-gray-500' },
+-  needs_reschedule: { label: 'نیازمند برنامه‌ریزی مجدد', cls: 'bg-amber-500 hover:bg-amber-600' },
++  needs_reschedule: { label: 'نیازمند برنامه‌ریزی مجدد', cls: 'bg-warning/100 hover:bg-warning' },
+ }
+ 
+ const PRIORITY_META: Record<PlanPriority, { label: string; cls: string }> = {
+@@ -343,14 +343,14 @@
+           </div>
+           <div className="text-sm font-medium text-muted-foreground">
+             {jalaliLabel}
+-            {isToday && <span className="mr-1 text-teal-600">(امروز)</span>}
++            {isToday && <span className="mr-1 text-primary">(امروز)</span>}
+           </div>
+           <div className="flex flex-wrap items-center gap-2 sm:mr-auto">
+             <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+               به‌روزرسانی
+             </Button>
+-            <Button size="sm" className="bg-teal-600 hover:bg-teal-700" onClick={openCreate}>
++            <Button size="sm" className="bg-primary hover:bg-primary/90" onClick={openCreate}>
+               <CalendarPlus className="h-4 w-4" />
+               برنامهٔ جدید
+             </Button>
+@@ -402,11 +402,11 @@
+       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border bg-muted/30 px-4 py-2 text-sm">
+         <span className="font-medium">{summary.total.toLocaleString('fa-IR')} برنامه</span>
+         <span className="text-emerald-700">انجام‌شده: {summary.done.toLocaleString('fa-IR')}</span>
+-        <span className="text-teal-700">باقی‌مانده: {summary.remaining.toLocaleString('fa-IR')}</span>
++        <span className="text-primary">باقی‌مانده: {summary.remaining.toLocaleString('fa-IR')}</span>
+         <span className={summary.overdue > 0 ? 'font-medium text-rose-700' : 'text-muted-foreground'}>
+           عقب‌افتاده: {summary.overdue.toLocaleString('fa-IR')}
+         </span>
+-        <span className="text-amber-700">نیازمند برنامه‌ریزی مجدد: {summary.needsResched.toLocaleString('fa-IR')}</span>
++        <span className="text-warning">نیازمند برنامه‌ریزی مجدد: {summary.needsResched.toLocaleString('fa-IR')}</span>
+         <span className="text-muted-foreground">لغوشده: {summary.cancelled.toLocaleString('fa-IR')}</span>
+         {truncated && (
+           <span className="text-rose-700">(نمایش ۵۰۰ برنامهٔ اول — برای دیدن همه، فیلتر دقیق‌تری بزنید)</span>
+@@ -466,7 +466,7 @@
+                       ({CUSTOMER_TYPE_LABEL[p.customer.type] || p.customer.type})
+                     </span>
+                     {assigned === false && (
+-                      <Badge variant="outline" className="mr-1 bg-amber-50 text-amber-700" title="چک‌این فقط برای مشتریان منتسب امکان‌پذیر است">
++                      <Badge variant="outline" className="mr-1 bg-warning/10 text-warning" title="چک‌این فقط برای مشتریان منتسب امکان‌پذیر است">
+                         منتسب نیست
+                       </Badge>
+                     )}
+@@ -502,7 +502,7 @@
+                         p.visit.deviationMin === 0
+                           ? 'bg-emerald-50 text-emerald-700'
+                           : p.visit.deviationMin < 0
+-                            ? 'bg-amber-50 text-amber-700'
++                            ? 'bg-warning/10 text-warning'
+                             : 'bg-rose-50 text-rose-700'
+                       }
+                       title="اختلاف شروع ویزیت واقعی با زمان برنامه‌ریزی‌شده"
+@@ -550,7 +550,7 @@
+                           setReschedAt(p.scheduledAtLocal || p.scheduledAt.slice(0, 16))
+                         }}
+                       >
+-                        <CalendarClock className="h-4 w-4 text-amber-600" />
++                        <CalendarClock className="h-4 w-4 text-warning" />
+                       </Button>
+                       <Button
+                         variant="ghost"
+@@ -609,7 +609,7 @@
+                 </SelectContent>
+               </Select>
+               {selectedEmployeeAssigned() === false && (
+-                <p className="text-xs text-amber-700">
++                <p className="text-xs text-warning">
+                   این مشتری به این کارمند منتسب نیست — چک‌این او توسط سرور رد می‌شود و برنامهٔ به‌طور خودکار
+                   «انجام‌شده» نمی‌شود. ابتدا انتساب را در تب کارمندان انجام دهید.
+                 </p>
+@@ -667,7 +667,7 @@
+             <Button variant="outline" onClick={() => setFormOpen(false)}>
+               انصراف
+             </Button>
+-            <Button className="bg-teal-600 hover:bg-teal-700" onClick={saveForm} disabled={saving}>
++            <Button className="bg-primary hover:bg-primary/90" onClick={saveForm} disabled={saving}>
+               {saving ? 'در حال ذخیره…' : editing ? 'ذخیرهٔ تغییرات' : 'ثبت برنامه'}
+             </Button>
+           </DialogFooter>
+@@ -705,7 +705,7 @@
+             <Button variant="outline" onClick={() => setReschedPlan(null)}>
+               انصراف
+             </Button>
+-            <Button className="bg-amber-600 hover:bg-amber-700" onClick={saveReschedule} disabled={saving}>
++            <Button className="bg-warning hover:bg-warning/90" onClick={saveReschedule} disabled={saving}>
+               {saving ? 'در حال انتقال…' : 'انتقال به زمان جدید'}
+             </Button>
+           </DialogFooter>
+--- a/src/components/panel/RouteMap.tsx
++++ b/src/components/panel/RouteMap.tsx
+@@ -76,8 +76,8 @@
+         </MapContainer>
+       </div>
+       <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+-        <span className="flex items-center gap-1"><span className="inline-block h-1 w-4 rounded bg-teal-600" /> مسیر ثبت‌شده</span>
+-        <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-full border-2 border-white bg-amber-700" /> چک‌این / پایان</span>
++        <span className="flex items-center gap-1"><span className="inline-block h-1 w-4 rounded bg-primary" /> مسیر ثبت‌شده</span>
++        <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-full border-2 border-white bg-warning" /> چک‌این / پایان</span>
+         <span className="flex items-center gap-1"><span className="inline-block h-3 w-3 rounded-full border-2 border-white bg-red-600" /> آخرین موقعیت</span>
+       </div>
+     </div>
+--- a/src/components/panel/ThemeToggle.tsx
++++ b/src/components/panel/ThemeToggle.tsx
+@@ -0,0 +1,51 @@
++'use client'
++
++import { useEffect, useState } from 'react'
++import { Monitor, Moon, Sun } from 'lucide-react'
++import { readThemePref, storeThemePref, type ThemePref } from '@/lib/theme'
++
++/**
++ * Theme switcher (UI/UX redesign §3.3): Light / Dark / System.
++ * The choice persists (localStorage) and 'system' follows the OS live.
++ * Rendered as a compact 3-segment control that fits the topbar and the
++ * mobile header alike.
++ */
++export default function ThemeToggle({ compact = false }: { compact?: boolean }) {
++  const [pref, setPref] = useState<ThemePref>('system')
++
++  useEffect(() => {
++    setPref(readThemePref())
++  }, [])
++
++  const choose = (p: ThemePref) => {
++    setPref(p)
++    storeThemePref(p)
++  }
++
++  const seg = (p: ThemePref, Icon: typeof Sun, label: string) => (
++    <button
++      key={p}
++      onClick={() => choose(p)}
++      title={label}
++      aria-label={label}
++      aria-pressed={pref === p}
++      className={`flex h-7 items-center justify-center rounded-md transition-colors ${
++        compact ? 'w-7' : 'w-8'
++      } ${pref === p ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}
++    >
++      <Icon className="h-3.5 w-3.5" />
++    </button>
++  )
++
++  return (
++    <div
++      role="group"
++      aria-label="انتخاب تم"
++      className="flex items-center gap-0.5 rounded-lg border bg-card p-0.5"
++    >
++      {seg('light', Sun, 'تم روشن')}
++      {seg('dark', Moon, 'تم تیره')}
++      {seg('system', Monitor, 'هماهنگ با سیستم')}
++    </div>
++  )
++}
+--- a/src/components/panel/TrackingTab.tsx
++++ b/src/components/panel/TrackingTab.tsx
+@@ -219,7 +219,7 @@
+   const connBadge = (c: LiveRow['connection']) => {
+     switch (c) {
+       case 'sending': return <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">در حال ارسال</Badge>
+-      case 'stale-report': return <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">گزارش نمی‌رسد</Badge>
++      case 'stale-report': return <Badge className="bg-warning/15 text-warning hover:bg-warning/15">گزارش نمی‌رسد</Badge>
+       case 'disabled': return <Badge className="bg-muted text-muted-foreground hover:bg-muted">خاموش (سیاست)</Badge>
+       default: return <Badge className="bg-muted text-muted-foreground hover:bg-muted">بی‌گزارش</Badge>
+     }
+@@ -231,7 +231,7 @@
+       <Card>
+         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+           <CardTitle className="flex items-center gap-2 text-base">
+-            <Navigation className="h-4 w-4 text-teal-600" />
++            <Navigation className="h-4 w-4 text-primary" />
+             وضعیت زندهٔ ردیابی
+           </CardTitle>
+           <div className="flex items-center gap-2">
+@@ -393,7 +393,7 @@
+             </Select>
+             {routeLoading && <span className="text-xs text-muted-foreground">در حال دریافت…</span>}
+             {routeData?.capped && (
+-              <span className="text-xs text-amber-700">نمایش به ۲٬۰۰۰ نقطهٔ آخر محدود شد</span>
++              <span className="text-xs text-warning">نمایش به ۲٬۰۰۰ نقطهٔ آخر محدود شد</span>
+             )}
+             {routeData && routeData.points.length === 0 && !routeLoading && (
+               <span className="text-xs text-muted-foreground">در این بازه موقعیتی ثبت نشده است.</span>
+--- a/src/instrumentation.ts
++++ b/src/instrumentation.ts
+@@ -277,6 +277,87 @@
+   'WHERE c."voicePath" IS NOT NULL ' +
+   'AND NOT EXISTS (SELECT 1 FROM "VoiceFile" vf WHERE vf."path" = c."voicePath")'
+ 
++// ── Customer 360 (phase 1, Nov 2026) ────────────────────────────────
++// 1) Customer: additive profile columns — all nullable except `active`
++//    (NOT NULL DEFAULT 1: every legacy row is active; deactivation is the
++//    project's logical-delete, history is never touched). `appLocalId` is
++//    the app's offline-create idempotency key (unique among non-NULL).
++const CUSTOMER_360_DDL = [
++  'ALTER TABLE "Customer" ADD COLUMN "lastName" TEXT',
++  'ALTER TABLE "Customer" ADD COLUMN "title" TEXT',
++  'ALTER TABLE "Customer" ADD COLUMN "specialty" TEXT',
++  'ALTER TABLE "Customer" ADD COLUMN "managerName" TEXT',
++  'ALTER TABLE "Customer" ADD COLUMN "phone2" TEXT',
++  'ALTER TABLE "Customer" ADD COLUMN "district" TEXT',
++  'ALTER TABLE "Customer" ADD COLUMN "postalCode" TEXT',
++  'ALTER TABLE "Customer" ADD COLUMN "notes" TEXT',
++  'ALTER TABLE "Customer" ADD COLUMN "active" BOOLEAN NOT NULL DEFAULT true',
++  'ALTER TABLE "Customer" ADD COLUMN "appLocalId" TEXT',
++]
++const CUSTOMER_APPLOCALID_INDEX_DDL =
++  'CREATE UNIQUE INDEX IF NOT EXISTS "Customer_appLocalId_key" ON "Customer"("appLocalId")'
++
++// 2) CustomerLink — physician↔clinic typed many-to-many (layout = prisma db
++//    push output for the Customer-360 schema; see schema.prisma for the
++//    design rationale). The unique (clinicId, physicianId) index makes
++//    duplicate links impossible at the database level.
++const CUSTOMER_LINK_DDL = `CREATE TABLE IF NOT EXISTS "CustomerLink" (
++    "id" TEXT NOT NULL PRIMARY KEY,
++    "clinicId" TEXT NOT NULL,
++    "physicianId" TEXT NOT NULL,
++    "note" TEXT,
++    "active" BOOLEAN NOT NULL DEFAULT true,
++    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
++    "updatedAt" DATETIME NOT NULL,
++    CONSTRAINT "CustomerLink_clinicId_fkey" FOREIGN KEY ("clinicId") REFERENCES "Customer" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
++    CONSTRAINT "CustomerLink_physicianId_fkey" FOREIGN KEY ("physicianId") REFERENCES "Customer" ("id") ON DELETE CASCADE ON UPDATE CASCADE
++)`
++const CUSTOMER_LINK_UNIQUE_DDL =
++  'CREATE UNIQUE INDEX IF NOT EXISTS "CustomerLink_clinicId_physicianId_key" ON "CustomerLink"("clinicId", "physicianId")'
++const CUSTOMER_LINK_PHYSICIAN_INDEX_DDL =
++  'CREATE INDEX IF NOT EXISTS "CustomerLink_physicianId_idx" ON "CustomerLink"("physicianId")'
++
++// 3) Purchase + PurchaseItem — purchase history STRUCTURE (ready for the
++//    future Holoo sync adapter; no real Holoo call exists in this phase).
++//    externalId is the adapter's upsert key (unique among non-NULL).
++const PURCHASE_DDL = `CREATE TABLE IF NOT EXISTS "Purchase" (
++    "id" TEXT NOT NULL PRIMARY KEY,
++    "customerId" TEXT NOT NULL,
++    "source" TEXT NOT NULL DEFAULT 'manual',
++    "externalId" TEXT,
++    "invoiceNo" TEXT,
++    "date" DATETIME NOT NULL,
++    "paymentStatus" TEXT,
++    "discount" REAL,
++    "notes" TEXT,
++    "syncedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
++    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
++    "updatedAt" DATETIME NOT NULL,
++    CONSTRAINT "Purchase_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
++)`
++const PURCHASE_CUSTOMER_DATE_INDEX_DDL =
++  'CREATE INDEX IF NOT EXISTS "Purchase_customerId_date_idx" ON "Purchase"("customerId", "date")'
++const PURCHASE_EXTERNALID_INDEX_DDL =
++  'CREATE INDEX IF NOT EXISTS "Purchase_externalId_idx" ON "Purchase"("externalId")'
++const PURCHASE_EXTERNALID_UNIQUE_DDL =
++  'CREATE UNIQUE INDEX IF NOT EXISTS "Purchase_externalId_key" ON "Purchase"("externalId")'
++
++const PURCHASE_ITEM_DDL = `CREATE TABLE IF NOT EXISTS "PurchaseItem" (
++    "id" TEXT NOT NULL PRIMARY KEY,
++    "purchaseId" TEXT NOT NULL,
++    "productId" TEXT,
++    "productName" TEXT NOT NULL,
++    "productCode" TEXT,
++    "brand" TEXT,
++    "qty" REAL NOT NULL DEFAULT 1,
++    "unitPrice" REAL NOT NULL DEFAULT 0,
++    "total" REAL NOT NULL DEFAULT 0,
++    "discount" REAL,
++    CONSTRAINT "PurchaseItem_purchaseId_fkey" FOREIGN KEY ("purchaseId") REFERENCES "Purchase" ("id") ON DELETE CASCADE ON UPDATE CASCADE
++)`
++const PURCHASE_ITEM_INDEX_DDL =
++  'CREATE INDEX IF NOT EXISTS "PurchaseItem_purchaseId_idx" ON "PurchaseItem"("purchaseId")'
++
+ export async function register() {
+   if (process.env.NEXT_RUNTIME !== 'nodejs') return
+   const { PrismaClient } = await import('@prisma/client')
+@@ -286,7 +367,7 @@
+   // index is created (a violating legacy row would otherwise fail the
+   // index creation loudly); both are idempotent, so every boot just
+   // re-applies them as no-ops.
+-  for (const sql of [...MIGRATIONS, AUDIT_TABLE_DDL, PLANNED_VISIT_DDL, PLANNED_VISIT_INDEX_DDL, NOTIF_EVENTKEY_DDL, NOTIF_EVENTKEY_INDEX_DDL, PANEL_NOTIFICATION_DDL, PANEL_NOTIFICATION_INDEX_DDL, ASSIGNMENT_REQUEST_DDL, ASSIGNMENT_REQUEST_PENDING_INDEX_DDL, ...CUSTOMER_CITY_DDL, CHECKIN_NOTE_VERSION_DDL, CHECKIN_NOTE_VERSION_INDEX_DDL, LOCATION_PING_DDL, LOCATION_PING_LOCALID_INDEX_DDL, LOCATION_PING_ROUTE_INDEX_DDL, TRACK_STATUS_DDL, VISIT_ONE_OPEN_RECONCILE_DDL, VISIT_ONE_OPEN_INDEX_DDL, OP_EVENT_DDL, OP_EVENT_EMP_IDX_DDL, OP_EVENT_TYPE_IDX_DDL, OP_EVENT_TIME_IDX_DDL, OP_EVENT_REQUEST_ID_INDEX_DDL, VOICE_FILE_DDL, VOICE_FILE_PATH_INDEX_DDL, VOICE_FILE_CHECKIN_INDEX_DDL, VOICE_FILE_BACKFILL_SQL]) {
++  for (const sql of [...MIGRATIONS, AUDIT_TABLE_DDL, PLANNED_VISIT_DDL, PLANNED_VISIT_INDEX_DDL, NOTIF_EVENTKEY_DDL, NOTIF_EVENTKEY_INDEX_DDL, PANEL_NOTIFICATION_DDL, PANEL_NOTIFICATION_INDEX_DDL, ASSIGNMENT_REQUEST_DDL, ASSIGNMENT_REQUEST_PENDING_INDEX_DDL, ...CUSTOMER_CITY_DDL, CHECKIN_NOTE_VERSION_DDL, CHECKIN_NOTE_VERSION_INDEX_DDL, LOCATION_PING_DDL, LOCATION_PING_LOCALID_INDEX_DDL, LOCATION_PING_ROUTE_INDEX_DDL, TRACK_STATUS_DDL, VISIT_ONE_OPEN_RECONCILE_DDL, VISIT_ONE_OPEN_INDEX_DDL, OP_EVENT_DDL, OP_EVENT_EMP_IDX_DDL, OP_EVENT_TYPE_IDX_DDL, OP_EVENT_TIME_IDX_DDL, OP_EVENT_REQUEST_ID_INDEX_DDL, VOICE_FILE_DDL, VOICE_FILE_PATH_INDEX_DDL, VOICE_FILE_CHECKIN_INDEX_DDL, VOICE_FILE_BACKFILL_SQL, ...CUSTOMER_360_DDL, CUSTOMER_APPLOCALID_INDEX_DDL, CUSTOMER_LINK_DDL, CUSTOMER_LINK_UNIQUE_DDL, CUSTOMER_LINK_PHYSICIAN_INDEX_DDL, PURCHASE_DDL, PURCHASE_CUSTOMER_DATE_INDEX_DDL, PURCHASE_EXTERNALID_INDEX_DDL, PURCHASE_EXTERNALID_UNIQUE_DDL, PURCHASE_ITEM_DDL, PURCHASE_ITEM_INDEX_DDL]) {
+     try {
+       await db.$executeRawUnsafe(sql)
+       applied++
+--- a/src/lib/customer360.ts
++++ b/src/lib/customer360.ts
+@@ -0,0 +1,145 @@
++import { db } from '@/lib/db'
++
++/**
++ * Customer 360 (phase 1) — shared helpers for the panel AND app paths.
++ *
++ * Everything here is deliberately conservative:
++ *  * unknown/absent fields are NEVER touched (partial update semantics —
++ *    an old app that does not know the new fields keeps syncing exactly
++ *    as before);
++ *  * strings are trimmed and empties collapse to NULL (one storage truth:
++ *    "no value" is NULL, never '');
++ *  * duplicate detection is advisory (the caller decides the status code)
++ *    and compares on NORMALIZED names so «دکتر احمدی» ≈ «دکتر  احمدی».
++ */
++
++export const CUSTOMER_TYPES = ['doctor', 'pharmacy', 'clinic', 'other'] as const
++export const PAYMENT_STATUSES = ['paid', 'unpaid', 'partial'] as const
++export const PURCHASE_SOURCES = ['manual', 'holoo'] as const
++
++function norm(s: unknown): string | null {
++  if (typeof s !== 'string') return null
++  const t = s.trim().replace(/\s+/g, ' ')
++  return t.length ? t : null
++}
++
++/** Extract + validate the Customer-360 profile fields from a request body.
++ *  Returns the partial Prisma `data` (only the keys present in the body). */
++export function pickCustomer360(b: Record<string, unknown> | null | undefined): Record<string, unknown> {
++  const data: Record<string, unknown> = {}
++  if (!b) return data
++  if ('lastName' in b) data.lastName = norm(b.lastName)
++  if ('title' in b) data.title = norm(b.title)
++  if ('specialty' in b) data.specialty = norm(b.specialty)
++  if ('managerName' in b) data.managerName = norm(b.managerName)
++  if ('phone2' in b) data.phone2 = norm(b.phone2)
++  if ('district' in b) data.district = norm(b.district)
++  if ('postalCode' in b) data.postalCode = norm(b.postalCode)
++  if ('notes' in b) data.notes = norm(b.notes)
++  if ('active' in b && typeof b.active === 'boolean') data.active = b.active
++  return data
++}
++
++/** The same fields, but the ones an APP client is allowed to write.
++ *  (`active` is panel-only: a rep must not be able to deactivate a customer
++ *  — that is an administrative lifecycle decision.) */
++export function pickCustomer360App(b: Record<string, unknown> | null | undefined): Record<string, unknown> {
++  const data = pickCustomer360(b)
++  delete data.active
++  return data
++}
++
++export interface DuplicateHit {
++  id: string
++  name: string
++  type: string
++  phone?: string | null
++}
++
++/**
++ * Duplicate prevention (mission §6.3: «جلوگیری از ثبت تصادفی رکوردهای تکراری»).
++ *
++ * A new/edited customer is a LIKELY duplicate of an existing row when:
++ *  - same type AND (normalized) same name, OR
++ *  - same type AND same non-empty phone.
++ *
++ * The check EXCLUDES the row being edited (`excludeId`) and is purely a
++ * WARNING: the caller decides whether to refuse (panel refuses with 409 +
++ * the existing row's identity; app path likewise) — the database itself has
++ * no unique constraint on name (legitimate same-name doctors in different
++ * cities exist, so hard-uniqueness would be wrong).
++ */
++export async function findCustomerDuplicate(opts: {
++  name: string
++  type: string
++  phone?: string | null
++  excludeId?: string
++}): Promise<DuplicateHit | null> {
++  const name = norm(opts.name) ?? ''
++  const phone = norm(opts.phone)
++  if (!name && !phone) return null
++  const OR: Record<string, unknown>[] = []
++  if (name) OR.push({ name, type: opts.type })
++  if (phone) OR.push({ phone, type: opts.type })
++  const hit = await db.customer.findFirst({
++    where: {
++      id: opts.excludeId ? { not: opts.excludeId } : undefined,
++      OR,
++    },
++    select: { id: true, name: true, type: true, phone: true },
++  })
++  return hit ?? null
++}
++
++/** The 360 financial summary — computed from REAL Purchase rows only.
++ *  An empty table yields all-zero/`null` values (the UI renders an explicit
++ *  «اطلاعاتی ثبت نشده» empty state — never a fabricated number). */
++export interface PurchaseSummary {
++  total: number
++  last30: number
++  last90: number
++  last365: number
++  orderCount: number
++  avgOrder: number | null
++  lastPurchaseAt: string | null
++  maxOrder: number | null
++}
++
++export async function purchaseSummary(customerId: string): Promise<PurchaseSummary> {
++  const now = Date.now()
++  // One fetch, exact math in JS (Prisma cannot sum a computed
++  // `gross - discount` in SQLite; per-customer purchase counts are small).
++  const rows = await db.purchase.findMany({
++    where: { customerId },
++    select: { date: true, discount: true, items: { select: { total: true } } },
++    orderBy: { date: 'desc' },
++  })
++  const net = rows.map((r) => {
++    const gross = r.items.reduce((s, it) => s + (it.total || 0), 0)
++    return { at: r.date.getTime(), value: gross - (r.discount || 0) }
++  })
++  const sum = (list: { value: number }[]) => list.reduce((s, x) => s + x.value, 0)
++  const w = (days: number) => sum(net.filter((x) => x.at >= now - days * 24 * 3600 * 1000))
++  const total = sum(net)
++  return {
++    total,
++    last30: w(30),
++    last90: w(90),
++    last365: w(365),
++    orderCount: rows.length,
++    avgOrder: rows.length ? total / rows.length : null,
++    lastPurchaseAt: rows.length ? rows[0].date.toISOString() : null,
++    maxOrder: net.length ? Math.max(...net.map((x) => x.value)) : null,
++  }
++}
++
++/** Persian label for a customer type — one source of truth for API error
++ *  messages and the link-type validation text. */
++export function customerTypeFa(t: string): string {
++  switch (t) {
++    case 'doctor': return 'پزشک'
++    case 'pharmacy': return 'داروخانه'
++    case 'clinic': return 'کلینیک'
++    default: return 'سایر'
++  }
++}
+--- a/src/lib/theme.ts
++++ b/src/lib/theme.ts
+@@ -0,0 +1,51 @@
++'use client'
++
++/**
++ * MedPad theme manager (UI/UX redesign phase 1).
++ *
++ * Three states — 'light' | 'dark' | 'system' — persisted in localStorage
++ * under 'medpad-theme' so the choice survives close/reopen (mission §3.3).
++ * 'system' follows prefers-color-scheme LIVE (the listener swaps the class
++ * the moment the OS switches). Application is a single class on <html>,
++ * which the Tailwind `dark` variant already targets — every component uses
++ * CSS-variable tokens, so nothing else needs to know the theme.
++ */
++
++export type ThemePref = 'light' | 'dark' | 'system'
++
++const STORAGE_KEY = 'medpad-theme'
++
++export function readThemePref(): ThemePref {
++  if (typeof window === 'undefined') return 'system'
++  const v = window.localStorage.getItem(STORAGE_KEY)
++  return v === 'light' || v === 'dark' || v === 'system' ? v : 'system'
++}
++
++export function applyThemePref(pref: ThemePref) {
++  if (typeof window === 'undefined') return
++  const dark =
++    pref === 'dark' ||
++    (pref === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
++  document.documentElement.classList.toggle('dark', dark)
++  // keep the browser chrome coherent with the panel
++  document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
++}
++
++export function storeThemePref(pref: ThemePref) {
++  if (typeof window === 'undefined') return
++  window.localStorage.setItem(STORAGE_KEY, pref)
++  applyThemePref(pref)
++}
++
++/** Boot hook: apply the stored preference ASAP + keep 'system' live. */
++export function initTheme() {
++  applyThemePref(readThemePref())
++  const mq = window.matchMedia('(prefers-color-scheme: dark)')
++  mq.addEventListener('change', () => {
++    if (readThemePref() === 'system') applyThemePref('system')
++  })
++}
++
++/** Blocking bootstrap snippet — inlined in layout <head> so the FIRST paint
++ *  already carries the right theme (no white flash on dark preference). */
++export const THEME_BOOTSTRAP = `(function(){try{var v=localStorage.getItem('${STORAGE_KEY}');var p=(v==='light'||v==='dark'||v==='system')?v:'system';var d=p==='dark'||(p==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches);if(d)document.documentElement.classList.add('dark');document.documentElement.style.colorScheme=d?'dark':'light';}catch(e){}})();`
+--- a/src/lib/types.ts
++++ b/src/lib/types.ts
+@@ -117,6 +117,9 @@
+   updatedAt: string
+ }
+ 
++/** alias — page.tsx + Dashboard import this historical name */
++export type PanelConfigInfo = PanelConfig
++
+ export interface PanelConfig {
+   panelVersion: string
+   apkVersion: string

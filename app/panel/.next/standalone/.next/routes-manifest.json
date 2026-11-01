@@ -38,6 +38,14 @@
       "namedRegex": "^/api/app/customers/(?<nxtPid>[^/]+?)(?:/)?$"
     },
     {
+      "page": "/api/app/customers/[id]/profile",
+      "regex": "^/api/app/customers/([^/]+?)/profile(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/app/customers/(?<nxtPid>[^/]+?)/profile(?:/)?$"
+    },
+    {
       "page": "/api/assignment-requests/[id]/approve",
       "regex": "^/api/assignment\\-requests/([^/]+?)/approve(?:/)?$",
       "routeKeys": {
@@ -62,12 +70,28 @@
       "namedRegex": "^/api/checkins/(?<nxtPid>[^/]+?)(?:/)?$"
     },
     {
+      "page": "/api/customer-links/[id]",
+      "regex": "^/api/customer\\-links/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/customer\\-links/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
       "page": "/api/customers/[id]",
       "regex": "^/api/customers/([^/]+?)(?:/)?$",
       "routeKeys": {
         "nxtPid": "nxtPid"
       },
       "namedRegex": "^/api/customers/(?<nxtPid>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/customers/[id]/profile",
+      "regex": "^/api/customers/([^/]+?)/profile(?:/)?$",
+      "routeKeys": {
+        "nxtPid": "nxtPid"
+      },
+      "namedRegex": "^/api/customers/(?<nxtPid>[^/]+?)/profile(?:/)?$"
     },
     {
       "page": "/api/employees/[id]",
@@ -222,6 +246,12 @@
       "namedRegex": "^/api/app/config(?:/)?$"
     },
     {
+      "page": "/api/app/customer-links",
+      "regex": "^/api/app/customer\\-links(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/app/customer\\-links(?:/)?$"
+    },
+    {
       "page": "/api/app/customers",
       "regex": "^/api/app/customers(?:/)?$",
       "routeKeys": {},
@@ -334,6 +364,12 @@
       "regex": "^/api/config(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api/config(?:/)?$"
+    },
+    {
+      "page": "/api/customer-links",
+      "regex": "^/api/customer\\-links(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/customer\\-links(?:/)?$"
     },
     {
       "page": "/api/customers",

@@ -1,0 +1,3 @@
+module.exports=[44059,t=>t.a(async(e,a)=>{try{var n=t.i(79832),c=e([n]);[n]=c.then?(await c)():c;let o=!1;async function i(t,e){let a;try{a=(0,n.G)()}catch(t){o||(o=!0,console.error(`[medpad] emit skipped (${t.message})`));return}try{let n=process.env.REALTIME_URL||"http://127.0.0.1:3003";await fetch(`${n}/emit`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({token:a,event:t,payload:e}),signal:AbortSignal.timeout(1500)})}catch{}}t.s(["f",0,i]),a()}catch(t){a(t)}},!1)];
+
+//# sourceMappingURL=src_lib_emit_ts_0p7mcbrwklfhf._.js.map

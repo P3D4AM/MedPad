@@ -35,8 +35,12 @@ echo "==== [4/6] full v1.9.12 suite ===="
 bash "$HERE/test-v1912.sh" ${PKG:+"$PKG"} || RC=1
 echo "==== [5/6] functional core (phase 1 / task 1) ===="
 bash "$HERE/test-functional-core.sh" ${PKG:+"$PKG"} || RC=1
-echo "==== [6/6] remediation (phase 1 / task 2) ===="
+echo "==== [6/8] remediation (phase 1 / task 2) ===="
 bash "$HERE/test-remediation.sh" ${PKG:+"$PKG"} || RC=1
+echo "==== [7/8] mission 12 (Nov 2026) ===="
+bash "$HERE/test-mission12.sh" ${PKG:+"$PKG"} || RC=1
+echo "==== [8/8] customer 360 (phase 1) ===="
+bash "$HERE/test-customer360.sh" ${PKG:+"$PKG"} || RC=1
 
 echo ""
 if [ "$RC" = "0" ]; then echo "ALL-SUITES-PASS"; else echo "SOME-SUITES-FAILED"; fi
