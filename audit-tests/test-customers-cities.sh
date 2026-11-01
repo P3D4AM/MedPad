@@ -147,6 +147,11 @@ CODE=$(curl -s -o $W/a1.json -w '%{http_code}' -X POST $BASE/api/app/customers/c
 chk "CC5 app create with city -> 200" "[ '$CODE' = '200' ]"
 CUS3=$(py "import json;print(json.load(open('$W/a1.json'))['customer']['id'])")
 chk "CC5 pair stored + canonical" "py \"import json;d=json.load(open('$W/a1.json'));c=d['customer'];exit(0 if c['city']=='کرمان' and c['province']=='کرمان' else 1)\""
+# mission-12/item-1 contract: the creator is NOT auto-assigned — the admin
+# assigns explicitly (this is what makes the CC6/CC7 edits legal for EMP1)
+curl -s -b $W/cj -X POST $BASE/api/assignments -H 'content-type: application/json' \
+  -d "{\"employeeId\":\"$EMP1\",\"customerId\":\"$CUS3\"}" -o $W/asg0.json
+chk "CC5 CUS3 assigned by admin (no-auto-assign contract)" "grep -q '\"ok\":true' $W/asg0.json"
 CODE=$(curl -s -o $W/a2.json -w '%{http_code}' -X POST $BASE/api/app/customers/create \
   -H "X-Medpad-Token: $TOK1" -H 'content-type: application/json' \
   -d '{"name":"اپ شهر خراب","city":"نانا","province":"فارس","lat":30.2,"lng":57.0}')
@@ -173,8 +178,8 @@ CODE=$(curl -s -o $W/a5.json -w '%{http_code}' -X PUT "$BASE/api/app/customers/$
 chk "CC7 pair untouched by city-less edit" "py \"import json;d=json.load(open('$W/a5.json'));c=d['customer'];exit(0 if c['city']=='بردسیر' and c['phone']=='03599999' else 1)\""
 
 # ── CC8: app sync returns pair; G-1 isolation ────────────────
-# assign CUS1 (شیراز, admin-created, unassigned) to EMP1. CUS3 is ALREADY
-# assigned to EMP1 — the app-create route auto-assigns the creator.
+# assign CUS1 (شیراز, admin-created) to EMP1 too. (CUS3 was assigned by
+# the admin right after CC5 — the no-auto-assign contract of mission-12.)
 curl -s -b $W/cj -X POST $BASE/api/assignments -H 'content-type: application/json' \
   -d "{\"employeeId\":\"$EMP1\",\"customerId\":\"$CUS1\"}" -o $W/asg1.json
 chk "CC8 fixtures assigned" "grep -q '\"ok\":true' $W/asg1.json"
