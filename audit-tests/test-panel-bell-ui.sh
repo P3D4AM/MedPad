@@ -128,7 +128,7 @@ with sync_playwright() as p:
     # BU1: bell exists, no badge, empty state
     step("bu1_bell_button", lambda: page.locator('[data-testid="bell-button"]').count())
     step("bu1_no_badge", lambda: page.locator('[data-testid="bell-unread-count"]').count() == 0)
-    step("bu1_socket_connected", lambda: (page.wait_for_selector(".bg-emerald-500", timeout=20000) is not None))
+    step("bu1_socket_connected", lambda: (page.wait_for_selector(".bg-success", timeout=20000) is not None))
     page.click('[data-testid="bell-button"]')
     page.wait_for_selector('[data-testid="bell-empty"]')
     step("bu1_empty_state", lambda: True)
