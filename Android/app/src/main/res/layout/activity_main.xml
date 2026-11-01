@@ -194,7 +194,7 @@
             android:layout_width="match_parent"
             android:layout_height="110dp"
             android:layout_marginTop="16dp"
-            app:cardBackgroundColor="@color/white"
+            app:cardBackgroundColor="@color/card_bg"
             app:cardCornerRadius="20dp">
 
             <LinearLayout
@@ -221,6 +221,45 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- Customer 360 (phase 1) — the customers list (search/filter/360 profile).
+             Long-press opens the map directly (the existing add-on-map flow). -->
+        <com.google.android.material.card.MaterialCardView
+            xmlns:app="http://schemas.android.com/apk/res-auto"
+            android:id="@+id/cardCustomers"
+            android:layout_width="match_parent"
+            android:layout_height="110dp"
+            android:layout_marginTop="16dp"
+            app:cardBackgroundColor="@color/card_bg"
+            app:cardCornerRadius="20dp"
+            app:strokeWidth="1dp"
+            app:strokeColor="@color/gray_200"
+            app:cardElevation="0dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="horizontal"
+                android:gravity="center">
+
+                <ImageView
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginStart="24dp"
+                    android:src="@drawable/ic_account"
+                    app:tint="@color/teal_600"
+                    xmlns:app="http://schemas.android.com/apk/res-auto" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="20dp"
+                    android:text="@string/customers_title"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/teal_700" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
         <!-- Customers map card -->
         <com.google.android.material.card.MaterialCardView
             xmlns:app="http://schemas.android.com/apk/res-auto"
@@ -229,7 +268,7 @@
             android:layout_height="110dp"
             android:layout_marginTop="16dp"
             android:layout_marginBottom="24dp"
-            app:cardBackgroundColor="@color/white"
+            app:cardBackgroundColor="@color/card_bg"
             app:cardCornerRadius="20dp">
 
             <LinearLayout

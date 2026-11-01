@@ -144,6 +144,8 @@ class MainActivity : AppCompatActivity() {
                 CheckinSync.flush()
                 CheckinSync.syncDoctors()
                 LocationSync.flushOnce(this@MainActivity)
+                // Customer 360 — customer ops ride the same flush points
+                try { com.medpad.tracker.sync.Customers360.flush() } catch (_: Exception) { }
                 // mission item 10 — device-side operational events ride the
                 // same connectivity-regain path (idempotent batch upload)
                 try { com.medpad.tracker.sync.OpEvents.flushOnce() } catch (_: Exception) { }
@@ -231,6 +233,15 @@ class MainActivity : AppCompatActivity() {
         findViewById<View>(R.id.cardPlans).setOnClickListener {
             startActivity(Intent(this, PlansActivity::class.java))
         }
+        // Customer 360 (phase 1) — the customers list (search/filter/360
+        // profile); long-press jumps straight to the map.
+        findViewById<View>(R.id.cardCustomers).setOnClickListener {
+            startActivity(Intent(this, CustomersActivity::class.java))
+        }
+        findViewById<View>(R.id.cardCustomers).setOnLongClickListener {
+            startActivity(Intent(this, DoctorsMapActivity::class.java))
+            true
+        }
         findViewById<View>(R.id.cardMap).setOnClickListener {
             startActivity(Intent(this, DoctorsMapActivity::class.java))
         }
@@ -251,6 +262,9 @@ class MainActivity : AppCompatActivity() {
             CheckinSync.flush()
             CheckinSync.syncDoctors()
             LocationSync.flushOnce(this@MainActivity)
+            // Customer 360 — offline customer create/edit/link ops ride the
+            // same resume flush (idempotent localId, nothing is lost offline)
+            try { com.medpad.tracker.sync.Customers360.flush() } catch (_: Exception) { }
             withContext(Dispatchers.Main) { updateQueueStatus() }
         }
         // connectivity callback

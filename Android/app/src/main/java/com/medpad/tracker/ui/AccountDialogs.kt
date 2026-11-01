@@ -57,16 +57,73 @@ import kotlinx.coroutines.withContext
 object AccountDialogs {
 
     fun show(activity: AppCompatActivity) {
-        val items = arrayOf(
-            activity.getString(R.string.account_change_password),
-            activity.getString(R.string.account_change_server),
+        // Customer 360 / UI-UX — the account sheet: theme row (Light/Dark/
+        // System) + the existing two actions, one custom view (setItems and
+        // setView are mutually exclusive on AlertDialog).
+        val pad = dp(activity, 16)
+        val box = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad / 2, pad, 0)
+        }
+        box.addView(TextView(activity).apply {
+            text = activity.getString(R.string.theme_title)
+            textSize = 13f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+        })
+        val themeRow = LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(activity, 8), 0, dp(activity, 4))
+        }
+        val modes = listOf(
+            com.medpad.tracker.util.ThemePrefs.MODE_LIGHT to R.string.theme_light,
+            com.medpad.tracker.util.ThemePrefs.MODE_DARK to R.string.theme_dark,
+            com.medpad.tracker.util.ThemePrefs.MODE_SYSTEM to R.string.theme_system,
         )
+        val current = com.medpad.tracker.util.ThemePrefs.mode(activity)
+        modes.forEach { (mode, labelRes) ->
+            themeRow.addView(
+                android.widget.Button(activity).apply {
+                    text = activity.getString(labelRes)
+                    isAllCaps = false
+                    textSize = 13f
+                    minHeight = 0
+                    setPadding(dp(activity, 10), dp(activity, 6), dp(activity, 10), dp(activity, 6))
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                        marginEnd = dp(activity, 6)
+                    }
+                    if (mode == current) {
+                        setTextColor(0xFFFFFFFF.toInt())
+                        background.setTint(0xFF2563EB.toInt())
+                    } else {
+                        setTextColor(0xFF334155.toInt())
+                        background.setTint(0xFFE2E8F0.toInt())
+                    }
+                    setOnClickListener {
+                        com.medpad.tracker.util.ThemePrefs.setMode(activity, mode)
+                        // the activity recreates under the new theme; this dialog dies with it
+                    }
+                },
+            )
+        }
+        box.addView(themeRow)
+
+        fun actionBtn(label: String, onClick: () -> Unit) =
+            android.widget.Button(activity).apply {
+                text = label
+                isAllCaps = false
+                textSize = 14f
+                gravity = android.view.Gravity.CENTER_VERTICAL or android.view.Gravity.START
+                setPadding(dp(activity, 12), dp(activity, 10), dp(activity, 12), dp(activity, 10))
+                background = null
+                setOnClickListener { onClick() }
+            }
+        box.addView(actionBtn(activity.getString(R.string.account_change_password)) { changePassword(activity) })
+        box.addView(actionBtn(activity.getString(R.string.account_change_server)) { changeServer(activity) })
+
         AlertDialog.Builder(activity)
             .setTitle(R.string.account_title)
-            .setItems(items) { _, which ->
-                if (which == 0) changePassword(activity) else changeServer(activity)
-            }
-            .setNegativeButton(R.string.cancel, null)
+            .setView(box)
+            .setNegativeButton(R.string.close, null)
             .show()
     }
 
@@ -277,6 +334,10 @@ object AccountDialogs {
                             withContext(Dispatchers.IO) {
                                 CheckinSync.clearQueue()
                                 LocationSync.clearQueue(activity)
+                                // Customer 360 — queued customer ops + caches
+                                // belong to the OLD server's database too;
+                                // they never replay against the new one.
+                                com.medpad.tracker.sync.Customers360.clearAll(activity)
                             }
                             TrackingService.stop(activity)
                             Session.clear(activity)

@@ -1,14 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="teal_700">#0F766E</color>
-    <color name="teal_600">#0D9488</color>
-    <color name="teal_50">#F0FDFA</color>
-    <color name="amber_600">#D97706</color>
+    <!-- ── MedPad design system (Customer-360 / UI-UX phase 1, Nov 2026) ──
+         The legacy resource NAMES stay (layouts reference them); their VALUES
+         move to the reference design's brand palette: deep-blue primary,
+         violet accent, slate neutrals. values-night/ carries the dark twins. -->
+    <!-- primary blue (buttons, links, active states) -->
+    <color name="teal_700">#1E40AF</color>
+    <color name="teal_600">#2563EB</color>
+    <color name="teal_50">#EFF6FF</color>
+    <!-- accent violet (checkout / secondary actions) -->
+    <color name="accent_violet">#7C3AED</color>
+    <!-- banner surfaces -->
+    <color name="amber_600">#7C3AED</color>
     <color name="amber_100">#FEF3C7</color>
-    <color name="gray_700">#374151</color>
+    <!-- neutrals (slate scale) -->
+    <color name="gray_700">#334155</color>
+    <color name="gray_500">#64748B</color>
+    <color name="gray_200">#E2E8F0</color>
+    <!-- app surfaces -->
     <color name="white">#FFFFFF</color>
     <color name="black">#000000</color>
-    <color name="gray_500">#6B7280</color>
-    <color name="gray_200">#E5E7EB</color>
+    <color name="card_bg">#FFFFFF</color>
+    <color name="screen_bg">#F4F7FB</color>
+    <color name="status_ok">#059669</color>
+    <color name="status_warn">#D97706</color>
+    <color name="status_err">#DC2626</color>
     <color name="red_600">#DC2626</color>
 </resources>

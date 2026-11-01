@@ -323,4 +323,72 @@
     <string name="checkout_note_hint_required">گزارش پایان بازدید — حداقل ۱۰ نویسه *</string>
     <string name="record_voice_optional">ضبط صدا (اختیاری)</string>
     <string name="record_voice_required">ضبط صدا *</string>
+
+    <!-- ── Customer 360 (phase 1) ─────────────────────────────────────── -->
+    <!-- theme -->
+    <string name="theme_title">نمایش برنامه</string>
+    <string name="theme_light">روشن</string>
+    <string name="theme_dark">تیره</string>
+    <string name="theme_system">هماهنگ با سیستم</string>
+    <!-- customers list -->
+    <string name="back">بازگشت</string>
+    <string name="customers_title">مشتریان من</string>
+    <string name="customers_search_hint">جستجو: نام، کلینیک، تلفن، شهر…</string>
+    <string name="customers_empty">مشتری‌ای یافت نشد</string>
+    <string name="filter_all">همه</string>
+    <string name="filter_active_only">فقط فعال</string>
+    <string name="type_doctor">پزشک</string>
+    <string name="type_clinic">کلینیک</string>
+    <string name="type_pharmacy">داروخانه</string>
+    <string name="type_other">سایر</string>
+    <string name="customer_type">نوع مشتری</string>
+    <string name="customer_inactive">غیرفعال</string>
+    <string name="customer_pending_sync">در انتظار همگام‌سازی</string>
+    <string name="customers_queue_waiting">%1$s تغییر مشتری در صف همگام‌سازی است — با اتصال اینترنت ارسال می‌شود</string>
+    <string name="customers_queue_failed">%1$s تغییر مشتری ناموفق بود — برای تلاش دوباره لمس کنید</string>
+    <!-- form -->
+    <string name="customer_lastname">نام خانوادگی</string>
+    <string name="customer_pro_title">عنوان حرفه‌ای (مثلاً دکتر)</string>
+    <string name="customer_specialty">تخصص</string>
+    <string name="customer_manager">مسئول خرید</string>
+    <string name="customer_phone2">تلفن دوم</string>
+    <string name="customer_district">منطقه</string>
+    <string name="customer_postal">کد پستی</string>
+    <string name="customer_notes">یادداشت‌های مشتری</string>
+    <string name="err_name_required">نام مشتری لازم است</string>
+    <string name="err_phone_invalid">شماره تلفن معتبر نیست (۱۰ تا ۱۳ رقم)</string>
+    <string name="customer_created_queued">مشتری ثبت شد و در صف همگام‌سازی است — با اتصال اینترنت برای مدیر ارسال می‌شود</string>
+    <string name="customer_edit_queued">تغییرات ذخیره شد و در صف همگام‌سازی است</string>
+    <!-- 360 profile -->
+    <string name="customer_profile_title">پروندهٔ مشتری</string>
+    <string name="customer_view_map">مشاهده روی نقشه</string>
+    <string name="profile_load_failed">پرونده بارگذاری نشد — اتصال اینترنت را بررسی کنید</string>
+    <string name="profile_cached_note">آفلاین — آخرین نسخهٔ ذخیره‌شده نمایش داده می‌شود</string>
+    <string name="profile_no_info">اطلاعات تکمیلی ثبت نشده است</string>
+    <string name="sum_total_purchase">مجموع خرید</string>
+    <string name="sum_order_count">تعداد سفارش</string>
+    <string name="sum_last_visit">آخرین ویزیت</string>
+    <string name="sum_last30">۳۰ روز</string>
+    <string name="sum_last90">۹۰ روز</string>
+    <string name="sum_last365">یک سال</string>
+    <string name="tab_info">اطلاعات پایه</string>
+    <string name="tab_links">ارتباطات</string>
+    <string name="tab_purchases">خریدها</string>
+    <string name="tab_visits">تاریخچه ویزیت</string>
+    <string name="tab_notes">یادداشت‌ها</string>
+    <string name="links_no_physicians">هنوز پزشکی به این کلینیک متصل نشده است</string>
+    <string name="links_no_clinics">هنوز کلینیکی برای این پزشک ثبت نشده است</string>
+    <string name="links_masked">مرتبط (خارج از محدودهٔ شما)</string>
+    <string name="purchases_empty">اطلاعات خریدی ثبت نشده — پس از اتصال به سامانهٔ هلو نمایش داده می‌شود</string>
+    <string name="purchase_invoice">فاکتور</string>
+    <string name="purchase_source_holoo">هلو</string>
+    <string name="purchase_source_manual">دستی</string>
+    <string name="purchase_total">مبلغ</string>
+    <string name="visits_empty">هنوز ویزیتی برای این مشتری ثبت نشده است</string>
+    <string name="visit_open">در جریان</string>
+    <string name="visit_duration">%1$s دقیقه</string>
+    <string name="visit_planned">برنامه‌دار</string>
+    <string name="note_edited">ویرایش‌شده</string>
+    <string name="notes_empty">یادداشتی برای این مشتری ثبت نشده است</string>
+    <string name="customer_province">استان</string>
 </resources>

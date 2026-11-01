@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- dark theme (Customer-360 / UI-UX phase 1) — the "deep-space navy"
+         reference palette: never pure black, layered navy surfaces.
+         Same resource NAMES as values/colors.xml so every layout flips
+         automatically. -->
+    <color name="teal_700">#93C5FD</color>   <!-- headings on dark: light blue -->
+    <color name="teal_600">#3B82F6</color>   <!-- primary blue -->
+    <color name="teal_50">#0B1020</color>    <!-- screen wash = main background -->
+    <color name="accent_violet">#8B5CF6</color>
+    <color name="amber_600">#8B5CF6</color>  <!-- checkout card: violet accent -->
+    <color name="amber_100">#3B2F0B</color>  <!-- warning banner surface -->
+    <color name="gray_700">#CBD5E1</color>
+    <color name="gray_500">#94A3B8</color>
+    <color name="gray_200">#26344D</color>
+    <color name="white">#F1F5F9</color>      <!-- "on-color" text stays light -->
+    <color name="black">#000000</color>
+    <color name="card_bg">#151E32</color>    <!-- card surface -->
+    <color name="screen_bg">#0B1020</color>
+    <color name="status_ok">#10B981</color>
+    <color name="status_warn">#F59E0B</color>
+    <color name="status_err">#EF4444</color>
+    <color name="red_600">#EF4444</color>
+</resources>

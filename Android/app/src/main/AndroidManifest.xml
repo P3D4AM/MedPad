@@ -52,6 +52,9 @@
         <activity android:name=".ui.ReportsActivity" android:exported="false" />
         <activity android:name=".ui.PlansActivity" android:exported="false" />
         <activity android:name=".ui.DoctorsMapActivity" android:exported="false" />
+        <!-- Customer 360 (phase 1) — the customers list + the 360 dossier -->
+        <activity android:name=".ui.CustomersActivity" android:exported="false" />
+        <activity android:name=".ui.CustomerProfileActivity" android:exported="false" />
 
         <service
             android:name=".location.TrackingService"
