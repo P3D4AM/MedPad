@@ -289,6 +289,16 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
+    /** Backup & Restore (Nov 2026) — the SAF pickers are launched from
+     *  DIALOGS (see BackupDialogs), so they use the classic result API;
+     *  every backup request code is forwarded there. Results survive
+     *  activity recreation — the system redelivers to the new instance. */
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        BackupDialogs.handleResult(this, requestCode, resultCode, data)
+    }
+
     private fun askServicePermissions() {
         val wanted = mutableListOf<String>()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
