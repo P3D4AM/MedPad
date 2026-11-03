@@ -56,6 +56,12 @@ import kotlinx.coroutines.withContext
  */
 object AccountDialogs {
 
+    // Owner decision (Nov 3 2026): the in-app Backup & Restore section is
+    // HIDDEN — the capability belongs to the admin panel. See the comment
+    // at the section below. The data layer + dialogs stay compiled so the
+    // flag can be flipped back without touching anything else.
+    private const val BACKUP_UI_VISIBLE = false
+
     fun show(activity: AppCompatActivity) {
         // Customer 360 / UI-UX — the account sheet: theme row (Light/Dark/
         // System) + the existing two actions, one custom view (setItems and
@@ -123,15 +129,23 @@ object AccountDialogs {
         // Backup & Restore (owner mission, Nov 2026) — its own section in
         // the account/settings sheet: JSON backup, exact .db copy, JSON
         // restore, legacy-.db restore and the pre-restore safety snapshots.
-        box.addView(
-            TextView(activity).apply {
-                text = activity.getString(R.string.backup_section_title)
-                textSize = 13f
-                setTypeface(null, android.graphics.Typeface.BOLD)
-                setPadding(0, dp(activity, 16), 0, 0)
-            },
-        )
-        box.addView(actionBtn(activity.getString(R.string.backup_section_title)) { BackupDialogs.show(activity) })
+        //
+        // HIDDEN (owner decision, Nov 3 2026 — «بکاپ اپ اندروید رو مخفی کن»):
+        // Backup & Restore is a PANEL-side capability; the in-app section is
+        // no longer shown to reps. The data layer (BackupManager) and the
+        // dialogs (BackupDialogs) stay in the codebase — flip this flag to
+        // bring the section back; nothing else needs to change.
+        if (BACKUP_UI_VISIBLE) {
+            box.addView(
+                TextView(activity).apply {
+                    text = activity.getString(R.string.backup_section_title)
+                    textSize = 13f
+                    setTypeface(null, android.graphics.Typeface.BOLD)
+                    setPadding(0, dp(activity, 16), 0, 0)
+                },
+            )
+            box.addView(actionBtn(activity.getString(R.string.backup_section_title)) { BackupDialogs.show(activity) })
+        }
 
         AlertDialog.Builder(activity)
             .setTitle(R.string.account_title)
