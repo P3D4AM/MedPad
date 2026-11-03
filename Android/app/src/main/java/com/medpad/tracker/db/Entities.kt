@@ -133,6 +133,10 @@ interface CustomerLinkDao {
 
     @Query("DELETE FROM customer_links")
     suspend fun clear()
+
+    /** Backup & Restore — full-table read for the JSON export. */
+    @Query("SELECT * FROM customer_links")
+    suspend fun all(): List<CustomerLinkEntity>
 }
 
 /**
@@ -160,6 +164,13 @@ interface CustomerProfileDao {
 
     @Query("DELETE FROM customer_profiles")
     suspend fun clear()
+
+    /** Backup & Restore — full-table read (export) + batch write (import). */
+    @Query("SELECT * FROM customer_profiles")
+    suspend fun all(): List<CustomerProfileCache>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(items: List<CustomerProfileCache>)
 }
 
 /**
@@ -402,6 +413,10 @@ interface PlannedVisitDao {
 
     @Query("DELETE FROM planned_visits")
     suspend fun clear()
+
+    /** Backup & Restore — full-table read for the JSON export. */
+    @Query("SELECT * FROM planned_visits ORDER BY scheduledAtMs")
+    suspend fun all(): List<PlannedVisitEntity>
 }
 
 /**
@@ -440,6 +455,10 @@ interface PendingLocationDao {
     /** oldest-first batch for upload (order preserved — route history) */
     @Query("SELECT * FROM pending_locations ORDER BY createdAt ASC LIMIT :limit")
     suspend fun oldest(limit: Int): List<PendingLocation>
+
+    /** Backup & Restore — full-table read for the JSON export. */
+    @Query("SELECT * FROM pending_locations ORDER BY createdAt ASC")
+    suspend fun all(): List<PendingLocation>
 
     /** delete server-confirmed (or permanently rejected) rows by primary key */
     @Query("DELETE FROM pending_locations WHERE uid IN (:uids)")
@@ -501,6 +520,10 @@ interface OpEventDao {
 
     @Query("SELECT COUNT(*) FROM op_events")
     suspend fun count(): Int
+
+    /** Backup & Restore — full-table read for the JSON export. */
+    @Query("SELECT * FROM op_events ORDER BY createdAt ASC")
+    suspend fun all(): List<OpEventEntity>
 
     /** full wipe — ONLY on logout / server change (rows belong to the old
      *  server's employee; the queue clear confirms with the user first) */

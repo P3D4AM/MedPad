@@ -219,9 +219,16 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** The REAL migration chain (4 → 14). Production use (Backup &
+         *  Restore, Nov 2026): the legacy-DB import opens a COPY of an old
+         *  install's database with the SAME chain — the migration history
+         *  IS the old→current schema mapping (every step is additive), and
+         *  Room validates the result against the current entities. */
+        fun migrations(): Array<Migration> =
+            arrayOf(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
+
         /** Test-only accessor (unit tests build a throwaway instance on a
          *  version-9 file and must install the SAME real migrations). */
-        fun migrationsForTest(): Array<Migration> =
-            arrayOf(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
+        fun migrationsForTest(): Array<Migration> = migrations()
     }
 }
