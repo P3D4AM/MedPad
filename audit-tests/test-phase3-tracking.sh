@@ -301,7 +301,7 @@ with sync_playwright() as p:
     page.fill("#u", "admin")
     page.fill("#p", PASSWORD)
     page.click("button[type=submit]")
-    page.wait_for_selector('button[title="اعلان‌های مرورگر"]')  # dashboard ready (base bundle feature)
+    page.wait_for_selector('button[title="تنظیمات"]')  # dashboard ready (phase 4: permission-bell icon removed as duplicate; gear is the sentinel)
 
     # tab renders with the live table
     step("ui_tab_click", lambda: page.get_by_text("وضعیت زنده", exact=True).first.click())

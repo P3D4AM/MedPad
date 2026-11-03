@@ -1,0 +1,2214 @@
+--- a/next.config.ts	2026-11-03 12:28:22.000000000 +0000
++++ b/next.config.ts	2026-11-03 12:05:59.940344066 +0000
+@@ -7,7 +7,9 @@
+   // The offline installer's seed step imports it from
+   // .next/standalone/node_modules at runtime; bundling it into the server
+   // chunks removed it from node_modules and broke the seed on fresh installs.
+-  serverExternalPackages: ["bcryptjs"],
++  // phase 4: web-push stays external too — same guarantee for the Push
++  // sender (src/lib/push.ts) and the VAPID bootstrap in instrumentation.
++  serverExternalPackages: ["bcryptjs", "web-push"],
+   typescript: {
+     ignoreBuildErrors: true,
+   },
+--- a/package-lock.json	2026-11-03 12:28:22.989643656 +0000
++++ b/package-lock.json	2026-11-03 12:07:07.037772207 +0000
+@@ -76,6 +76,7 @@
+         "tailwindcss-animate": "^1.0.7",
+         "uuid": "^11.1.0",
+         "vaul": "^1.1.2",
++        "web-push": "^3.6.7",
+         "z-ai-web-dev-sdk": "^0.0.18",
+         "zod": "^4.0.2",
+         "zustand": "^5.0.6"
+@@ -6175,6 +6176,15 @@
+         "acorn": "^6.0.0 || ^7.0.0 || ^8.0.0"
+       }
+     },
++    "node_modules/agent-base": {
++      "version": "7.1.4",
++      "resolved": "https://registry.npmjs.org/agent-base/-/agent-base-7.1.4.tgz",
++      "integrity": "sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==",
++      "license": "MIT",
++      "engines": {
++        "node": ">= 14"
++      }
++    },
+     "node_modules/anser": {
+       "version": "2.3.5",
+       "resolved": "https://registry.npmjs.org/anser/-/anser-2.3.5.tgz",
+@@ -6385,6 +6395,18 @@
+         "url": "https://github.com/sponsors/ljharb"
+       }
+     },
++    "node_modules/asn1.js": {
++      "version": "5.4.1",
++      "resolved": "https://registry.npmjs.org/asn1.js/-/asn1.js-5.4.1.tgz",
++      "integrity": "sha512-+I//4cYPccV8LdmBLiX8CYvf9Sp3vQsrqu2QNXRcrbiWvcx/UdlFiqUJJzxRQxgsZmvhXhn4cSKeSmoFjVdupA==",
++      "license": "MIT",
++      "dependencies": {
++        "bn.js": "^4.0.0",
++        "inherits": "^2.0.1",
++        "minimalistic-assert": "^1.0.0",
++        "safer-buffer": "^2.1.0"
++      }
++    },
+     "node_modules/ast-types-flow": {
+       "version": "0.0.8",
+       "resolved": "https://registry.npmjs.org/ast-types-flow/-/ast-types-flow-0.0.8.tgz",
+@@ -6496,6 +6518,12 @@
+         "bcrypt": "bin/bcrypt"
+       }
+     },
++    "node_modules/bn.js": {
++      "version": "4.12.5",
++      "resolved": "https://registry.npmjs.org/bn.js/-/bn.js-4.12.5.tgz",
++      "integrity": "sha512-3aRg6/JxfffFD+OlOjOFR3Vo79l39ooBTFucxx+MT3dhCtzn3EmiUPQo+6/OZuI2jbXi3YKgmiTFBgChQMwIRQ==",
++      "license": "MIT"
++    },
+     "node_modules/brace-expansion": {
+       "version": "1.1.21",
+       "resolved": "https://registry.npmjs.org/brace-expansion/-/brace-expansion-1.1.21.tgz",
+@@ -6578,6 +6606,12 @@
+         "ieee754": "^1.2.1"
+       }
+     },
++    "node_modules/buffer-equal-constant-time": {
++      "version": "1.0.1",
++      "resolved": "https://registry.npmjs.org/buffer-equal-constant-time/-/buffer-equal-constant-time-1.0.1.tgz",
++      "integrity": "sha512-zRpUiDwd/xk6ADqPMATG8vc9VPrkck7T07OIx0gnjmJAnHnTVXNQG3vfvWNuiZIkwu9KrKdA1iJKfsfTVxE6NA==",
++      "license": "BSD-3-Clause"
++    },
+     "node_modules/bun-types": {
+       "version": "1.4.2",
+       "resolved": "https://registry.npmjs.org/bun-types/-/bun-types-1.4.2.tgz",
+@@ -7406,6 +7440,15 @@
+         "node": ">= 0.4"
+       }
+     },
++    "node_modules/ecdsa-sig-formatter": {
++      "version": "1.0.11",
++      "resolved": "https://registry.npmjs.org/ecdsa-sig-formatter/-/ecdsa-sig-formatter-1.0.11.tgz",
++      "integrity": "sha512-nagl3RYrbNv6kQkeJIpt6NJZy8twLB/2vtz6yN9Z4vRKHN4/QZJIEbqohALSgwKdnksuY3k5Addp5lg8sVoVcQ==",
++      "license": "Apache-2.0",
++      "dependencies": {
++        "safe-buffer": "^5.0.1"
++      }
++    },
+     "node_modules/effect": {
+       "version": "3.21.0",
+       "resolved": "https://registry.npmjs.org/effect/-/effect-3.21.0.tgz",
+@@ -8972,6 +9015,28 @@
+         "url": "https://opencollective.com/unified"
+       }
+     },
++    "node_modules/http_ece": {
++      "version": "1.2.0",
++      "resolved": "https://registry.npmjs.org/http_ece/-/http_ece-1.2.0.tgz",
++      "integrity": "sha512-JrF8SSLVmcvc5NducxgyOrKXe3EsyHMgBFgSaIUGmArKe+rwr0uphRkRXvwiom3I+fpIfoItveHrfudL8/rxuA==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=16"
++      }
++    },
++    "node_modules/https-proxy-agent": {
++      "version": "7.0.6",
++      "resolved": "https://registry.npmjs.org/https-proxy-agent/-/https-proxy-agent-7.0.6.tgz",
++      "integrity": "sha512-vK9P5/iUfdl95AI+JVyUuIcVtd4ofvtrOr3HNtM2yxC9bnMbEdp3x01OhQNnjb8IJYi38VlTE3mBXwcfvywuSw==",
++      "license": "MIT",
++      "dependencies": {
++        "agent-base": "^7.1.2",
++        "debug": "4"
++      },
++      "engines": {
++        "node": ">= 14"
++      }
++    },
+     "node_modules/icu-minify": {
+       "version": "4.14.9",
+       "resolved": "https://registry.npmjs.org/icu-minify/-/icu-minify-4.14.9.tgz",
+@@ -9044,6 +9109,12 @@
+         "node": ">=0.8.19"
+       }
+     },
++    "node_modules/inherits": {
++      "version": "2.0.4",
++      "resolved": "https://registry.npmjs.org/inherits/-/inherits-2.0.4.tgz",
++      "integrity": "sha512-k/vGaX4/Yla3WzyMCvTQOXYeIHvqOKtnqBduzTHpzpQZzAskKMhZ2K+EnBiSM9zGSoIFeMpXKxa4dYeZIQqewQ==",
++      "license": "ISC"
++    },
+     "node_modules/inline-style-parser": {
+       "version": "0.2.7",
+       "resolved": "https://registry.npmjs.org/inline-style-parser/-/inline-style-parser-0.2.7.tgz",
+@@ -9742,6 +9813,27 @@
+         "node": ">=4.0"
+       }
+     },
++    "node_modules/jwa": {
++      "version": "2.0.1",
++      "resolved": "https://registry.npmjs.org/jwa/-/jwa-2.0.1.tgz",
++      "integrity": "sha512-hRF04fqJIP8Abbkq5NKGN0Bbr3JxlQ+qhZufXVr0DvujKy93ZCbXZMHDL4EOtodSbCWxOqR8MS1tXA5hwqCXDg==",
++      "license": "MIT",
++      "dependencies": {
++        "buffer-equal-constant-time": "^1.0.1",
++        "ecdsa-sig-formatter": "1.0.11",
++        "safe-buffer": "^5.0.1"
++      }
++    },
++    "node_modules/jws": {
++      "version": "4.0.1",
++      "resolved": "https://registry.npmjs.org/jws/-/jws-4.0.1.tgz",
++      "integrity": "sha512-EKI/M/yqPncGUUh44xz0PxSidXFr/+r0pA70+gIYhjv+et7yxM+s29Y+VGDkovRofQem0fs7Uvf4+YmAdyRduA==",
++      "license": "MIT",
++      "dependencies": {
++        "jwa": "^2.0.1",
++        "safe-buffer": "^5.0.1"
++      }
++    },
+     "node_modules/keyv": {
+       "version": "4.5.4",
+       "resolved": "https://registry.npmjs.org/keyv/-/keyv-4.5.4.tgz",
+@@ -11276,6 +11368,12 @@
+         "node": ">= 0.6"
+       }
+     },
++    "node_modules/minimalistic-assert": {
++      "version": "1.0.1",
++      "resolved": "https://registry.npmjs.org/minimalistic-assert/-/minimalistic-assert-1.0.1.tgz",
++      "integrity": "sha512-UtJcAD4yEaGtjPezWuO9wC4nwUnVH/8/Im3yEHQP4b67cXlD/Qr9hdITCU1xDbSEXg2XKNaP8jsReV7vQd00/A==",
++      "license": "ISC"
++    },
+     "node_modules/minimatch": {
+       "version": "3.1.5",
+       "resolved": "https://registry.npmjs.org/minimatch/-/minimatch-3.1.5.tgz",
+@@ -11293,7 +11391,6 @@
+       "version": "1.2.8",
+       "resolved": "https://registry.npmjs.org/minimist/-/minimist-1.2.8.tgz",
+       "integrity": "sha512-2yyAR8qBkN3YuheJanUpWC5U3bb5osDywNB8RzDVlDwDHbocAJveqqj1u8+SVD7jkWT4yvsHCpWqqWqAxb0zCA==",
+-      "dev": true,
+       "license": "MIT",
+       "funding": {
+         "url": "https://github.com/sponsors/ljharb"
+@@ -13369,6 +13466,26 @@
+         "url": "https://github.com/sponsors/ljharb"
+       }
+     },
++    "node_modules/safe-buffer": {
++      "version": "5.2.1",
++      "resolved": "https://registry.npmjs.org/safe-buffer/-/safe-buffer-5.2.1.tgz",
++      "integrity": "sha512-rp3So07KcdmmKbGvgaNxQSJr7bGVSVk5S9Eq1F+ppbRo70+YeaDxkw5Dd8NPN+GD6bjnYm2VuPuCXmpuYvmCXQ==",
++      "funding": [
++        {
++          "type": "github",
++          "url": "https://github.com/sponsors/feross"
++        },
++        {
++          "type": "patreon",
++          "url": "https://www.patreon.com/feross"
++        },
++        {
++          "type": "consulting",
++          "url": "https://feross.org/support"
++        }
++      ],
++      "license": "MIT"
++    },
+     "node_modules/safe-push-apply": {
+       "version": "1.0.0",
+       "resolved": "https://registry.npmjs.org/safe-push-apply/-/safe-push-apply-1.0.0.tgz",
+@@ -13404,6 +13521,12 @@
+         "url": "https://github.com/sponsors/ljharb"
+       }
+     },
++    "node_modules/safer-buffer": {
++      "version": "2.1.2",
++      "resolved": "https://registry.npmjs.org/safer-buffer/-/safer-buffer-2.1.2.tgz",
++      "integrity": "sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg==",
++      "license": "MIT"
++    },
+     "node_modules/scheduler": {
+       "version": "0.28.0",
+       "resolved": "https://registry.npmjs.org/scheduler/-/scheduler-0.28.0.tgz",
+@@ -14685,6 +14808,25 @@
+       "integrity": "sha512-dpojBhNsCNN7T82Tm7k26A6G9ML3NkhDsnw9n/eoxSRlVBB4CEtIQ/KTCLI2Fwf3ataSXRhYFkQi3SlnFwPvPQ==",
+       "license": "MIT"
+     },
++    "node_modules/web-push": {
++      "version": "3.6.7",
++      "resolved": "https://registry.npmjs.org/web-push/-/web-push-3.6.7.tgz",
++      "integrity": "sha512-OpiIUe8cuGjrj3mMBFWY+e4MMIkW3SVT+7vEIjvD9kejGUypv8GPDf84JdPWskK8zMRIJ6xYGm+Kxr8YkPyA0A==",
++      "license": "MPL-2.0",
++      "dependencies": {
++        "asn1.js": "^5.3.0",
++        "http_ece": "1.2.0",
++        "https-proxy-agent": "^7.0.0",
++        "jws": "^4.0.0",
++        "minimist": "^1.2.5"
++      },
++      "bin": {
++        "web-push": "src/cli.js"
++      },
++      "engines": {
++        "node": ">= 16"
++      }
++    },
+     "node_modules/which": {
+       "version": "2.0.2",
+       "resolved": "https://registry.npmjs.org/which/-/which-2.0.2.tgz",
+--- a/package.json	2026-11-03 12:28:22.989643656 +0000
++++ b/package.json	2026-11-03 12:05:55.762317474 +0000
+@@ -83,7 +83,8 @@
+     "vaul": "^1.1.2",
+     "z-ai-web-dev-sdk": "^0.0.18",
+     "zod": "^4.0.2",
+-    "zustand": "^5.0.6"
++    "zustand": "^5.0.6",
++    "web-push": "^3.6.7"
+   },
+   "devDependencies": {
+     "@tailwindcss/postcss": "^4",
+--- a/prisma/schema.prisma	2026-11-03 12:28:23.032643929 +0000
++++ b/prisma/schema.prisma	2026-11-03 11:56:30.801646324 +0000
+@@ -555,4 +555,30 @@
+   batteryUnrestricted Boolean  @default(false)
+   appVersion          String?
+   lastReportAt        DateTime @default(now())
++  // phase 4 — «اعمال‌شده روی دستگاه»: the config the device CONFIRMED it
++  // is running (sent with the periodic status report, adopted from the
++  // same clamped values the server handed out). NULL = this build of the
++  // app has not reported an ack yet. configAckAt = when that report
++  // arrived (server clock) — the panel shows saved-vs-applied honestly
++  // instead of assuming a save reached the field.
++  appliedConfigJson   String?
++  configAckAt         DateTime?
++}
++
++// ── phase 4: browser Push (Web Push / service worker) ──────────────
++// One row per PANEL BROWSER subscription (admin machine — the panel has a
++// single admin account, so rows are not user-scoped). endpoint is the
++// push service's unique URL (upsert key); p256dh/auth are the client's
++// encryption keys. The server NEVER stores notification content — each
++// push is encrypted per-subscription at send time and gone.
++// Rows are pruned when the push service answers 404/410 (subscription
++// gone — browser uninstalled, permission revoked, storage cleared).
++model PushSubscription {
++  id          String   @id @default(cuid())
++  endpoint    String   @unique
++  p256dh      String
++  auth        String
++  userAgent   String?
++  createdAt   DateTime @default(now())
++  lastSeenAt  DateTime @default(now())
+ }
+--- a/public/sw.js	1970-01-01 00:00:00.000000000 +0000
++++ b/public/sw.js	2026-11-03 11:59:16.593741356 +0000
+@@ -0,0 +1,88 @@
++/* MedPad panel — Service Worker (phase 4: browser Push)
++ *
++ * «اعلان‌های مهم ... در زمان بسته‌بودن مرورگر با Push + Service Worker»
++ *
++ * Responsibilities (deliberately dependency-free — no Workbox):
++ *  - push: decrypt+show the admin's system notification. DEDUP with the
++ *    open page: when a visible AND focused panel window exists, the page
++ *    already surfaced the realtime toast — the SW stays silent, so the
++ *    admin never sees the same event twice («عدم ارسال تکراری»).
++ *  - notificationclick: focus an existing panel window (or open one) and
++ *    land on the tab the notification is about («کلیک روی اعلان صفحهٔ
++ *    مربوط را باز کند») — the payload's url is /#tab=... which the
++ *    Dashboard reads on load.
++ *
++ * The notification payload (JSON from src/lib/push.ts):
++ *   { title, body, url, eventKey }   — eventKey doubles as the
++ *   notification tag, so a re-delivered push REPLACES its own toast
++ *   instead of stacking.
++ */
++const FALLBACK_TITLE = 'اعلان مدرپد'
++
++self.addEventListener('install', () => {
++  self.skipWaiting()
++})
++
++self.addEventListener('activate', (event) => {
++  event.waitUntil(self.clients.claim())
++})
++
++self.addEventListener('push', (event) => {
++  let data = {}
++  try {
++    data = event.data ? event.data.json() : {}
++  } catch (e) {
++    data = {}
++  }
++  const d = data || {}
++  const title = typeof d.title === 'string' && d.title ? d.title : FALLBACK_TITLE
++  const body = typeof d.body === 'string' ? d.body : ''
++  const url = typeof d.url === 'string' && d.url ? d.url : '/'
++  const tag = typeof d.eventKey === 'string' && d.eventKey ? d.eventKey : 'medpad'
++  const options = {
++    body: body,
++    dir: 'rtl',
++    lang: 'fa',
++    tag: tag,
++    renotify: false,
++    data: { url: url },
++  }
++  event.waitUntil(
++    (async () => {
++      const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
++      const hasVisibleFocused = wins.some((w) => w.visibilityState === 'visible' && w.focused)
++      if (!hasVisibleFocused) {
++        await self.registration.showNotification(title, options)
++      }
++    })(),
++  )
++})
++
++self.addEventListener('notificationclick', (event) => {
++  event.notification.close()
++  const url = (event.notification.data && event.notification.data.url) || '/'
++  event.waitUntil(
++    (async () => {
++      const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
++      for (const w of wins) {
++        if ('focus' in w) {
++          try {
++            await w.focus()
++          } catch (e) {
++            /* focus can reject for cross-origin leftovers — ignore */
++          }
++          if (url !== '/') {
++            try {
++              await w.navigate(url)
++            } catch (e) {
++              /* navigate can reject while the window is loading — the admin
++                 still lands on the panel; acceptable */
++            }
++          }
++          return
++        }
++      }
++      await self.clients.openWindow(url)
++    })(),
++  )
++})
+--- a/src/app/api/admin/settings/route.ts	2026-11-03 12:28:23.022643865 +0000
++++ b/src/app/api/admin/settings/route.ts	2026-11-03 11:58:37.742479811 +0000
+@@ -1,7 +1,8 @@
+ import { NextResponse } from 'next/server'
+-import { isAdmin } from '@/lib/auth'
++import { isAdmin, getConfig } from '@/lib/auth'
+ import { getAdminSettings, saveAdminSettings, getDefaultCity, setDefaultCity, type DefaultCitySetting } from '@/lib/settings'
+ import { writeAudit } from '@/lib/audit'
++import { db } from '@/lib/db'
+ 
+ /**
+  * phase 1 / task 2 (G-2): admin-configurable server settings.
+@@ -10,6 +11,16 @@
+  * package 9: `defaultCity` (string pair from the offline dataset) is
+  *   handled by the dedicated getDefaultCity/setDefaultCity helpers and
+  *   returned alongside the numeric settings.
++ * phase 4: the GET response grew three additive blocks for the unified
++ *   settings section (all optional for old consumers — the numeric
++ *   `settings` + `defaultCity` contract is unchanged):
++ *   - deviceAck: «اعمال‌شده روی دستگاه» — which reporting devices have
++ *     CONFIRMED they are running the current tracking policy (vs a saved
++ *     but not-yet-applied one), with the latest ack time.
++ *   - auditHistory: the last settings.update rows (old → new, time,
++ *     actor) powering the controlled-rollback list.
++ *   - push: browser-push state (master switch value is in settings.pushEnabled;
++ *     here: subscription count + VAPID availability).
+  * Admin-session only; every value is range-validated server-side and an
+  * invalid stored value falls back to the safe default on read.
+  */
+@@ -18,7 +29,50 @@
+     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
+   }
+   const [settings, defaultCity] = await Promise.all([getAdminSettings(), getDefaultCity()])
+-  return NextResponse.json({ ok: true, settings, defaultCity })
++  // phase 4 — saved-vs-applied: compare each device's acked config with the
++  // policy that is saved RIGHT NOW. A device that acked an older policy is
++  // «stale» (it will pick the new one on its next config fetch).
++  const ackRows = await db.trackStatus.findMany({
++    select: { appliedConfigJson: true, configAckAt: true, lastReportAt: true },
++  })
++  const currentPolicy = JSON.stringify({
++    enabled: settings.trackEnabled === 1,
++    moveIntervalSec: settings.trackMoveIntervalSec,
++    stillIntervalSec: settings.trackStillIntervalSec,
++    motionThresholdM: settings.trackMotionThresholdM,
++    maxAgeSec: settings.trackMaxAgeSec,
++  })
++  let ackMatched = 0
++  let ackStale = 0
++  let lastAckAt: string | null = null
++  for (const row of ackRows) {
++    if (!row.appliedConfigJson || !row.configAckAt) continue // pre-phase-4 app build
++    if (row.appliedConfigJson === currentPolicy) ackMatched++
++    else ackStale++
++    if (!lastAckAt || row.configAckAt.toISOString() > lastAckAt) {
++      lastAckAt = row.configAckAt.toISOString()
++    }
++  }
++  const deviceAck = { reporting: ackRows.length, matched: ackMatched, stale: ackStale, lastAckAt }
++  // phase 4 — audit history for the rollback list (settings.update only;
++  // the full trail stays in the AuditLog table / employees tab)
++  const auditRows = await db.auditLog.findMany({
++    where: { action: 'settings.update' },
++    orderBy: { createdAt: 'desc' },
++    take: 30,
++    select: { id: true, detail: true, actorId: true, createdAt: true },
++  })
++  const auditHistory = auditRows.map((r) => ({
++    id: r.id,
++    detail: r.detail ?? '',
++    actor: r.actorId,
++    createdAt: r.createdAt.toISOString(),
++  }))
++  // phase 4 — push infrastructure state
++  const pushCount = await db.pushSubscription.count()
++  const vapidPub = await getConfig('vapidPublicKey', '')
++  const push = { subscriptions: pushCount, vapidReady: vapidPub.length >= 60 }
++  return NextResponse.json({ ok: true, settings, defaultCity, deviceAck, auditHistory, push })
+ }
+ 
+ export async function PUT(req: Request) {
+@@ -33,33 +87,48 @@
+     // package 9 — string-valued defaultCity handled by its own validator
+     // (numeric machinery rejects non-numbers); removed from the numeric
+     // patch before saveAdminSettings sees it. undefined = key not sent.
++    const before = await getAdminSettings()
++    const beforeCity = await getDefaultCity()
+     let defaultCity: DefaultCitySetting | null | undefined = undefined
+     const numericPatch: Record<string, unknown> = { ...body }
+     if ('defaultCity' in body) {
+       defaultCity = await setDefaultCity(body.defaultCity)
+       delete numericPatch.defaultCity
+     }
+-    // mission item 6 (5ج): the audit row carries OLD → NEW for every
+-    // changed numeric key (the admin can reconstruct what a policy looked
+-    // before each change — e.g. which radius was in force yesterday).
+-    const before = await getAdminSettings()
+     const settings = Object.keys(numericPatch).length > 0 ? await saveAdminSettings(numericPatch) : await getAdminSettings()
+     if (defaultCity === undefined) defaultCity = await getDefaultCity()
++    // mission item 6 (5ج) + phase 4: the audit row carries OLD → NEW for
++    // every key that ACTUALLY changed (numeric keys by value comparison;
++    // defaultCity by pair comparison). Unchanged keys are not noise in the
++    // trail; the admin can reconstruct what a policy looked like before
++    // each change — and the rollback list in the settings section parses
++    // exactly this format.
++    const changed: string[] = []
++    for (const k of Object.keys(numericPatch)) {
++      const oldV = (before as unknown as Record<string, number>)[k]
++      if (oldV === undefined) continue
++      const newV = (settings as unknown as Record<string, number>)[k]
++      if (oldV === newV) continue // no real change -> no audit noise
++      changed.push(`${k}: ${String(oldV)} → ${String(newV)}`)
++    }
++    if ('defaultCity' in body) {
++      const same =
++        beforeCity && defaultCity
++          ? beforeCity.city === defaultCity.city && beforeCity.province === defaultCity.province
++          : !beforeCity && !defaultCity
++      if (!same) {
++        changed.push(
++          `defaultCity: ${beforeCity ? `${beforeCity.city} (${beforeCity.province})` : '—'} → ${defaultCity ? `${defaultCity.city} (${defaultCity.province})` : '—'}`,
++        )
++      }
++    }
+     // G-3: administrative audit trail (values only — never secrets)
+-    const changed = Object.entries(numericPatch)
+-      .filter(([k]) => (before as unknown as Record<string, number>)[k] !== undefined)
+-      .map(([k, v]) => {
+-        const oldV = (before as unknown as Record<string, number>)[k]
+-        return `${k}: ${String(oldV)} → ${String(typeof v === 'object' && v !== null ? JSON.stringify(v) : v)}`
+-      })
+     await writeAudit({
+       action: 'settings.update',
+       targetType: 'Config',
+       detail: changed.length > 0
+         ? `به‌روزرسانی تنظیمات: ${changed.join('، ')}`
+-        : `به‌روزرسانی تنظیمات: ${Object.entries(body)
+-            .map(([k, v]) => `${k}=${typeof v === 'object' && v !== null ? JSON.stringify(v) : v}`)
+-            .join('، ')}`,
++        : `به‌روزرسانی تنظیمات (بدون تغییر مقدار): ${Object.keys(body).join('، ')}`,
+     })
+     return NextResponse.json({ ok: true, settings, defaultCity })
+   } catch (e) {
+--- a/src/app/api/app/locations/route.ts	2026-11-03 12:28:23.019643846 +0000
++++ b/src/app/api/app/locations/route.ts	2026-11-03 11:59:33.647858387 +0000
+@@ -128,10 +128,44 @@
+     const serviceRunning = st.serviceRunning === true
+     const batteryUnrestricted = st.batteryUnrestricted === true
+     const appVersion = typeof st.appVersion === 'string' ? st.appVersion.slice(0, 40) : null
++    // phase 4 — «اعمال‌شده روی دستگاه»: the app reports the tracking
++    // config it has ACTUALLY adopted (from TrackingConfig.current — the
++    // same clamped values the server handed out). The panel compares it
++    // with the saved policy to show saved-vs-applied honestly. The payload
++    // is validated field-by-field with the same ranges; a garbage/absent
++    // object is simply ignored (pre-phase-4 app builds keep working).
++    let appliedConfigJson: string | null = null
++    const ac = st.appliedConfig
++    if (ac && typeof ac === 'object' && !Array.isArray(ac)) {
++      const c = ac as Record<string, unknown>
++      const num = (v: unknown, min: number, max: number): number | null => {
++        const n = typeof v === 'number' ? v : NaN
++        return Number.isFinite(n) && Math.trunc(n) === n && n >= min && n <= max ? Math.trunc(n) : null
++      }
++      const enabled = c.enabled === true || c.enabled === 1
++      const moveIntervalSec = num(c.moveIntervalSec, 15, 600)
++      const stillIntervalSec = num(c.stillIntervalSec, 60, 3600)
++      const motionThresholdM = num(c.motionThresholdM, 5, 500)
++      const maxAgeSec = num(c.maxAgeSec, 60, 21600)
++      if (moveIntervalSec !== null && stillIntervalSec !== null && motionThresholdM !== null && maxAgeSec !== null) {
++        // canonical field order — byte-comparable with the panel's
++        // current-policy JSON (stable «matched» verdicts, not formatting luck)
++        appliedConfigJson = JSON.stringify({
++          enabled,
++          moveIntervalSec,
++          stillIntervalSec,
++          motionThresholdM,
++          maxAgeSec,
++        })
++      }
++    }
++    const ackFields = appliedConfigJson
++      ? { appliedConfigJson, configAckAt: new Date() }
++      : {}
+     await db.trackStatus.upsert({
+       where: { employeeId: emp.id },
+-      update: { locationPermission, backgroundLocation, serviceRunning, batteryUnrestricted, appVersion, lastReportAt: new Date() },
+-      create: { employeeId: emp.id, locationPermission, backgroundLocation, serviceRunning, batteryUnrestricted, appVersion, lastReportAt: new Date() },
++      update: { locationPermission, backgroundLocation, serviceRunning, batteryUnrestricted, appVersion, lastReportAt: new Date(), ...ackFields },
++      create: { employeeId: emp.id, locationPermission, backgroundLocation, serviceRunning, batteryUnrestricted, appVersion, lastReportAt: new Date(), ...ackFields },
+     })
+   }
+ 
+--- a/src/app/api/panel/tracking/route.ts	2026-11-03 12:28:23.020643852 +0000
++++ b/src/app/api/panel/tracking/route.ts	2026-11-03 11:59:45.851942987 +0000
+@@ -53,6 +53,20 @@
+     if (!enabled) connection = 'disabled'
+     else if (status && now - status.lastReportAt.getTime() <= maxAgeMs) connection = 'sending'
+     else if (status) connection = 'stale-report'
++    // phase 4 — saved-vs-applied per device: compare the config the device
++    // CONFIRMED (appliedConfigJson) with the policy saved right now.
++    // 'no-ack' = this app build has not reported an ack yet.
++    let configApplied: 'matched' | 'stale' | 'no-ack' = 'no-ack'
++    if (status?.appliedConfigJson && status?.configAckAt) {
++      const currentPolicy = JSON.stringify({
++        enabled,
++        moveIntervalSec: settings.trackMoveIntervalSec,
++        stillIntervalSec: settings.trackStillIntervalSec,
++        motionThresholdM: settings.trackMotionThresholdM,
++        maxAgeSec: settings.trackMaxAgeSec,
++      })
++      configApplied = status.appliedConfigJson === currentPolicy ? 'matched' : 'stale'
++    }
+     return {
+       employee: e,
+       lastPing,
+@@ -61,6 +75,7 @@
+       status,
+       last24h,
+       total,
++      configApplied,
+     }
+   }))
+ 
+--- a/src/app/api/push/key/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/push/key/route.ts	2026-11-03 11:58:50.150562843 +0000
+@@ -0,0 +1,23 @@
++import { NextResponse } from 'next/server'
++import { isAdmin } from '@/lib/auth'
++import { getVapidKeys } from '@/lib/push'
++
++/**
++ * phase 4 — the browser needs the install's PUBLIC VAPID key to subscribe
++ * to Web Push (it is safe to expose — it only identifies the sender).
++ *
++ * GET /api/push/key (admin session) -> { ok, publicKey }
++ *
++ * The pair is generated at first boot by instrumentation.register() and
++ * stored in the Config table. If it is somehow missing (push bootstrap
++ * failed), the route says so honestly: { ok: true, publicKey: null } and
++ * the settings section shows push as unavailable instead of failing an
++ * opaque subscription attempt later.
++ */
++export async function GET() {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const keys = await getVapidKeys()
++  return NextResponse.json({ ok: true, publicKey: keys ? keys.publicKey : null })
++}
+--- a/src/app/api/push/subscribe/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/push/subscribe/route.ts	2026-11-03 11:59:01.217637409 +0000
+@@ -0,0 +1,73 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { isAdmin } from '@/lib/auth'
++
++/**
++ * phase 4 — panel-browser Push subscription management (admin session).
++ *
++ *   POST /api/push/subscribe     { endpoint, keys:{p256dh,auth} }
++ *        -> upsert by endpoint (one row per browser; re-subscribing after
++ *           a browser key rotation REPLACES the old row, never duplicates)
++ *   DELETE /api/push/subscribe   { endpoint }
++ *        -> remove this browser's subscription
++ *
++ * Validation is strict: endpoint must be an https URL (the Web Push
++ * protocol only speaks to push services over TLS), keys are non-empty
++ * base64url strings of sane length. The payload carries nothing else —
++ * no message content is ever stored server-side (each push is encrypted
++ * per subscription at send time).
++ */
++
++interface SubBody {
++  endpoint?: unknown
++  keys?: { p256dh?: unknown; auth?: unknown } | unknown
++}
++
++function validEndpoint(v: unknown): v is string {
++  if (typeof v !== 'string' || v.length < 16 || v.length > 2048) return false
++  try {
++    const u = new URL(v)
++    return u.protocol === 'https:'
++  } catch {
++    return false
++  }
++}
++
++function validB64(v: unknown, min: number, max: number): v is string {
++  return typeof v === 'string' && v.length >= min && v.length <= max && /^[A-Za-z0-9_-]+={0,2}$/.test(v)
++}
++
++export async function POST(req: Request) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const body = (await req.json().catch(() => null)) as SubBody | null
++  if (!body || !validEndpoint(body.endpoint)) {
++    return NextResponse.json({ ok: false, error: 'آدرس اشتراک نامعتبر است' }, { status: 400 })
++  }
++  const keys = body.keys as { p256dh?: unknown; auth?: unknown } | undefined
++  if (!keys || !validB64(keys.p256dh, 40, 512) || !validB64(keys.auth, 8, 512)) {
++    return NextResponse.json({ ok: false, error: 'کلیدهای اشتراک نامعتبر است' }, { status: 400 })
++  }
++  const userAgent = req.headers.get('user-agent')?.slice(0, 250) ?? null
++  await db.pushSubscription.upsert({
++    where: { endpoint: body.endpoint },
++    update: { p256dh: keys.p256dh, auth: keys.auth, userAgent, lastSeenAt: new Date() },
++    create: { endpoint: body.endpoint, p256dh: keys.p256dh, auth: keys.auth, userAgent },
++  })
++  const total = await db.pushSubscription.count()
++  return NextResponse.json({ ok: true, subscriptions: total })
++}
++
++export async function DELETE(req: Request) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const body = (await req.json().catch(() => null)) as SubBody | null
++  if (!body || typeof body.endpoint !== 'string' || body.endpoint.length < 16) {
++    return NextResponse.json({ ok: false, error: 'آدرس اشتراک نامعتبر است' }, { status: 400 })
++  }
++  await db.pushSubscription.deleteMany({ where: { endpoint: body.endpoint } })
++  const total = await db.pushSubscription.count()
++  return NextResponse.json({ ok: true, subscriptions: total })
++}
+--- a/src/components/panel/Dashboard.tsx	2026-11-03 12:28:23.035643948 +0000
++++ b/src/components/panel/Dashboard.tsx	2026-11-03 12:13:53.263411477 +0000
+@@ -3,18 +3,8 @@
+ import { useCallback, useEffect, useRef, useState } from 'react'
+ import { Badge } from '@/components/ui/badge'
+ import { Button } from '@/components/ui/button'
+-import { Input } from '@/components/ui/input'
+-import { Label } from '@/components/ui/label'
+ import { useToast } from '@/hooks/use-toast'
+ import {
+-  Dialog,
+-  DialogContent,
+-  DialogFooter,
+-  DialogHeader,
+-  DialogTitle,
+-} from '@/components/ui/dialog'
+-import {
+-  Activity,
+   ClipboardList,
+   CalendarCheck,
+   CalendarClock,
+@@ -34,7 +24,8 @@
+ // phase 3 — live tracking status + policy + route history
+ import TrackingTab from './TrackingTab'
+ import EventsTab from './EventsTab'
+-import CityPicker from './CityPicker'
++// phase 4 — the UNIFIED settings section (11 categories)
++import SettingsTab from './SettingsTab'
+ // package 5 / phase 5-C — the panel's notification center (persisted bell)
+ import NotificationsBell from './NotificationsBell'
+ // UI/UX redesign — theme switcher (Light / Dark / System, persisted)
+@@ -43,11 +34,10 @@
+ import {
+   browserNotify,
+   faDateTime,
+-  requestNotifyPermission,
+   useRealtimeSocket,
+ } from '@/lib/realtime'
+ 
+-type TabKey = 'overview' | 'plans' | 'checkins' | 'customers' | 'employees' | 'tracking' | 'events'
++type TabKey = 'overview' | 'plans' | 'checkins' | 'customers' | 'employees' | 'tracking' | 'events' | 'settings'
+ 
+ const TABS: { key: TabKey; label: string; short: string; icon: React.ComponentType<{ className?: string }> }[] = [
+   { key: 'overview', label: 'نمای کلی', short: 'نمای کلی', icon: RadioTower },
+@@ -59,6 +49,9 @@
+   // phase 3 — background location + live panel status
+   { key: 'tracking', label: 'وضعیت زنده', short: 'وضعیت زنده', icon: Navigation },
+   { key: 'events', label: 'گزارش رویدادها', short: 'رویدادها', icon: ClipboardList },
++  // phase 4 — the UNIFIED settings section (11 categories) replaces the
++  // old security dialog: every server policy lives in ONE place now
++  { key: 'settings', label: 'تنظیمات', short: 'تنظیمات', icon: Settings },
+ ]
+ 
+ export default function Dashboard({ cfg, onLogout }: { cfg: PanelConfigInfo; onLogout: () => void }) {
+@@ -68,20 +61,6 @@
+   const [connected, setConnected] = useState(false)
+   const [live, setLive] = useState<Checkin[]>([]) // realtime events stream
+   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+-  // G-2 (phase 1 / task 2): admin settings dialog (app-token TTL)
+-  // G-6: GPS accuracy tolerance + strict-radius mode
+-  const [showSettings, setShowSettings] = useState(false)
+-  const [ttlHours, setTtlHours] = useState('')
+-  const [gpsAcc, setGpsAcc] = useState('')
+-  // mission item 6 — INDEPENDENT check-in / check-out geofence policy
+-  const [chkGeoReq, setChkGeoReq] = useState(false)
+-  const [chkGeoRadius, setChkGeoRadius] = useState('0')
+-  const [cktGeoReq, setCktGeoReq] = useState(false)
+-  const [cktGeoRadius, setCktGeoRadius] = useState('0')
+-  const [savingSettings, setSavingSettings] = useState(false)
+-  // package 9 — default map city for the app (offline dataset pair)
+-  const [defCity, setDefCity] = useState('')
+-  const [defProvince, setDefProvince] = useState('')
+ 
+   const bumpRefresh = useCallback(() => {
+     if (refreshTimer.current) clearTimeout(refreshTimer.current)
+@@ -89,7 +68,18 @@
+   }, [])
+ 
+   useEffect(() => {
+-    requestNotifyPermission()
++    // phase 4 — notification click-through: the service worker opens (or
++    // navigates an open window to) /#tab=<key> — the tab the notification
++    // is about. Hash-only navigation does NOT reload the document, so the
++    // hash is applied on mount AND on every hashchange; unknown values are
++    // ignored (the current tab stays).
++    const applyHash = () => {
++      const m = window.location.hash.match(/^#tab=([a-z-]+)$/)
++      if (m && TABS.some((t) => t.key === m[1])) setTab(m[1] as TabKey)
++    }
++    applyHash()
++    window.addEventListener('hashchange', applyHash)
++    return () => window.removeEventListener('hashchange', applyHash)
+   }, [])
+ 
+   const onEvent = useCallback(
+@@ -129,55 +119,9 @@
+     onLogout()
+   }
+ 
+-  // G-2: load settings when the dialog opens
+-  useEffect(() => {
+-    if (!showSettings) return
+-    fetch('/api/admin/settings', { cache: 'no-store' })
+-      .then((r) => r.json())
+-      .then((d) => {
+-        if (!d.ok) return
+-        setTtlHours(String(d.settings.appTokenTtlHours))
+-        setGpsAcc(String(d.settings.gpsMaxAccuracyM))
+-        setChkGeoReq(d.settings.checkinGeoRequired === 1)
+-        setChkGeoRadius(String(d.settings.checkinGeoRadiusM ?? 0))
+-        setCktGeoReq(d.settings.checkoutGeoRequired === 1)
+-        setCktGeoRadius(String(d.settings.checkoutGeoRadiusM ?? 0))
+-        // package 9 — current default map city (null when unset)
+-        setDefCity(d.defaultCity?.city ?? '')
+-        setDefProvince(d.defaultCity?.province ?? '')
+-      })
+-      .catch(() => {})
+-  }, [showSettings])
+-
+-  async function saveSettings() {
+-    setSavingSettings(true)
+-    try {
+-      const res = await fetch('/api/admin/settings', {
+-        method: 'PUT',
+-        headers: { 'content-type': 'application/json' },
+-        body: JSON.stringify({
+-          appTokenTtlHours: Number(ttlHours),
+-          gpsMaxAccuracyM: Number(gpsAcc),
+-          // mission item 6 — the two policies are fully independent keys
+-          checkinGeoRequired: chkGeoReq ? 1 : 0,
+-          checkinGeoRadiusM: Number(chkGeoRadius) || 0,
+-          checkoutGeoRequired: cktGeoReq ? 1 : 0,
+-          checkoutGeoRadiusM: Number(cktGeoRadius) || 0,
+-          // legacy key mirrors the check-in choice (old clients read it)
+-          gpsStrictRadius: chkGeoReq ? 1 : 0,
+-          // package 9 — null clears; the pair is validated server-side
+-          defaultCity: defCity ? { city: defCity, province: defProvince } : null,
+-        }),
+-      })
+-      const data = await res.json()
+-      if (data.ok) {
+-        toast({ title: 'تنظیمات ذخیره شد' })
+-        setShowSettings(false)
+-      } else toast({ title: 'خطا', description: data.error, variant: 'destructive' })
+-    } finally {
+-      setSavingSettings(false)
+-    }
+-  }
++  // phase 4 — the old «تنظیمات امنیتی» dialog (G-2 + mission item 6 +
++  // package 9 defaultCity) moved to the unified SettingsTab: same
++  // /api/admin/settings route, same validation, same audit — one place.
+ 
+   const activeTab = TABS.find((t) => t.key === tab)
+ 
+@@ -266,7 +210,9 @@
+               <Button variant="ghost" size="icon" title="مرکز دانلود" onClick={() => window.open('/downloads.html', '_blank')}>
+                 <Download className="h-4 w-4" />
+               </Button>
+-              <Button variant="ghost" size="icon" title="تنظیمات" onClick={() => setShowSettings(true)}>
++              {/* phase 4 — the gear now opens the unified settings TAB (11
++                  categories) instead of the old security dialog. */}
++              <Button variant="ghost" size="icon" title="تنظیمات" onClick={() => setTab('settings')} data-testid="open-settings-tab">
+                 <Settings className="h-4 w-4" />
+               </Button>
+               {/* package 5 / phase 5-C — persisted notification center: list +
+@@ -274,9 +220,11 @@
+                   events trigger a refetch (H4); expired sessions surface
+                   explicitly (H3). */}
+               <NotificationsBell refreshSignal={refreshKey} onSessionExpired={logout} />
+-              <Button variant="ghost" size="icon" title="اعلان‌های مرورگر" onClick={requestNotifyPermission}>
+-                <Activity className="h-4 w-4" />
+-              </Button>
++              {/* phase 4 — the duplicate «اعلان‌های مرورگر» header icon is
++                  GONE (comprehensive instruction: «حذف آیکون‌های اعلان
++                  تکراری/بدون کارکرد»). Browser-permission control moved to
++                  the explicit Push setup box in Settings → اعلان‌ها; the
++                  permission is no longer requested on every page load. */}
+               {/* theme switcher — hidden on phones (the sidebar has it on
+                   desktop; mobile gets it in the tabs row) */}
+               <span className="hidden lg:flex">
+@@ -324,6 +272,7 @@
+             {tab === 'employees' && <EmployeesTab refreshKey={refreshKey} />}
+             {tab === 'tracking' && <TrackingTab refreshKey={refreshKey} />}
+             {tab === 'events' && <EventsTab refreshKey={refreshKey} />}
++            {tab === 'settings' && <SettingsTab cfg={cfg} />}
+           </div>
+         </main>
+ 
+@@ -332,127 +281,6 @@
+         </footer>
+       </div>
+ 
+-      {/* G-2: admin settings dialog (app-token TTL) */}
+-      <Dialog open={showSettings} onOpenChange={setShowSettings}>
+-        <DialogContent dir="rtl" className="sm:max-w-sm">
+-          <DialogHeader>
+-            <DialogTitle>تنظیمات امنیتی</DialogTitle>
+-          </DialogHeader>
+-          <div className="grid gap-2">
+-            <Label>انقضای نشست اپ (ساعت)</Label>
+-            <Input
+-              dir="ltr"
+-              className="text-left"
+-              inputMode="numeric"
+-              value={ttlHours}
+-              onChange={(e) => setTtlHours(e.target.value)}
+-            />
+-            <p className="text-xs text-muted-foreground">
+-              نشست‌های جدید اپ بعد از این مدت منقضی می‌شوند و کاربر باید دوباره وارد شود.
+-              ۰ = بدون انقضا · مجاز: ۰ تا ۸۷۶۰ (یک سال). تغییر این مقدار روی نشست‌های فعلی اثر
+-              گذشته ندارد.
+-            </p>
+-          </div>
+-          <div className="grid gap-2 border-t pt-3">
+-            <Label>حداکثر خطای قابل‌قبول GPS (متر)</Label>
+-            <Input
+-              dir="ltr"
+-              className="text-left"
+-              inputMode="numeric"
+-              value={gpsAcc}
+-              onChange={(e) => setGpsAcc(e.target.value)}
+-            />
+-            <p className="text-xs text-muted-foreground">
+-              اگر دقت گزارش‌شدهٔ دستگاه بدتر از این مقدار باشد، موقعیت «ثبت‌نشده» در نظر گرفته
+-              می‌شود (خود رویداد ثبت می‌ماند). ۰ = عدم فیلتر بر اساس دقت · مجاز: ۰ تا ۵۰۰.
+-            </p>
+-          </div>
+-          {/* mission item 6 — two INDEPENDENT geofence blocks. Changing the
+-              check-in radius/toggle never touches check-out (separate keys,
+-              separate inputs, separate save values). 0 meters = use each
+-              customer's own radius (per-customer mechanism, default 150 m). */}
+-          <div className="grid gap-2 border-t pt-3" data-testid="geo-policy-checkin">
+-            <Label>الزام فاصله مکانی — چک‌این</Label>
+-            <div className="flex items-center gap-2">
+-              <input
+-                id="chkGeoReq"
+-                type="checkbox"
+-                className="h-4 w-4"
+-                checked={chkGeoReq}
+-                onChange={(e) => setChkGeoReq(e.target.checked)}
+-              />
+-              <Label htmlFor="chkGeoReq" className="cursor-pointer">
+-                رد کردن چک‌این خارج از شعاع مجاز
+-              </Label>
+-            </div>
+-            <div className="flex items-center gap-2">
+-              <Label className="shrink-0">شعاع مجاز (متر)</Label>
+-              <Input
+-                dir="ltr"
+-                className="w-28 text-left"
+-                inputMode="numeric"
+-                data-testid="geo-checkin-radius"
+-                value={chkGeoRadius}
+-                onChange={(e) => setChkGeoRadius(e.target.value)}
+-              />
+-            </div>
+-            <p className="text-xs text-muted-foreground">
+-              ۰ = شعاع خودِ مشتری (پیش‌فرض ۱۵۰ متر، از کارت مشتری) · مجاز: ۰ تا ۵۰۰۰.
+-              وقتی الزام خاموش است، چک‌این ثبت می‌شود و در گزارش سرور «بدون کنترل فاصله»
+-              علامت می‌خورد؛ فاصلهٔ اندازه‌گیری‌شده نیز در صورت وجود موقعیت معتبر ذخیره
+-              می‌شود.
+-            </p>
+-          </div>
+-          <div className="grid gap-2 border-t pt-3" data-testid="geo-policy-checkout">
+-            <Label>الزام فاصله مکانی — چک‌اوت</Label>
+-            <div className="flex items-center gap-2">
+-              <input
+-                id="cktGeoReq"
+-                type="checkbox"
+-                className="h-4 w-4"
+-                checked={cktGeoReq}
+-                onChange={(e) => setCktGeoReq(e.target.checked)}
+-              />
+-              <Label htmlFor="cktGeoReq" className="cursor-pointer">
+-                رد کردن چک‌اوت خارج از شعاع مجاز
+-              </Label>
+-            </div>
+-            <div className="flex items-center gap-2">
+-              <Label className="shrink-0">شعاع مجاز (متر)</Label>
+-              <Input
+-                dir="ltr"
+-                className="w-28 text-left"
+-                inputMode="numeric"
+-                data-testid="geo-checkout-radius"
+-                value={cktGeoRadius}
+-                onChange={(e) => setCktGeoRadius(e.target.value)}
+-              />
+-            </div>
+-            <p className="text-xs text-muted-foreground">
+-              مستقل از چک‌این. ۰ = شعاع خودِ مشتری · مجاز: ۰ تا ۵۰۰۰. علامت‌گذاری و
+-              گزارش «بدون کنترل فاصله» دقیقاً مثل چک‌این است.
+-            </p>
+-          </div>
+-          {/* package 9 — default map city (app opens its map here when the
+-              rep has no customers yet; coordinates are centering defaults) */}
+-          <div className="grid gap-2 border-t pt-3">
+-            <Label>شهر پیش‌فرض نقشهٔ اپ</Label>
+-            <CityPicker city={defCity} province={defProvince} onChange={(c, p) => { setDefCity(c); setDefProvince(p) }} />
+-            <p className="text-xs text-muted-foreground">
+-              اگر مدرپ هنوز مشتری‌ای نداشته باشد، نقشهٔ اپ روی این شهر باز می‌شود (مختصات
+-              تقریبی مرکز شهر — فقط برای مرکزشدن نقشه). خالی = پیش‌فرض تهران.
+-            </p>
+-          </div>
+-          <DialogFooter>
+-            <Button variant="outline" onClick={() => setShowSettings(false)}>
+-              انصراف
+-            </Button>
+-            <Button className="bg-primary hover:bg-primary/90" onClick={saveSettings} disabled={savingSettings}>
+-              ذخیره
+-            </Button>
+-          </DialogFooter>
+-        </DialogContent>
+-      </Dialog>
+     </div>
+   )
+ }
+--- a/src/components/panel/SettingsTab.tsx	1970-01-01 00:00:00.000000000 +0000
++++ b/src/components/panel/SettingsTab.tsx	2026-11-03 12:08:22.298257844 +0000
+@@ -0,0 +1,659 @@
++'use client'
++
++/**
++ * phase 4 — the UNIFIED settings section (11 pre-defined categories).
++ *
++ * Structure comes from lib/settings-meta.ts (the same module the server
++ * re-exports) — a new setting lands in its category by construction.
++ *
++ * Design rules from the comprehensive instruction, all implemented here:
++ *  - «سرور مرجع نهایی است» — every value shown/saved goes through
++ *    /api/admin/settings (server-side range validation + audit).
++ *  - «تفکیک تنظیمات محلی کاربر از سیاست مدیر» — browser-local settings
++ *    (theme, notification permission) render in a visually separate
++ *    «تنظیمات این مرورگر» card; they never mix with server policy.
++ *  - «تفکیک ذخیره‌شده از اعمال‌شده روی دستگاه» — the tracking category
++ *    shows the device-ack summary (how many reporting devices CONFIRMED
++ *    they run the saved policy; last ack time) — a save is never implied
++ *    to have reached the field.
++ *  - «حسابرسی تغییرات مهم» — the change-history list (old → new, time,
++ *    actor) with a CONTROLLED ROLLBACK button per numeric change: it
++ *    PUTs the old value back through the same validated+audited route.
++ *  - «خطاها دیده شوند» — validation errors from the server render in
++ *    Persian next to the form; nothing fails silently.
++ *  - «حذف آیکون‌های تکراری/بدون کارکرد» — browser-permission control
++ *    lives HERE now (explicit user action), not as a stray header icon.
++ */
++
++import { useCallback, useEffect, useMemo, useState } from 'react'
++import { Badge } from '@/components/ui/badge'
++import { Button } from '@/components/ui/button'
++import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
++import { Input } from '@/components/ui/input'
++import { Label } from '@/components/ui/label'
++import { Switch } from '@/components/ui/switch'
++import { useToast } from '@/hooks/use-toast'
++import { faDateTime } from '@/lib/realtime'
++import { SETTINGS_CATEGORIES, SETTING_FIELDS } from '@/lib/settings-meta'
++import CityPicker from './CityPicker'
++import ThemeToggle from './ThemeToggle'
++import type { PanelConfigInfo } from '@/lib/types'
++import {
++  Bell,
++  BellRing,
++  CheckCircle2,
++  Clock,
++  Database,
++  DoorOpen,
++  FileClock,
++  Globe2,
++  History,
++  Info,
++  MapPin,
++  Navigation,
++  RefreshCw,
++  Save,
++  ShieldCheck,
++  Smartphone,
++  TestTube2,
++  Trash2,
++} from 'lucide-react'
++
++const CATEGORY_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
++  general: Info,
++  application: Smartphone,
++  tracking: Navigation,
++  notifications: Bell,
++  'customers-geo': MapPin,
++  'visit-plan': FileClock,
++  assignment: DoorOpen,
++  sync: RefreshCw,
++  diagnostics: TestTube2,
++  security: ShieldCheck,
++  retention: Database,
++}
++
++interface AdminSettingsPayload {
++  ok: boolean
++  settings: Record<string, number>
++  defaultCity: { city: string; province: string } | null
++  deviceAck?: { reporting: number; matched: number; stale: number; lastAckAt: string | null }
++  auditHistory?: { id: string; detail: string; actor: string; createdAt: string }[]
++  push?: { subscriptions: number; vapidReady: boolean }
++}
++
++/** parse «key: old → new» pairs out of an audit detail line */
++function parseAuditChanges(detail: string): { key: string; oldV: string; newV: string }[] {
++  const out: { key: string; oldV: string; newV: string }[] = []
++  const body = detail.replace(/^به‌روزرسانی تنظیمات:?(\s*\(بدون تغییر مقدار\))?:?\s*/, '')
++  for (const part of body.split('،')) {
++    const m = part.trim().match(/^([A-Za-z0-9_]+):\s*(.+?)\s*→\s*(.+)$/)
++    if (m) out.push({ key: m[1], oldV: m[2], newV: m[3] })
++  }
++  return out
++}
++
++export default function SettingsTab({ cfg }: { cfg: PanelConfigInfo }) {
++  const { toast } = useToast()
++  const [loading, setLoading] = useState(true)
++  const [saving, setSaving] = useState(false)
++  const [loadError, setLoadError] = useState('')
++  const [saveError, setSaveError] = useState('')
++  const [data, setData] = useState<AdminSettingsPayload | null>(null)
++  // editable numeric drafts (string inputs; '' while loading)
++  const [drafts, setDrafts] = useState<Record<string, string>>({})
++  const [defCity, setDefCity] = useState('')
++  const [defProvince, setDefProvince] = useState('')
++  // push setup state (browser-local, but coordinated with the server)
++  const [pushBusy, setPushBusy] = useState(false)
++  const [pushState, setPushState] = useState<'unsupported' | 'insecure' | 'denied' | 'prompt' | 'granted'>('prompt')
++  const [pushSubscribed, setPushSubscribed] = useState(false)
++
++  const load = useCallback(async () => {
++    setLoading(true)
++    setLoadError('')
++    try {
++      const res = await fetch('/api/admin/settings', { cache: 'no-store' })
++      if (res.status === 401) {
++        setLoadError('نشست منقضی شده است — دوباره وارد شوید.')
++        setData(null)
++        return
++      }
++      const j = (await res.json()) as AdminSettingsPayload
++      if (!j.ok) throw new Error('failed')
++      setData(j)
++      const d: Record<string, string> = {}
++      for (const [k, v] of Object.entries(j.settings)) d[k] = String(v)
++      setDrafts(d)
++      setDefCity(j.defaultCity?.city ?? '')
++      setDefProvince(j.defaultCity?.province ?? '')
++    } catch {
++      setLoadError('بارگذاری تنظیمات ناموفق بود.')
++    } finally {
++      setLoading(false)
++    }
++  }, [])
++
++  useEffect(() => {
++    load()
++  }, [load])
++
++  // push availability probe (browser capability — local, never server state)
++  useEffect(() => {
++    const secure = typeof window !== 'undefined' && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')
++    const capable = typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window
++    if (!capable) setPushState('unsupported')
++    else if (!secure) setPushState('insecure')
++    else setPushState(Notification.permission === 'granted' ? 'granted' : Notification.permission === 'denied' ? 'denied' : 'prompt')
++    // existing subscription for THIS browser
++    if (capable && secure) {
++      navigator.serviceWorker.ready
++        .then((reg) => reg.pushManager.getSubscription())
++        .then((sub) => setPushSubscribed(!!sub))
++        .catch(() => {})
++    }
++  }, [])
++
++  const dirty = useMemo(() => {
++    if (!data) return false
++    for (const [k, v] of Object.entries(drafts)) {
++      if (String(data.settings[k] ?? '') !== v) return true
++    }
++    if ((data.defaultCity?.city ?? '') !== defCity) return true
++    if ((data.defaultCity?.province ?? '') !== defProvince) return true
++    return false
++  }, [data, drafts, defCity, defProvince])
++
++  /** PUT an explicit patch (used by BOTH the save button — full patch —
++   *  and the controlled rollback — a single key). The server validates,
++   *  persists and audits; the response refreshes the local state so the
++   *  form never shows stale values after a save. */
++  const savePatch = useCallback(
++    async (patch: Record<string, unknown>) => {
++      if (!data) return
++      setSaving(true)
++      setSaveError('')
++      try {
++        const res = await fetch('/api/admin/settings', {
++          method: 'PUT',
++          headers: { 'content-type': 'application/json' },
++          body: JSON.stringify(patch),
++        })
++        const j = (await res.json()) as AdminSettingsPayload & { error?: string }
++        if (!res.ok || !j.ok) {
++          setSaveError(j.error || 'ذخیره ناموفق بود.')
++          toast({ title: 'خطا در ذخیرهٔ تنظیمات', description: j.error || undefined, variant: 'destructive' })
++          return
++        }
++        setData(j)
++        const d: Record<string, string> = {}
++        for (const [k, v] of Object.entries(j.settings)) d[k] = String(v)
++        setDrafts(d)
++        toast({ title: 'تنظیمات ذخیره شد' })
++      } catch {
++        setSaveError('ارتباط با سرور برقرار نشد.')
++      } finally {
++        setSaving(false)
++      }
++    },
++    [data, toast],
++  )
++
++  const save = useCallback(() => {
++    if (!data) return
++    const patch: Record<string, unknown> = {}
++    for (const [k, v] of Object.entries(drafts)) {
++      if (k === 'defaultCity') continue
++      patch[k] = v === '' ? null : Number(v)
++    }
++    patch.defaultCity = defCity ? { city: defCity, province: defProvince } : null
++    return savePatch(patch)
++  }, [data, drafts, defCity, defProvince, savePatch])
++
++  /** controlled rollback: PUT ONLY the old value of one audited numeric
++   *  key — nothing else is touched, and the rollback itself goes through
++   *  the same validation + audit (it appears in the history right away). */
++  const rollbackKey = useCallback(
++    async (key: string, oldV: string) => {
++      await savePatch({ [key]: Number(oldV) })
++    },
++    [savePatch],
++  )
++
++  // ── push subscribe / unsubscribe (browser + server) ────────────────
++  const urlBase64ToUint8Array = (b64: string): Uint8Array => {
++    const padding = '='.repeat((4 - (b64.length % 4)) % 4)
++    const base64 = (b64 + padding).replace(/-/g, '+').replace(/_/g, '/')
++    const raw = atob(base64)
++    const out = new Uint8Array(raw.length)
++    for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i)
++    return out
++  }
++
++  const enablePush = useCallback(async () => {
++    setPushBusy(true)
++    try {
++      const perm = await Notification.requestPermission()
++      if (perm !== 'granted') {
++        setPushState('denied')
++        toast({ title: 'مجوز اعلان داده نشد', description: 'مرکز اعلان درون پنل همچنان کار می‌کند.' })
++        return
++      }
++      setPushState('granted')
++      const keyRes = await fetch('/api/push/key', { cache: 'no-store' })
++      const keyJ = (await keyRes.json()) as { ok: boolean; publicKey: string | null }
++      if (!keyJ.ok || !keyJ.publicKey) {
++        toast({ title: 'کلید Push آماده نیست', description: 'سرور را یک بار ری‌استارت کنید و دوباره تلاش کنید.', variant: 'destructive' })
++        return
++      }
++      const reg = await navigator.serviceWorker.register('/sw.js')
++      await navigator.serviceWorker.ready
++      const sub = await reg.pushManager.subscribe({
++        userVisibleOnly: true,
++        applicationServerKey: urlBase64ToUint8Array(keyJ.publicKey) as unknown as BufferSource,
++      })
++      const jsub = sub.toJSON() as { endpoint?: string; keys?: { p256dh?: string; auth?: string } }
++      const res = await fetch('/api/push/subscribe', {
++        method: 'POST',
++        headers: { 'content-type': 'application/json' },
++        body: JSON.stringify({ endpoint: jsub.endpoint, keys: jsub.keys }),
++      })
++      if (!res.ok) throw new Error('subscribe failed')
++      setPushSubscribed(true)
++      toast({ title: 'اعلان‌های Push فعال شد', description: 'حتی با بسته‌بودن مرورگر، اعلان‌های مهم می‌رسند.' })
++    } catch {
++      toast({ title: 'فعال‌سازی Push ناموفق بود', variant: 'destructive' })
++    } finally {
++      setPushBusy(false)
++    }
++  }, [toast])
++
++  const disablePush = useCallback(async () => {
++    setPushBusy(true)
++    try {
++      const reg = await navigator.serviceWorker.ready
++      const sub = await reg.pushManager.getSubscription()
++      if (sub) {
++        const jsub = sub.toJSON() as { endpoint?: string }
++        await fetch('/api/push/subscribe', {
++          method: 'DELETE',
++          headers: { 'content-type': 'application/json' },
++          body: JSON.stringify({ endpoint: jsub.endpoint }),
++        })
++        await sub.unsubscribe()
++      }
++      setPushSubscribed(false)
++      toast({ title: 'اعلان Push این مرورگر خاموش شد' })
++    } catch {
++      toast({ title: 'قطع Push ناموفق بود', variant: 'destructive' })
++    } finally {
++      setPushBusy(false)
++    }
++  }, [toast])
++
++  if (loading) {
++    return (
++      <div className="flex items-center justify-center py-16 text-muted-foreground" data-testid="settings-loading">
++        در حال بارگذاری تنظیمات…
++      </div>
++    )
++  }
++  if (loadError && !data) {
++    return (
++      <div className="mx-auto max-w-lg py-16 text-center">
++        <p className="mb-4 text-destructive">{loadError}</p>
++        <Button variant="outline" onClick={load}>
++          تلاش مجدد
++        </Button>
++      </div>
++    )
++  }
++  if (!data) return null
++
++  const renderField = (key: string) => {
++    if (key === 'defaultCity') {
++      return (
++        <div className="grid gap-2" data-testid="settings-field-defaultCity">
++          <Label>شهر پیش‌فرض نقشهٔ اپ</Label>
++          <CityPicker city={defCity} province={defProvince} onChange={(c, p) => { setDefCity(c); setDefProvince(p) }} />
++          <p className="text-xs text-muted-foreground">
++            اگر مدرپ هنوز مشتری‌ای نداشته باشد، نقشهٔ اپ روی این شهر باز می‌شود. خالی = پیش‌فرض تهران.
++          </p>
++        </div>
++      )
++    }
++    const meta = SETTING_FIELDS[key]
++    if (!meta) return null
++    if (meta.kind === 'toggle') {
++      return (
++        <div className="flex items-start justify-between gap-3" data-testid={`settings-field-${key}`}>
++          <div className="grid gap-1">
++            <Label className="cursor-pointer" htmlFor={`sw-${key}`}>
++              {meta.label}
++            </Label>
++            <p className="text-xs text-muted-foreground">{meta.desc}</p>
++          </div>
++          <Switch
++            id={`sw-${key}`}
++            checked={drafts[key] === '1'}
++            onCheckedChange={(v) => setDrafts((d) => ({ ...d, [key]: v ? '1' : '0' }))}
++          />
++        </div>
++      )
++    }
++    return (
++      <div className="grid gap-2" data-testid={`settings-field-${key}`}>
++        <Label>{meta.label}</Label>
++        <div className="flex items-center gap-2">
++          <Input
++            dir="ltr"
++            className="w-32 text-left"
++            inputMode="numeric"
++            data-testid={`settings-input-${key}`}
++            value={drafts[key] ?? ''}
++            onChange={(e) => setDrafts((d) => ({ ...d, [key]: e.target.value }))}
++          />
++          {meta.unit && <span className="text-xs text-muted-foreground">{meta.unit}</span>}
++        </div>
++        <p className="text-xs text-muted-foreground">
++          {meta.desc} {meta.min !== undefined && meta.max !== undefined ? `· مجاز: ${meta.min} تا ${meta.max}` : ''}
++        </p>
++      </div>
++    )
++  }
++
++  const ack = data.deviceAck
++  const pushInfo = data.push
++
++  return (
++    <div className="grid gap-4 lg:grid-cols-[220px_1fr]" data-testid="settings-root">
++      {/* category nav — sticky rail on desktop, chips on mobile */}
++      <nav className="hidden lg:block">
++        <div className="sticky top-4 grid gap-1" data-testid="settings-nav">
++          {SETTINGS_CATEGORIES.map((c) => {
++            const Icon = CATEGORY_ICONS[c.key] ?? Info
++            return (
++              <a
++                key={c.key}
++                href={`#settings-cat-${c.key}`}
++                className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
++              >
++                <Icon className="h-4 w-4" />
++                {c.title}
++              </a>
++            )
++          })}
++        </div>
++      </nav>
++      <div className="flex gap-1.5 overflow-x-auto lg:hidden" data-testid="settings-nav-mobile">
++        {SETTINGS_CATEGORIES.map((c) => (
++          <a
++            key={c.key}
++            href={`#settings-cat-${c.key}`}
++            className="flex shrink-0 items-center gap-1.5 rounded-full bg-card px-3 py-1.5 text-sm text-muted-foreground"
++          >
++            {c.title}
++          </a>
++        ))}
++      </div>
++
++      <div className="grid min-w-0 gap-4">
++        {saveError && (
++          <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive" data-testid="settings-error">
++            {saveError}
++          </div>
++        )}
++
++        {/* local-browser settings — VISUALLY SEPARATE from server policy */}
++        <Card className="border-dashed" data-testid="settings-local-browser">
++          <CardHeader className="pb-2">
++            <CardTitle className="flex items-center gap-2 text-base">
++              <Globe2 className="h-4 w-4" />
++              تنظیمات این مرورگر
++            </CardTitle>
++          </CardHeader>
++          <CardContent className="grid gap-3 text-sm">
++            <p className="text-xs text-muted-foreground">
++              این تنظیمات فقط روی همین مرورگر شما است و با سیاست‌های سرور (بقیهٔ این صفحه) جدا و مستقل مدیریت می‌شود.
++            </p>
++            <div className="flex flex-wrap items-center justify-between gap-2">
++              <div>
++                <div className="font-medium">ظاهر پنل (روشن/تیره/سیستمی)</div>
++                <div className="text-xs text-muted-foreground">فقط نمایش همین مرورگر — روی اپ و سایر مرورگرها اثری ندارد.</div>
++              </div>
++              <ThemeToggle />
++            </div>
++          </CardContent>
++        </Card>
++
++        {SETTINGS_CATEGORIES.map((cat) => {
++          const Icon = CATEGORY_ICONS[cat.key] ?? Info
++          return (
++            <Card key={cat.key} id={`settings-cat-${cat.key}`} className="scroll-mt-20" data-testid={`settings-cat-${cat.key}`}>
++              <CardHeader className="pb-2">
++                <CardTitle className="flex items-center gap-2 text-base">
++                  <Icon className="h-4 w-4" />
++                  {cat.title}
++                </CardTitle>
++                <p className="text-xs text-muted-foreground">{cat.hint}</p>
++              </CardHeader>
++              <CardContent className="grid gap-4">
++                {/* category-specific read-only blocks */}
++                {cat.key === 'general' && (
++                  <div className="grid gap-2 text-sm" data-testid="settings-general-info">
++                    <div className="flex flex-wrap items-center justify-between gap-2">
++                      <span className="text-muted-foreground">نسخهٔ پنل</span>
++                      <Badge variant="secondary" dir="ltr">{cfg.panelVersion}</Badge>
++                    </div>
++                    <div className="flex flex-wrap items-center justify-between gap-2">
++                      <span className="text-muted-foreground">نسخهٔ اپ اندروید</span>
++                      <Badge variant="secondary" dir="ltr">{cfg.apkVersion}</Badge>
++                    </div>
++                    <div className="flex flex-wrap items-center justify-between gap-2">
++                      <span className="text-muted-foreground">حالت اتصال سوکت</span>
++                      <Badge variant="secondary" dir="ltr">{cfg.socketMode === 'direct' ? 'direct :3003' : 'gateway (هم‌مبدأ)'}</Badge>
++                    </div>
++                    <p className="text-xs text-muted-foreground">
++                      سرور مرجع نهایی همهٔ تنظیمات است؛ اپ فقط تنظیمات مجاز را از سرور دریافت می‌کند و آفلین آخرین تنظیم معتبر را نگه می‌دارد.
++                    </p>
++                  </div>
++                )}
++
++                {cat.key === 'tracking' && ack && (
++                  <div
++                    className={`rounded-md border px-3 py-2 text-xs ${ack.reporting === 0 ? 'border-muted bg-muted/40 text-muted-foreground' : ack.stale > 0 ? 'border-warning/40 bg-warning/10 text-foreground' : 'border-success/30 bg-success/10 text-foreground'}`}
++                    data-testid="settings-device-ack"
++                  >
++                    <div className="mb-1 flex items-center gap-1.5 font-medium">
++                      {ack.reporting > 0 && ack.stale === 0 ? <CheckCircle2 className="h-3.5 w-3.5 text-success" /> : <Clock className="h-3.5 w-3.5 text-warning" />}
++                      وضعیت اعمال روی دستگاه‌ها
++                    </div>
++                    {ack.reporting === 0 ? (
++                      <span>هنوز هیچ دستگاهی گزارش وضعیت نداده است — پس از اولین آپلود موقعیت، وضعیت اعمال اینجا نمایش داده می‌شود.</span>
++                    ) : (
++                      <>
++                        {ack.matched} دستگاه سیاست ذخیره‌شدهٔ فعلی را تأیید کرده
++                        {ack.stale > 0 && <> · {ack.stale} دستگاه هنوز روی سیاست قدیمی‌تر است (با اولین همگام‌سازی بعدی به‌روز می‌شود)</>}
++                        {ack.lastAckAt && <> · آخرین تأیید: {faDateTime(ack.lastAckAt)}</>}
++                      </>
++                    )}
++                  </div>
++                )}
++
++                {cat.key === 'notifications' && (
++                  <div className="grid gap-3 rounded-md border p-3" data-testid="settings-push-box">
++                    <div className="flex flex-wrap items-center justify-between gap-2">
++                      <div>
++                        <div className="font-medium">اعلان سیستمی این مرورگر</div>
++                        <div className="text-xs text-muted-foreground">
++                          برای اعلان‌های مهم مدیر — حتی وقتی مرورگر بسته است.
++                        </div>
++                      </div>
++                      {pushState === 'unsupported' || pushState === 'insecure' ? (
++                        <Badge variant="secondary">
++                          {pushState === 'unsupported' ? 'مرورگر پشتیبانی نمی‌کند' : 'نیازمند HTTPS'}
++                        </Badge>
++                      ) : pushSubscribed ? (
++                        <Button variant="outline" size="sm" onClick={disablePush} disabled={pushBusy}>
++                          <Trash2 className="ml-1 h-3.5 w-3.5" />
++                          قطع اعلان این مرورگر
++                        </Button>
++                      ) : (
++                        <Button size="sm" onClick={enablePush} disabled={pushBusy || pushState === 'denied'}>
++                          <BellRing className="ml-1 h-3.5 w-3.5" />
++                          فعال‌سازی اعلان Push
++                        </Button>
++                      )}
++                    </div>
++                    <div className="text-xs text-muted-foreground">
++                      {pushState === 'granted'
++                        ? pushSubscribed
++                          ? 'فعال — اعلان‌ها با کلیک، صفحهٔ مربوط را باز می‌کنند؛ وقتی پنل باز و در حالت تمرکز است، اعلان تکراری نمایش داده نمی‌شود.'
++                          : 'مجوز اعلان داده شده؛ دکمهٔ بالا اشتراک Push را فعال می‌کند.'
++                        : pushState === 'denied'
++                          ? 'مجوز اعلان در تنظیمات مرورگر رد شده است — از تنظیمات خود مرورگر مجوز را بدهید و دوباره تلاش کنید. مرکز اعلان درون پنل بدون این مجوز هم کامل کار می‌کند.'
++                          : pushState === 'insecure'
++                            ? 'Push فقط روی HTTPS (یا localhost) کار می‌کند. مرکز اعلان درون پنل همچنان کامل کار می‌کند.'
++                            : pushState === 'unsupported'
++                              ? 'این مرورگر Push را پشتیبانی نمی‌کند. مرکز اعلان درون پنل همچنان کامل کار می‌کند.'
++                              : 'با فعال‌سازی، مجوز اعلان از شما پرسیده می‌شود.'}
++                      {pushInfo && (
++                        <>
++                          {' '}
++                          · سرور: {pushInfo.subscriptions} اشتراک فعال {pushInfo.vapidReady ? '' : '· کلید Push هنوز آماده نیست (ری‌استارت سرور)'}
++                        </>
++                      )}
++                    </div>
++                  </div>
++                )}
++
++                {cat.key === 'customers-geo' && (
++                  <ul className="grid gap-1.5 text-sm text-muted-foreground" data-testid="settings-customers-geo-info">
++                    <li>· ثبت مشتری تکراری (حتی با املای متفاوت) به‌صورت خطای ۴۰۹ گزارش می‌شود؛ ثبت نهایی فقط با تأیید صریح مدیر انجام می‌شود.</li>
++                    <li>· شهر و استان هنگام ثبت از دیتاست آفلاین ایران انتخاب می‌شود (بدون نیاز به اینترنت).</li>
++                    <li>· مختصات مشتری روی نقشه ثبت و ذخیره می‌شود.</li>
++                  </ul>
++                )}
++
++                {cat.key === 'assignment' && (
++                  <ul className="grid gap-1.5 text-sm text-muted-foreground" data-testid="settings-assignment-info">
++                    <li>· ثبت مشتری توسط مدرپ به‌صورت خودکار به خودش تخصیص نمی‌خورد؛ منتظر تأیید مدیر می‌ماند.</li>
++                    <li>· مدرپ می‌تواند از داخل اپ «درخواست تخصیص» بفرستد؛ نتیجه در همان‌جا اعلام و در پنل ثبت می‌شود.</li>
++                    <li>· چک‌این بدون تخصیص فعال به‌صورت خطای ۴۰۳ رد می‌شود (سیاست انتساب سمت سرور).</li>
++                  </ul>
++                )}
++
++                {cat.key === 'sync' && (
++                  <ul className="grid gap-1.5 text-sm text-muted-foreground" data-testid="settings-sync-info">
++                    <li>· صف آفلاین اپ (چک‌این/چک‌اوت/مشتری/موقعیت) بدون هیچ چیزی از دست نمی‌رود؛ ارسال مجدد با شناسهٔ محلی ضدتکرار است.</li>
++                    <li>· هر بستهٔ ارسال موقعیت، تنظیمات ردیابی جدید را هم همراه پاسخ برمی‌گرداند تا دستگاه بدون نیاز به نصب مجدد به‌روز شود.</li>
++                  </ul>
++                )}
++
++                {cat.key === 'diagnostics' && (
++                  <ul className="grid gap-1.5 text-sm text-muted-foreground" data-testid="settings-diagnostics-info">
++                    <li>· گزارش رویدادهای عملیاتی دستگاه‌ها (مجوزها، سرویس مکان، باتری، نسخه) در تب «رویدادها» با فیلترهای ترکیبی قابل مشاهده است.</li>
++                    <li>· وضعیت لحظه‌ای اتصال و اعمال تنظیمات هر دستگاه در تب «وضعیت زنده» نمایش داده می‌شود.</li>
++                    <li>· خطاهای اعتبارسنجی هر تغییر تنظیمات در همین صفحه و به زبان فارسی نشان داده می‌شود — هیچ خطایی بی‌صدا نمی‌ماند.</li>
++                  </ul>
++                )}
++
++                {cat.key === 'security' && (
++                  <ul className="grid gap-1.5 text-sm text-muted-foreground" data-testid="settings-security-info">
++                    <li>· نشست‌های اپ با توکن با طول عمر کنترل‌شده (دستهٔ «همگام‌سازی و اتصال») و ابطال فوری از کارت کارمند مدیریت می‌شوند.</li>
++                    <li>· ارتباط عمومی غیر-HTTPS در ورود اپ با هشدار آگاهانه همراه است؛ ارتباط داخل شبکه بدون هشدار است.</li>
++                    <li>· هر تغییر تنظیمات با مقدار قبلی/جدید، زمان و عمل‌کننده در حسابرسی مدیر ثبت می‌شود (فهرست پایین همین صفحه).</li>
++                    <li>· داده‌های حساس (رمز، توکن) هرگز در حسابرسی یا خروجی‌ها ثبت نمی‌شوند.</li>
++                  </ul>
++                )}
++
++                {/* editable fields of this category */}
++                {cat.keys.map((k) => renderField(k))}
++              </CardContent>
++            </Card>
++          )
++        })}
++
++        {/* save bar */}
++        <div className="sticky bottom-3 z-10 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-background/95 p-3 shadow-lg backdrop-blur" data-testid="settings-savebar">
++          <span className="text-xs text-muted-foreground">
++            {dirty ? 'تغییرات ذخیره‌نشده دارید — اعمال روی دستگاه‌ها پس از ذخیره و همگام‌سازی بعدی انجام می‌شود.' : 'همهٔ تغییرات ذخیره شده است.'}
++          </span>
++          <div className="flex gap-2">
++            <Button variant="outline" onClick={load} disabled={saving || loading}>
++              بازگردانی به مقادیر ذخیره‌شده
++            </Button>
++            <Button className="bg-primary hover:bg-primary/90" onClick={() => save()} disabled={saving || !dirty} data-testid="settings-save">
++              <Save className="ml-1 h-4 w-4" />
++              {saving ? 'در حال ذخیره…' : 'ذخیرهٔ تنظیمات'}
++            </Button>
++          </div>
++        </div>
++
++        {/* change history + controlled rollback */}
++        <Card data-testid="settings-history">
++          <CardHeader className="pb-2">
++            <CardTitle className="flex items-center gap-2 text-base">
++              <History className="h-4 w-4" />
++              تاریخچهٔ تغییرات تنظیمات
++            </CardTitle>
++            <p className="text-xs text-muted-foreground">
++              هر تغییر با مقدار قبلی/جدید، زمان و عمل‌کننده ثبت می‌شود. «بازگردانی» مقدار قبلی را از طریق همان مسیر اعتبارسنجی‌شده برمی‌گرداند و خودش هم در همین تاریخچه ثبت می‌شود.
++            </p>
++          </CardHeader>
++          <CardContent>
++            {!data.auditHistory || data.auditHistory.length === 0 ? (
++              <p className="py-4 text-center text-sm text-muted-foreground">هنوز تغییری ثبت نشده است.</p>
++            ) : (
++              <div className="grid gap-2">
++                {data.auditHistory.map((h) => {
++                  const changes = parseAuditChanges(h.detail)
++                  return (
++                    <div key={h.id} className="rounded-md border px-3 py-2 text-xs" data-testid="settings-history-row">
++                      <div className="mb-1 flex flex-wrap items-center justify-between gap-2 text-muted-foreground">
++                        <span>{faDateTime(h.createdAt)}</span>
++                        <span dir="ltr">{h.actor}</span>
++                      </div>
++                      {changes.length === 0 ? (
++                        <div>{h.detail}</div>
++                      ) : (
++                        <div className="grid gap-1">
++                          {changes.map((c, i) => {
++                            const meta = SETTING_FIELDS[c.key]
++                            const canRollback = !!meta && meta.kind === 'number'
++                            return (
++                              <div key={i} className="flex flex-wrap items-center justify-between gap-2">
++                                <span>
++                                  {meta ? meta.label : c.key}:{' '}
++                                  <span dir="ltr" className="text-muted-foreground line-through">{c.oldV}</span>
++                                  {' → '}
++                                  <span dir="ltr" className="font-medium">{c.newV}</span>
++                                </span>
++                                {canRollback && (
++                                  <Button
++                                    variant="ghost"
++                                    size="sm"
++                                    className="h-6 px-2 text-xs"
++                                    onClick={() => rollbackKey(c.key, c.oldV)}
++                                    disabled={saving}
++                                    title={`بازگردانی ${meta ? meta.label : c.key} به ${c.oldV}`}
++                                  >
++                                    بازگردانی به {c.oldV}
++                                  </Button>
++                                )}
++                              </div>
++                            )
++                          })}
++                        </div>
++                      )}
++                    </div>
++                  )
++                })}
++              </div>
++            )}
++          </CardContent>
++        </Card>
++      </div>
++    </div>
++  )
++}
+--- a/src/instrumentation.ts	2026-11-03 12:28:23.036643954 +0000
++++ b/src/instrumentation.ts	2026-11-03 12:23:14.565682271 +0000
+@@ -358,6 +358,27 @@
+ const PURCHASE_ITEM_INDEX_DDL =
+   'CREATE INDEX IF NOT EXISTS "PurchaseItem_purchaseId_idx" ON "PurchaseItem"("purchaseId")'
+ 
++// ── phase 4: settings ack («اعمال‌شده روی دستگاه») + browser Push ──────
++// 1) TrackStatus gains the acknowledged-config columns (schema.prisma has
++//    the design rationale). Additive ALTERs — a device that never reports
++//    an ack simply leaves them NULL.
++const TRACK_STATUS_ACK_DDL = [
++  'ALTER TABLE "TrackStatus" ADD COLUMN "appliedConfigJson" TEXT',
++  'ALTER TABLE "TrackStatus" ADD COLUMN "configAckAt" DATETIME',
++]
++// 2) PushSubscription — one row per subscribed panel browser (layout =
++//    prisma db push output for the phase-4 schema; see schema.prisma).
++const PUSH_SUBSCRIPTION_DDL = `CREATE TABLE IF NOT EXISTS "PushSubscription" (
++    "id" TEXT NOT NULL PRIMARY KEY,
++    "endpoint" TEXT NOT NULL,
++    "p256dh" TEXT NOT NULL,
++    "auth" TEXT NOT NULL,
++    "userAgent" TEXT,
++    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
++    "lastSeenAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
++    CONSTRAINT "PushSubscription_endpoint_key" UNIQUE ("endpoint")
++)`
++
+ export async function register() {
+   if (process.env.NEXT_RUNTIME !== 'nodejs') return
+   const { PrismaClient } = await import('@prisma/client')
+@@ -367,7 +388,7 @@
+   // index is created (a violating legacy row would otherwise fail the
+   // index creation loudly); both are idempotent, so every boot just
+   // re-applies them as no-ops.
+-  for (const sql of [...MIGRATIONS, AUDIT_TABLE_DDL, PLANNED_VISIT_DDL, PLANNED_VISIT_INDEX_DDL, NOTIF_EVENTKEY_DDL, NOTIF_EVENTKEY_INDEX_DDL, PANEL_NOTIFICATION_DDL, PANEL_NOTIFICATION_INDEX_DDL, ASSIGNMENT_REQUEST_DDL, ASSIGNMENT_REQUEST_PENDING_INDEX_DDL, ...CUSTOMER_CITY_DDL, CHECKIN_NOTE_VERSION_DDL, CHECKIN_NOTE_VERSION_INDEX_DDL, LOCATION_PING_DDL, LOCATION_PING_LOCALID_INDEX_DDL, LOCATION_PING_ROUTE_INDEX_DDL, TRACK_STATUS_DDL, VISIT_ONE_OPEN_RECONCILE_DDL, VISIT_ONE_OPEN_INDEX_DDL, OP_EVENT_DDL, OP_EVENT_EMP_IDX_DDL, OP_EVENT_TYPE_IDX_DDL, OP_EVENT_TIME_IDX_DDL, OP_EVENT_REQUEST_ID_INDEX_DDL, VOICE_FILE_DDL, VOICE_FILE_PATH_INDEX_DDL, VOICE_FILE_CHECKIN_INDEX_DDL, VOICE_FILE_BACKFILL_SQL, ...CUSTOMER_360_DDL, CUSTOMER_APPLOCALID_INDEX_DDL, CUSTOMER_LINK_DDL, CUSTOMER_LINK_UNIQUE_DDL, CUSTOMER_LINK_PHYSICIAN_INDEX_DDL, PURCHASE_DDL, PURCHASE_CUSTOMER_DATE_INDEX_DDL, PURCHASE_EXTERNALID_INDEX_DDL, PURCHASE_EXTERNALID_UNIQUE_DDL, PURCHASE_ITEM_DDL, PURCHASE_ITEM_INDEX_DDL]) {
++  for (const sql of [...MIGRATIONS, AUDIT_TABLE_DDL, PLANNED_VISIT_DDL, PLANNED_VISIT_INDEX_DDL, NOTIF_EVENTKEY_DDL, NOTIF_EVENTKEY_INDEX_DDL, PANEL_NOTIFICATION_DDL, PANEL_NOTIFICATION_INDEX_DDL, ASSIGNMENT_REQUEST_DDL, ASSIGNMENT_REQUEST_PENDING_INDEX_DDL, ...CUSTOMER_CITY_DDL, CHECKIN_NOTE_VERSION_DDL, CHECKIN_NOTE_VERSION_INDEX_DDL, LOCATION_PING_DDL, LOCATION_PING_LOCALID_INDEX_DDL, LOCATION_PING_ROUTE_INDEX_DDL, TRACK_STATUS_DDL, VISIT_ONE_OPEN_RECONCILE_DDL, VISIT_ONE_OPEN_INDEX_DDL, OP_EVENT_DDL, OP_EVENT_EMP_IDX_DDL, OP_EVENT_TYPE_IDX_DDL, OP_EVENT_TIME_IDX_DDL, OP_EVENT_REQUEST_ID_INDEX_DDL, VOICE_FILE_DDL, VOICE_FILE_PATH_INDEX_DDL, VOICE_FILE_CHECKIN_INDEX_DDL, VOICE_FILE_BACKFILL_SQL, ...CUSTOMER_360_DDL, CUSTOMER_APPLOCALID_INDEX_DDL, CUSTOMER_LINK_DDL, CUSTOMER_LINK_UNIQUE_DDL, CUSTOMER_LINK_PHYSICIAN_INDEX_DDL, PURCHASE_DDL, PURCHASE_CUSTOMER_DATE_INDEX_DDL, PURCHASE_EXTERNALID_INDEX_DDL, PURCHASE_EXTERNALID_UNIQUE_DDL, PURCHASE_ITEM_DDL, PURCHASE_ITEM_INDEX_DDL, ...TRACK_STATUS_ACK_DDL, PUSH_SUBSCRIPTION_DDL]) {
+     try {
+       await db.$executeRawUnsafe(sql)
+       applied++
+@@ -377,6 +398,39 @@
+       console.error(`[medpad][migrate] FAILED: ${sql} -> ${msg}`)
+     }
+   }
++  // phase 4 — VAPID keys for Web Push: generated ONCE on first boot and
++  // stored in Config (zero-config upgrade; keys survive restarts and are
++  // never logged). Length sanity: a P-256 VAPID public key is 65 bytes →
++  // 87 base64url chars, the private key is 32 bytes → 43 chars — the
++  // thresholds below accept those EXACT shapes and anything longer, so a
++  // valid pair is NEVER regenerated (regenerating would silently break
++  // every existing push subscription). Missing/short keys regenerate; the
++  // private key stays in the DB only.
++  try {
++    const pub = await db.config.findUnique({ where: { key: 'vapidPublicKey' } })
++    const priv = await db.config.findUnique({ where: { key: 'vapidPrivateKey' } })
++    const looksValid = (v: string | null | undefined, min: number) =>
++      typeof v === 'string' && v.length >= min
++    if (!looksValid(pub?.value, 80) || !looksValid(priv?.value, 40)) {
++      const wp = (await import('web-push')).default
++      const keys = wp.generateVAPIDKeys()
++      await db.config.upsert({
++        where: { key: 'vapidPublicKey' },
++        update: { value: keys.publicKey },
++        create: { key: 'vapidPublicKey', value: keys.publicKey },
++      })
++      await db.config.upsert({
++        where: { key: 'vapidPrivateKey' },
++        update: { value: keys.privateKey },
++        create: { key: 'vapidPrivateKey', value: keys.privateKey },
++      })
++      console.log('edpad][push] generated VAPID key pair (stored in Config)')
++    }
++  } catch (e) {
++    // push is optional infrastructure — a failure here must never block
++    // the server; the settings page shows push as unavailable.
++    console.error('edpad][push] VAPID bootstrap failed:', e instanceof Error ? e.message : e)
++  }
+   // phase 3 — retention prune at boot (receivedAt-based, through the client
+   // so the DateTime storage format is never hand-rolled; the 6h gate row is
+   // left stale on purpose: boot prunes unconditionally, uploads re-gate it)
+--- a/src/lib/notify.ts	2026-11-03 12:28:23.025643884 +0000
++++ b/src/lib/notify.ts	2026-11-03 11:57:31.674043108 +0000
+@@ -1,4 +1,5 @@
+ import { db } from '@/lib/db'
++import { sendPushToAll, pushUrlForKind } from '@/lib/push'
+ 
+ /**
+  * package 4 (phase 2 / task 3) — notification helpers.
+@@ -80,6 +81,16 @@
+         customerId: opts.customerId ?? null,
+       },
+     })
++    // phase 4 — browser Push rides ONLY on a successful create, so the
++    // eventKey dedup above covers pushes too (a replayed business event
++    // returns at the P2002 catch and never reaches here — «عدم ارسال
++    // تکراری»). Fire-and-forget: sendPushToAll swallows its own errors.
++    await sendPushToAll({
++      title: opts.title,
++      body: opts.body ?? '',
++      url: pushUrlForKind(opts.kind),
++      eventKey: opts.eventKey,
++    }).catch(() => {})
+   } catch (e: unknown) {
+     if ((e as { code?: string })?.code === 'P2002') return // same event already recorded
+     console.error('[notify] panel notification failed:', e instanceof Error ? e.message : e)
+--- a/src/lib/push.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/lib/push.ts	2026-11-03 11:57:21.921978910 +0000
+@@ -0,0 +1,137 @@
++import { db } from '@/lib/db'
++import { getConfig } from '@/lib/auth'
++import { getAdminSettings } from '@/lib/settings'
++
++/**
++ * phase 4 — Web Push to the PANEL browser (service worker).
++ *
++ * «اعلان‌های مهم پس از دریافت مجوز به‌صورت اعلان سیستمی مرورگر نمایش
++ * داده شوند؛ در زمان بسته‌بودن مرورگر با Push + Service Worker»
++ *
++ * Design points (all from the comprehensive instruction):
++ *  - DEDUP BY CONSTRUCTION: pushes are sent from notifyAdmin() AFTER the
++ *    PanelNotification row is successfully created. That table's unique
++ *    eventKey already collapses business-event replays (a retried
++ *    check-in upload never re-notifies) — so a replay never reaches this
++ *    code either. No separate push-side dedup needed.
++ *  - NO DUPLICATE WITH THE OPEN PAGE: the service worker (public/sw.js)
++ *    suppresses the notification when a visible+focused panel window
++ *    exists (the page already showed the toast via the realtime socket).
++ *    The server cannot know page visibility — the SW can.
++ *  - MASTER SWITCH: pushEnabled=0 stops all sends; PanelNotification
++ *    rows still persist, so the in-panel notification center keeps
++ *    working («بدون مجوز... مرکز اعلان درون پنل همچنان کار می‌کند»).
++ *  - ZERO-CONFIG KEYS: VAPID keys are generated at FIRST BOOT and stored
++ *    in the Config table (vapidPublicKey / vapidPrivateKey). An existing
++ *    install upgrades and push just works; the keys survive restarts and
++ *    are never written to logs.
++ *  - BEST-EFFORT, NEVER FATAL: a push failure must never fail the
++ *    business event that triggered it. Dead subscriptions (404/410) are
++ *    pruned; other errors are logged once per send round.
++ */
++
++let webpush: typeof import('web-push') | null = null
++
++async function getWebPush() {
++  if (webpush) return webpush
++  const mod = (await import('web-push')).default
++  webpush = mod
++  return mod
++}
++
++export interface VapidKeys {
++  publicKey: string
++  privateKey: string
++}
++
++/** Read the install's VAPID keys from Config (or null when not yet
++ *  generated — instrumentation.register() creates them at first boot). */
++export async function getVapidKeys(): Promise<VapidKeys | null> {
++  const pub = await getConfig('vapidPublicKey', '')
++  const priv = await getConfig('vapidPrivateKey', '')
++  if (!pub || !priv) return null
++  return { publicKey: pub, privateKey: priv }
++}
++
++export async function generateAndStoreVapidKeys(): Promise<VapidKeys> {
++  const wp = await getWebPush()
++  const keys = wp.generateVAPIDKeys()
++  await db.config.upsert({
++    where: { key: 'vapidPublicKey' },
++    update: { value: keys.publicKey },
++    create: { key: 'vapidPublicKey', value: keys.publicKey },
++  })
++  await db.config.upsert({
++    where: { key: 'vapidPrivateKey' },
++    update: { value: keys.privateKey },
++    create: { key: 'vapidPrivateKey', value: keys.privateKey },
++  })
++  return keys
++}
++
++/** Which panel tab a notification kind opens (notification click-through).
++ *  Mirrors the Dashboard's tab keys. */
++export function pushUrlForKind(kind: string): string {
++  switch (kind) {
++    case 'checkin':
++    case 'checkout':
++      return '/#tab=checkins'
++    case 'plan':
++      return '/#tab=plans'
++    case 'assignment':
++    case 'request':
++      return '/#tab=customers'
++    case 'info':
++      return '/#tab=overview'
++    default:
++      return '/#tab=overview'
++  }
++}
++
++/** Send one push to every subscribed browser. Fire-and-forget by design —
++ *  callers wrap it in try/catch (or don't await it at all in a
++ *  fire-and-forget context). Dead endpoints are pruned on the fly. */
++export async function sendPushToAll(payload: {
++  title: string
++  body: string
++  url: string
++  eventKey: string
++}): Promise<void> {
++  try {
++    const settings = await getAdminSettings()
++    if (settings.pushEnabled !== 1) return
++    const keys = await getVapidKeys()
++    if (!keys) return // not generated yet (boot will)
++    const subs = await db.pushSubscription.findMany()
++    if (subs.length === 0) return
++    const wp = await getWebPush()
++    wp.setVapidDetails('mailto:admin@medpad.local', keys.publicKey, keys.privateKey)
++    // the payload is ENCRYPTED per subscription by web-push (RFC 8291);
++    // the server stores no message content anywhere
++    const message = JSON.stringify(payload)
++    const gone: string[] = []
++    await Promise.all(
++      subs.map(async (s) => {
++        try {
++          await wp.sendNotification(
++            { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
++            message,
++            { TTL: 3600 },
++          )
++        } catch (e: unknown) {
++          const status = (e as { statusCode?: number })?.statusCode
++          if (status === 404 || status === 410) gone.push(s.id)
++          // other failures (push service hiccup, offline): leave the sub —
++          // it may recover; nothing is silently lost (the notification
++          // center still has the row)
++        }
++      }),
++    )
++    if (gone.length > 0) {
++      await db.pushSubscription.deleteMany({ where: { id: { in: gone } } })
++    }
++  } catch (e) {
++    // never let push break the business event
++    console.error('[push] send failed:', e instanceof Error ? e.message : e)
++  }
++}
+--- a/src/lib/settings-meta.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/lib/settings-meta.ts	2026-11-03 12:00:35.420280467 +0000
+@@ -0,0 +1,229 @@
++/**
++ * phase 4 — settings metadata (PURE module: no db, no server imports).
++ *
++ * Shared by the SERVER (lib/settings.ts re-exports the category table) and
++ * the CLIENT (SettingsTab renders from it) — so the unified «تنظیمات»
++ * section's structure has exactly ONE definition and the panel can never
++ * drift back into an ad-hoc dialog.
++ *
++ * Range/defaults here MUST mirror SETTING_DEFS in lib/settings.ts (the
++ * server re-validates everything on write anyway — this copy only powers
++ * labels, hints and input affordances).
++ */
++
++export interface SettingFieldMeta {
++  key: string
++  label: string
++  desc: string
++  kind: 'number' | 'toggle'
++  min?: number
++  max?: number
++  unit?: string
++}
++
++export const SETTING_FIELDS: Record<string, SettingFieldMeta> = {
++  appTokenTtlHours: {
++    key: 'appTokenTtlHours',
++    label: 'انقضای نشست اپ (ساعت)',
++    desc: 'نشست‌های جدید اپ بعد از این مدت منقضی می‌شوند و کاربر باید دوباره وارد شود. ۰ = بدون انقضا. تغییر این مقدار روی نشست‌های فعلی اثر گذشته ندارد.',
++    kind: 'number',
++    min: 0,
++    max: 8760,
++  },
++  gpsMaxAccuracyM: {
++    key: 'gpsMaxAccuracyM',
++    label: 'حداکثر خطای قابل‌قبول GPS (متر)',
++    desc: 'اگر دقت گزارش‌شدهٔ دستگاه بدتر از این مقدار باشد، موقعیت «ثبت‌نشده» در نظر گرفته می‌شود (خود رویداد ثبت می‌ماند). ۰ = عدم فیلتر بر اساس دقت.',
++    kind: 'number',
++    min: 0,
++    max: 500,
++  },
++  trackEnabled: {
++    key: 'trackEnabled',
++    label: 'ردیابی پس‌زمینه فعال باشد',
++    desc: 'خاموش = دستگاه‌ها موقعیت نمی‌فرستند؛ داده‌های قبلی حفظ می‌شوند.',
++    kind: 'toggle',
++  },
++  trackMoveIntervalSec: {
++    key: 'trackMoveIntervalSec',
++    label: 'فاصلهٔ ارسال در حرکت (ثانیه)',
++    desc: 'هدفِ ارسال موقعیت وقتی مدرپ در حال حرکت است (پیشنهاد دستورالعمل: ۳۰ تا ۶۰ ثانیه).',
++    kind: 'number',
++    min: 15,
++    max: 600,
++    unit: 'ثانیه',
++  },
++  trackStillIntervalSec: {
++    key: 'trackStillIntervalSec',
++    label: 'فاصلهٔ ارسال در سکون (ثانیه)',
++    desc: 'هدفِ ارسال موقعیت وقتی مدرپ ثابت است (پیشنهاد دستورالعمل: ۲ تا ۵ دقیقه).',
++    kind: 'number',
++    min: 60,
++    max: 3600,
++    unit: 'ثانیه',
++  },
++  trackMotionThresholdM: {
++    key: 'trackMotionThresholdM',
++    label: 'آستانهٔ تشخیص حرکت (متر)',
++    desc: 'جابه‌جایی کمتر از این مقدار «سکون» حساب می‌شود.',
++    kind: 'number',
++    min: 5,
++    max: 500,
++    unit: 'متر',
++  },
++  trackMaxAgeSec: {
++    key: 'trackMaxAgeSec',
++    label: 'حداکثر عمر موقعیت تازه (ثانیه)',
++    desc: 'موقعیت قدیمی‌تر از این هرگز به‌عنوان موقعیت زنده نمایش داده نمی‌شود.',
++    kind: 'number',
++    min: 60,
++    max: 21600,
++    unit: 'ثانیه',
++  },
++  trackRetentionDays: {
++    key: 'trackRetentionDays',
++    label: 'نگه‌داری مسیر موقعیت (روز)',
++    desc: 'موقعیت‌های دریافتی قدیمی‌تر از این مدت در بوت پاک‌سازی می‌شوند (فقط داده‌های دریافتی — هرگز بی‌صدا و هرگز دادهٔ ارسال‌نشده).',
++    kind: 'number',
++    min: 7,
++    max: 365,
++    unit: 'روز',
++  },
++  eventRetentionDays: {
++    key: 'eventRetentionDays',
++    label: 'نگه‌داری گزارش رویدادها (روز)',
++    desc: 'رویدادهای عملیاتی دستگاه‌ها قدیمی‌تر از این مدت پاک‌سازی می‌شوند. حسابرسی مدیر هرگز پاک نمی‌شود.',
++    kind: 'number',
++    min: 30,
++    max: 730,
++    unit: 'روز',
++  },
++  checkinGeoRequired: {
++    key: 'checkinGeoRequired',
++    label: 'الزام فاصلهٔ مکانی — چک‌این',
++    desc: 'روشن = چک‌این خارج از شعاع مجاز رد می‌شود (خطای ۴۲۲). خاموش = ثبت می‌شود و «بدون کنترل فاصله» علامت می‌خورد.',
++    kind: 'toggle',
++  },
++  checkinGeoRadiusM: {
++    key: 'checkinGeoRadiusM',
++    label: 'شعاع مجاز چک‌این (متر)',
++    desc: '۰ = شعاع خودِ مشتری (پیش‌فرض ۱۵۰ متر). مستقل از چک‌اوت.',
++    kind: 'number',
++    min: 0,
++    max: 5000,
++    unit: 'متر',
++  },
++  checkoutGeoRequired: {
++    key: 'checkoutGeoRequired',
++    label: 'الزام فاصلهٔ مکانی — چک‌اوت',
++    desc: 'مستقل از چک‌این. روشن = چک‌اوت خارج از شعاع رد می‌شود.',
++    kind: 'toggle',
++  },
++  checkoutGeoRadiusM: {
++    key: 'checkoutGeoRadiusM',
++    label: 'شعاع مجاز چک‌اوت (متر)',
++    desc: '۰ = شعاع خودِ مشتری. مستقل از چک‌این.',
++    kind: 'number',
++    min: 0,
++    max: 5000,
++    unit: 'متر',
++  },
++  pushEnabled: {
++    key: 'pushEnabled',
++    label: 'ارسال اعلان Push مرورگر',
++    desc: 'خاموش = هیچ Pushی ارسال نمی‌شود؛ مرکز اعلان درون پنل همچنان کامل کار می‌کند.',
++    kind: 'toggle',
++  },
++}
++
++export interface SettingsCategory {
++  key: string
++  title: string
++  hint: string
++  /** numeric/string setting keys rendered as editable inputs ('defaultCity'
++   *  is the string-valued city picker) */
++  keys: string[]
++  /** category carries info + links only (no editable server knob) */
++  readOnly: boolean
++}
++
++/** The ELEVEN pre-defined categories of the comprehensive instruction. */
++export const SETTINGS_CATEGORIES: SettingsCategory[] = [
++  {
++    key: 'general',
++    title: 'عمومی',
++    hint: 'اطلاعات نسخه و حالت اتصال. سرور مرجع نهایی همهٔ تنظیمات است؛ اپ تنظیمات مجاز را از سرور می‌گیرد.',
++    keys: [],
++    readOnly: true,
++  },
++  {
++    key: 'application',
++    title: 'اپلیکیشن',
++    hint: 'تنظیمات اپ اندروید — در اولین فرصت دریافت و اعمال می‌شود؛ آفلاین، آخرین تنظیم معتبر حفظ می‌شود.',
++    keys: ['defaultCity'],
++    readOnly: false,
++  },
++  {
++    key: 'tracking',
++    title: 'موقعیت‌یابی و ردیابی',
++    hint: 'سیاست ردیابی پس‌زمینه. مقادیر «هدف» هستند — اندروید ممکن است برای باتری فاصله‌ها را کش بدهد؛ پنل زمان واقعی دریافت را نشان می‌دهد.',
++    keys: ['trackEnabled', 'trackMoveIntervalSec', 'trackStillIntervalSec', 'trackMotionThresholdM', 'trackMaxAgeSec', 'gpsMaxAccuracyM'],
++    readOnly: false,
++  },
++  {
++    key: 'notifications',
++    title: 'اعلان‌ها',
++    hint: 'اعلان سیستمی مرورگر برای مدیر — با اجازهٔ صریح شما و از طریق Service Worker؛ با بسته‌بودن مرورگر هم می‌رسد. مرکز اعلان درون پنل همیشه بدون مجوز هم کار می‌کند.',
++    keys: ['pushEnabled'],
++    readOnly: false,
++  },
++  {
++    key: 'customers-geo',
++    title: 'مشتریان و جغرافیا',
++    hint: 'سیاست جلوگیری از ثبت مشتری تکراری — سرور با املای متفاوت هم رکورد جدید نمی‌سازد مگر با تأیید صریح (force).',
++    keys: [],
++    readOnly: true,
++  },
++  {
++    key: 'visit-plan',
++    title: 'برنامهٔ بازدید',
++    hint: 'کنترل فاصلهٔ مکانی چک‌این/چک‌اوت — دو سیاست کاملاً مستقل. ۰ متر = شعاع خودِ مشتری (پیش‌فرض ۱۵۰).',
++    keys: ['checkinGeoRequired', 'checkinGeoRadiusM', 'checkoutGeoRequired', 'checkoutGeoRadiusM'],
++    readOnly: false,
++  },
++  {
++    key: 'assignment',
++    title: 'تخصیص مشتری',
++    hint: 'تخصیص فقط با تأیید مدیر انجام می‌شود؛ مدرپ می‌تواند درخواست تخصیص بفرستد و در اپ پیگیری کند.',
++    keys: [],
++    readOnly: true,
++  },
++  {
++    key: 'sync',
++    title: 'همگام‌سازی و اتصال',
++    hint: 'نشست اپ و مشخصات همگام‌سازی. صف آفلاین اپ بدون هیچ چیزی از دست نمی‌رود و ارسال مجدد ضدتکرار است.',
++    keys: ['appTokenTtlHours'],
++    readOnly: false,
++  },
++  {
++    key: 'diagnostics',
++    title: 'عیب‌یابی و گزارش فنی',
++    hint: 'گزارش رویدادهای عملیاتی دستگاه‌ها (مجوزها، سرویس، باتری، صف‌ها) و سلامت سرور.',
++    keys: [],
++    readOnly: true,
++  },
++  {
++    key: 'security',
++    title: 'امنیت و دسترسی',
++    hint: 'کنترل‌های دسترسی و سیاست‌های امنیتی سمت سرور — توکن‌ها، رمزها و حسابرسی.',
++    keys: [],
++    readOnly: true,
++  },
++  {
++    key: 'retention',
++    title: 'نگه‌داری داده',
++    hint: 'مدت نگه‌داری داده‌های عملیاتی. پاک‌سازی فقط روی داده‌های دریافتی انجام می‌شود و سیاستش در همین صفحه ثبت است.',
++    keys: ['trackRetentionDays', 'eventRetentionDays'],
++    readOnly: false,
++  },
++]
+--- a/src/lib/settings.ts	2026-11-03 12:28:23.026643891 +0000
++++ b/src/lib/settings.ts	2026-11-03 12:00:51.919386923 +0000
+@@ -64,6 +64,11 @@
+   trackMaxAgeSec: number
+   trackRetentionDays: number
+   eventRetentionDays: number
++  // phase 4 — browser Push master switch (Web Push to subscribed panel
++  // browsers). 0 = the server still records PanelNotification rows (the
++  // in-panel notification center ALWAYS works — «بدون مجوز، مرکز اعلان درون
++  // پنل همچنان کار می‌کند») but sends no push at all.
++  pushEnabled: number
+ }
+ 
+ export const SETTING_DEFS = {
+@@ -96,6 +101,8 @@
+   // mission item 10 — operational event log retention. Old OpEvent rows are
+   // pruned at boot; the ADMIN AUDIT TRAIL (AuditLog) is never touched.
+   eventRetentionDays:    { def: 90,  min: 30, max: 730 },
++  // phase 4 — browser Push master switch (see AdminSettings.pushEnabled).
++  pushEnabled:           { def: 1,   min: 0,  max: 1 },
+ } as const
+ 
+ export type SettingKey = keyof typeof SETTING_DEFS
+@@ -151,6 +158,18 @@
+   return getAdminSettings()
+ }
+ 
++// ── phase 4: the 11-category settings structure (comprehensive phase 4) ──
++// The structure + labels live in the PURE module lib/settings-meta.ts so
++// the CLIENT (SettingsTab) and the SERVER import the SAME definition —
++// no db import leaks into the browser bundle, and the unified «تنظیمات»
++// section can never drift from this table.
++export {
++  SETTINGS_CATEGORIES,
++  SETTING_FIELDS,
++  type SettingsCategory,
++  type SettingFieldMeta,
++} from './settings-meta'
++
+ // ── package 9 (phase 2 / task 6): default map city ─────────────────
+ // A STRING-valued setting, deliberately outside the numeric SETTING_DEFS
+ // machinery above. Stored in the same Config KV table as

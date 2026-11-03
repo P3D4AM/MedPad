@@ -59,6 +59,8 @@
   "/api/planned-visits/[id]/reschedule/route": "/api/planned-visits/[id]/reschedule",
   "/api/planned-visits/[id]/route": "/api/planned-visits/[id]",
   "/api/planned-visits/route": "/api/planned-visits",
+  "/api/push/key/route": "/api/push/key",
+  "/api/push/subscribe/route": "/api/push/subscribe",
   "/api/route": "/api",
   "/api/stats/route": "/api/stats",
   "/page": "/"

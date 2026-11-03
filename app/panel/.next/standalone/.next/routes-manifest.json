@@ -438,6 +438,18 @@
       "namedRegex": "^/api/planned\\-visits(?:/)?$"
     },
     {
+      "page": "/api/push/key",
+      "regex": "^/api/push/key(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/push/key(?:/)?$"
+    },
+    {
+      "page": "/api/push/subscribe",
+      "regex": "^/api/push/subscribe(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/push/subscribe(?:/)?$"
+    },
+    {
       "page": "/api/stats",
       "regex": "^/api/stats(?:/)?$",
       "routeKeys": {},

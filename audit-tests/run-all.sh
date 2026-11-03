@@ -25,22 +25,24 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 PKG="${1:-}"
 RC=0
 
-echo "==== [1/6] process safety ===="
+echo "==== [1/9] process safety ===="
 node "$HERE/test-process-safety.mjs" || RC=1
-echo "==== [2/6] wizard security ===="
+echo "==== [2/9] wizard security ===="
 node "$HERE/test-wizard-security.mjs" ${PKG:+"$PKG"} || RC=1
-echo "==== [3/6] realtime security ===="
+echo "==== [3/9] realtime security ===="
 node "$HERE/test-realtime-security.mjs" ${PKG:+"$PKG"} || RC=1
-echo "==== [4/6] full v1.9.12 suite ===="
+echo "==== [4/9] full v1.9.12 suite ===="
 bash "$HERE/test-v1912.sh" ${PKG:+"$PKG"} || RC=1
-echo "==== [5/6] functional core (phase 1 / task 1) ===="
+echo "==== [5/9] functional core (phase 1 / task 1) ===="
 bash "$HERE/test-functional-core.sh" ${PKG:+"$PKG"} || RC=1
-echo "==== [6/8] remediation (phase 1 / task 2) ===="
+echo "==== [6/9] remediation (phase 1 / task 2) ===="
 bash "$HERE/test-remediation.sh" ${PKG:+"$PKG"} || RC=1
-echo "==== [7/8] mission 12 (Nov 2026) ===="
+echo "==== [7/9] mission 12 (Nov 2026) ===="
 bash "$HERE/test-mission12.sh" ${PKG:+"$PKG"} || RC=1
-echo "==== [8/8] customer 360 (phase 1) ===="
+echo "==== [8/9] customer 360 (phase 1) ===="
 bash "$HERE/test-customer360.sh" ${PKG:+"$PKG"} || RC=1
+echo "==== [9/9] settings center (phase 4) ===="
+bash "$HERE/test-settings-center.sh" ${PKG:+"$PKG"} || RC=1
 
 echo ""
 if [ "$RC" = "0" ]; then echo "ALL-SUITES-PASS"; else echo "SOME-SUITES-FAILED"; fi

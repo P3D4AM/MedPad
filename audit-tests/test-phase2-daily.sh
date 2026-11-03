@@ -272,7 +272,7 @@ with sync_playwright() as p:
     page.fill("#u", "admin")
     page.fill("#p", PASSWORD)
     page.click("button[type=submit]")
-    page.wait_for_selector('button[title="اعلان‌های مرورگر"]')
+    page.wait_for_selector('button[title="تنظیمات"]')  # phase 4: permission-bell icon removed (duplicate); gear = dashboard-ready sentinel
     page.click("text=چک‌این‌ها")
     page.wait_for_selector(f'[data-testid="audio-player-{CH_V1}"]')
 

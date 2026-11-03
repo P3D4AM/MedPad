@@ -15,8 +15,11 @@
 #           12: no-auto-assign, VoiceFile, multi-voice, map-isolate) →
 #           phase6-customer360 (Customer 360: profile fields, CustomerLink,
 #           Purchase/PurchaseItem, 360 profile APIs + UI, dark/light theme
-#           system + switcher, sidebar dashboard, customers list upgrade —
-#           last)
+#           system + switcher, sidebar dashboard, customers list upgrade) →
+#           phase7-central-settings (phase 4 comprehensive: UNIFIED settings
+#           section with the 11 pre-defined categories + saved-vs-applied
+#           device ack + browser Push (VAPID boot-gen, PushSubscription,
+#           sw.js) + duplicate permission-bell icon removal — last)
 #
 # This script performs the WHOLE reproducible pipeline and verifies it:
 #   1. fresh extraction of the base source (git archive)
@@ -52,7 +55,7 @@ set -euo pipefail
 REPO_ROOT="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
 WORK="${2:-$REPO_ROOT/panel-build}"
 BASE_REF="bd9c80b:medpad-full-1.9/inst-stage/panel-src"
-CHAIN="phase1-task1 phase2-remediation phase2-task1 phase2-task2 phase2-dev2-fixes phase2-package4 phase2-madrep phase2-package6 phase2-package7 phase2-package9 phase2-package5 phase2-package13 phase3-package14 phase4-package15 phase5-package16 phase6-customer360"
+CHAIN="phase1-task1 phase2-remediation phase2-task1 phase2-task2 phase2-dev2-fixes phase2-package4 phase2-madrep phase2-package6 phase2-package7 phase2-package9 phase2-package5 phase2-package13 phase3-package14 phase4-package15 phase5-package16 phase6-customer360 phase7-central-settings"
 
 # RESUME mode (sandbox convenience): with MEDPAD_BUILD_RESUME=1 an existing
 # $WORK/src with node_modules (from an interrupted run — e.g. a sandbox that
@@ -99,6 +102,9 @@ fi
 [ -f "$WORK/src/src/components/panel/TrackingTab.tsx" ] || die "patch chain did not produce TrackingTab.tsx"
 # package15 marker (mission Oct 31)
 [ -f "$WORK/src/src/components/panel/EventsTab.tsx" ] || die "patch chain did not produce EventsTab.tsx"
+# phase 7 markers (comprehensive phase 4 — unified settings + browser Push)
+[ -f "$WORK/src/src/components/panel/SettingsTab.tsx" ] || die "patch chain did not produce SettingsTab.tsx"
+[ -f "$WORK/src/public/sw.js" ] || die "patch chain did not produce public/sw.js"
 cd "$WORK/src"
 
 # ── 3. npm install ──────────────────────────────────────────────────────────
@@ -175,7 +181,16 @@ chk "tracking tab UI chunks"       "grep -rq 'route-map' --include='*.js' ."
 chk "api: app events upload"       "[ -f .next/server/app/api/app/events/route.js ]"
 chk "api: admin events report"     "[ -f .next/server/app/api/admin/events/route.js ]"
 chk "events tab UI chunks"         "grep -rq 'events-filter-employee' --include='*.js' ."
-echo "   hardening: PASS=$P FAIL=$F / 26"
+# phase 7 (comprehensive phase 4): settings center + browser Push must ship
+chk "sw.js served from public"      "[ -f public/sw.js ]"
+chk "sw: push + click handlers"     "grep -q \"addEventListener('push'\" public/sw.js && grep -q \"addEventListener('notificationclick'\" public/sw.js"
+chk "api: push key"                 "[ -f .next/server/app/api/push/key/route.js ]"
+chk "api: push subscribe"           "[ -f .next/server/app/api/push/subscribe/route.js ]"
+chk "web-push external in runtime"  "[ -d node_modules/web-push ]"
+chk "settings tab UI chunks"        "grep -rq 'settings-cat-' --include='*.js' ."
+chk "device-ack + history chunks"   "grep -rq 'settings-device-ack' --include='*.js' ."
+chk "vapid bootstrap in server"     "grep -rq 'vapidPublicKey' .next/server --include='*.js'"
+echo "   hardening: PASS=$P FAIL=$F / 33"
 LAST_HARDENING="$P/$F PASS"
 [ "$F" -eq 0 ] || die "hardening checks failed"
 

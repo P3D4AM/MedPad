@@ -334,11 +334,11 @@ try:
         page.fill("#u", "admin")
         page.fill("#p", PASSWORD)
         page.click("button[type=submit]")
-        page.wait_for_selector('button[title="اعلان‌های مرورگر"]', timeout=20000)
+        page.wait_for_selector('button[title="تنظیمات"]', timeout=20000)  # phase 4: permission-bell removed (duplicate icon)
         out["dashboard_ms"] = round((time.time() - t0) * 1000)
 
         # document (at browser level) what the base bundle ships:
-        out["permission_bell_count"] = page.locator('button[title="اعلان‌های مرورگر"]').count()
+        out["permission_bell_count"] = page.locator('button[title="اعلان‌های مرورگر"]').count()  # phase 4 contract: 0 — duplicate removed (control moved to Settings)
         out["markall_button_count"] = page.locator('button:has-text("خوانده")').count()
 
         # the EXACT fetch pattern a bell UI performs, timed from inside the page
@@ -374,7 +374,8 @@ PYBROWSER
     [ -n "$(g t_markall)" ] && echo "$(python3 -c "print($(g t_markall)/1000)") PR7 browser mark-all" >> "$W/times.txt"
     chk "PR7 browser: no runtime errors" "[ \"\$(g errors)\" = '[]' ]"
     chk "PR7 browser: login -> dashboard rendered" "[ -n \"\$(g dashboard_ms)\" ]"
-    chk "PR7 browser: base bundle ships the permission bell (1)" "[ \"\$(g permission_bell_count)\" = '1' ]"
+    # phase 4: the duplicate permission-bell icon is REMOVED (comprehensive instruction)
+    chk "PR7 browser: duplicate permission bell removed (0)" "[ \"\$(g permission_bell_count)\" = '0' ]"
     chk "PR7 browser: NO mark-all button in the committed bundle" "[ \"\$(g markall_button_count)\" = '0' ]"
     chk "PR7 browser: GET list ok" "[ \"\$(g ok1)\" = 'True' ]"
     chk "PR7 browser: list capped at 100 (window)" "[ \"\$(g n1)\" = '100' ]"

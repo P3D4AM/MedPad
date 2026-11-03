@@ -59,6 +59,8 @@
   "/api/planned-visits/[id]/reschedule/route": "app/api/planned-visits/[id]/reschedule/route.js",
   "/api/planned-visits/[id]/route": "app/api/planned-visits/[id]/route.js",
   "/api/planned-visits/route": "app/api/planned-visits/route.js",
+  "/api/push/key/route": "app/api/push/key/route.js",
+  "/api/push/subscribe/route": "app/api/push/subscribe/route.js",
   "/api/route": "app/api/route.js",
   "/api/stats/route": "app/api/stats/route.js",
   "/page": "app/page.js"

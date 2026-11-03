@@ -1,0 +1,3 @@
+module.exports=[30510,e=>{e.v(t=>Promise.all(["server/chunks/[externals]_web-push_0rtps5qxk878m._.js"].map(t=>e.l(t))).then(()=>t(19708)))},44059,e=>e.a(async(t,a)=>{try{var s=e.i(79832),r=t([s]);[s]=r.then?(await r)():r;let c=!1;async function n(e,t){let a;try{a=(0,s.G)()}catch(e){c||(c=!0,console.error(`[medpad] emit skipped (${e.message})`));return}try{let s=process.env.REALTIME_URL||"http://127.0.0.1:3003";await fetch(`${s}/emit`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({token:a,event:e,payload:t}),signal:AbortSignal.timeout(1500)})}catch{}}e.s(["f",0,n]),a()}catch(e){a(e)}},!1)];
+
+//# sourceMappingURL=%5Broot-of-the-server%5D__02oiehtkp4a_6._.js.map
