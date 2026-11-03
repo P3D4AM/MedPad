@@ -9,7 +9,6 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.location.Location
-import android.os.Build
 import android.os.Looper
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
@@ -125,12 +124,17 @@ class TrackingService : LifecycleService() {
         fused = com.google.android.gms.location.LocationServices.getFusedLocationProviderClient(this)
         applyTrackingState()
 
-        // mission item 4 — immediate poll when the user unlocks the screen
-        if (Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(unlockReceiver, IntentFilter(Intent.ACTION_USER_PRESENT), ContextCompat.RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(unlockReceiver, IntentFilter(Intent.ACTION_USER_PRESENT))
-        }
+        // mission item 4 — immediate poll when the user unlocks the screen.
+        // ContextCompat.registerReceiver (the same pattern MainActivity
+        // uses) applies the RECEIVER_NOT_EXPORTED flag on API 33+ and is a
+        // plain register below — the raw framework flags overload is what
+        // lint's WrongConstant correctly rejects (pre-existing, found by
+        // the backup-mission lint sweep).
+        ContextCompat.registerReceiver(
+            this, unlockReceiver,
+            IntentFilter(Intent.ACTION_USER_PRESENT),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
 
         // heartbeat: flush queues + poll notifications + upload locations
         // + refresh the remote policy
