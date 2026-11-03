@@ -14,16 +14,15 @@ android {
         applicationId = "com.medpad.tracker"
         minSdk = 24
         targetSdk = 34
-        // dev.5 — phase 3 (background location + live panel status):
-        // location upload queue (idempotent localId, no silent loss),
-        // remote tracking policy (move/still intervals, motion threshold,
-        // max age, on/off) with offline retention, boot restart, permission
-        // state banner + reporting, panel live view + route history.
-        // versionCode strictly increased from 15 so it upgrades an
-        // existing same-signature install (this APK is signed with the
+        // Backup & Restore + legacy-data migration (owner mission, Nov 3
+        // 2026): in-app SAF backup/restore over one versioned JSON format,
+        // exact-.db export, in-app legacy-.db import (Room chain 4→14 as
+        // the mapping) + tools/legacy-backup CLI, pre-restore safety
+        // snapshots. versionCode strictly increased from 19 so it upgrades
+        // an existing same-signature install (this APK is signed with the
         // standard Android DEBUG key).
-        versionCode = 19
-        versionName = "1.9.14-dev.1"
+        versionCode = 20
+        versionName = "1.9.14-dev.2"
     }
 
     // ─── Signing (audit phase 2 hardening) ─────────────────────────────
@@ -112,6 +111,16 @@ android {
         unitTests {
             // Robolectric needs inflated resources for the activity smoke tests
             isIncludeAndroidResources = true
+            // Robolectric fetches its android-all jars from Maven Central at
+            // TEST runtime, OUTSIDE Gradle's repository chain — so mirrors
+            // configured for the build do not apply to it. Allow the URL to
+            // be overridden on restricted networks:
+            //   ./gradlew :app:testDebugUnitTest -ProbolectricRepoUrl=https://…
+            all {
+                (project.findProperty("robolectricRepoUrl") as String?)?.let { url ->
+                    it.systemProperty("robolectric.dependency.repo.url", url)
+                }
+            }
         }
     }
 }

@@ -1656,3 +1656,24 @@ Stage Summary:
 - انتشار کامل و راستی‌آزمایی‌شده: پوش `d9eb31b..732b6e6` + تگ `v1.9.14-dev.1` + Release id 431954135 با ۴ asset + دانلود-برگشتی OK. صفحهٔ Releases: ۱۰ ریلیز زنده، آخرین = v1.9.14-dev.1.
 - کشف امضای Debug سندباکس مستند و کلید امروز در `medpad-work/keystore-debug/` نگه داشته شد (زنجیرهٔ بعدی با بازیابی در `~/.android/` پایدار می‌ماند).
 - وضعیت: **DONE_VERIFIED**. قدم بعدی: تست میدانی مالک روی گوشی واقعی (پروندهٔ ۳۶۰، صف آفلاین، تم‌ها) + تصمیم‌های RELEASE-CHECKLIST §۷ (keystore رسمی / انتشار پایدار / typing debt).
+
+---
+
+Task ID: 60
+Agent: main (Z.ai — handoff-prompt v2 session)
+Task: پشتیبان‌گیری و بازگردانی در اپ + ابزار انتقال داده از نسخه‌های قدیمی (فرمان مالک Nov 3: «به نرم افزار قابلیت بکاپ گیری هم اضافه کن. یک ابزار اضافی هم تولید کن تا بتونم اطلاعات ورژنهای قبلی رو که بکاپ نداشتن و توشون اطلاعات وارد کردم رو بکاپ بگیرم به صورتی که به این نرم افزار که ورژن جدیدتر هست بتونم وارد کنم») — طبق پروتکل دائمی + انتشار v1.9.14-dev.2
+Date: Nov 3, 2026
+
+Work Log:
+- **محیط از صفر (سندباکس تازه):** کلون develop (`177758d`، همگام ریموت) · PAT جدید با ls-remote احراز شد (ماسک در خروجی‌ها) · Android SDK (platform-34 + build-tools 34.0.0) · JDK کامل 21 (JRE سیستم jlink/javac نداشت — درس Task 59) · آینهٔ هواوی برای mavenCentral (429) + قابلیت `-ProbolectricRepoUrl` به build.gradle.kts اضافه شد (دانلود android-all در زمان تست خارج از زنجیرهٔ گریدل است) · رپر run-gradle.sh با timeout (درس هنگ daemon) و بدون پایپ stdout (درس دیمن Kotlin).
+- **قرارداد قالب واحد (formatVersion=1):** `{manifest:{app,formatVersion,schemaVersion,exportedAt,appVersion},entities:{<table>:[rows]}}` — کلید=نام ستون SQLite؛ null حذف می‌شود (خواننده کلید غایب و null صریح را یکسان می‌فهمد)؛ uid هرگز جزو قالب نیست؛ سه تولیدکننده (اکسپورت اپ / ایمپورت legacy درون‌اپی / ابزار پایتون) → یک مصرف‌کننده (applyEntities).
+- **Task 1 — بکاپ/بازگردانی درون‌اپی:** BackupManager (اکسپورت ۸ جدول، importJson با ولیدیشن manifest + withTransaction، ادغام: LWW برای doctors/profiles، REPLACE برای آینه‌ها، dedupe با localId برای صف‌ها؛ exportDbCopy با چک‌پوینت WAL؛ اسنپ‌شات ایمنی files/backups با prune=3) + BackupDialogs (بخش «پشتیبان‌گیری و بازگردانی» در sheet حساب، SAF با startActivityForResult کلاسیک از دیالوگ + هدایت از MainActivity.onActivityResult، خلاصهٔ فارسی افزوده/به‌روزرسانی/ردشده، مرور/بازگردانی اسنپ‌شات‌ها با تاریخ جلالی) + ۳۱ رشتهٔ فارسی + DAO additions (all()×۴ + upsertAll پروفایل‌ها).
+- **Task 2a — بازگردانی از پایگاه‌دادهٔ قدیمی (درون‌اپی):** کپی خصوصی از فایل SAF → pre-flight نسخه → **باز کردن با زنجیرهٔ migration واقعی 4→14 (خود migration = نقشهٔ قدیم→جدید؛ Room ولیدیت می‌کند)** → همان export→apply. نرمال‌سازی‌های لازم: فایل v4 (نیمهٔ ستونی MIGRATION_4_5 دستی بدون ایندس) + حذف ایندس سرگردان `index_pending_checkins_localId` (entity فعلی تعریفش نمی‌کند — ولیدیشن open را رد می‌کرد). اسنپ‌شات‌های ایمنی (v14) هم از همین مسیر undo می‌شوند.
+- **Task 2b — ابزار مستقل:** `tools/legacy-backup/medpad_legacy_backup.py` (فقط stdlib؛ کپی خصوصی + بازیابی wal کناری؛ تشخیص user_version v4..v14؛ ستون‌های موجود فقط، تبدیل بولین، حذف null/uid؛ خروجی UTF-8 خوانا؛ یادآوری صوت‌ها) + `README-fa.md` (۳ مسیر استخراج: adb backup+استخراج / روت su / فایل موجود؛ راهنمای صوت‌ها؛ قرارداد قالب) + `test_legacy_backup.py`.
+- **تست‌ها (۱۶ جدید اندروید + ۱۰ پایتون):** رفت‌وبرگشت کامل ۸ جدول · LWW + dedupe + ایمپورت مجدد · فایل خراب/مانیفست غلط (DB دست‌نخورده) · تحمل ردیف خراب (ردشده) · قرارداد null هر دو سو · اسنپ‌شات (نوشتن/prune=3/undo از طریق legacy) · exportDbCopy→importLegacyDb · legacy فیکسچرهای فیزیکی v6 (ساخت دستی = قدیمی‌ترین اسکیمای منتشرشده)، v13 و v11 (downgrade از v14 واقعی با MigrationTestFixtures) · خراب/too-old/future · wal-اقزادی در پایتون.
+- **QA نهایی:** اندروید **۱۹۳/۱۹۳** (۳۴ کلاس) + پایتون **۱۰/۱۰** + assembleDebug (`app-debug.apk` 9,121,918 بایت؛ aapt vCode=20/1.9.14-dev.2؛ zipalign OK؛ apksigner VERIFIED) + assembleRelease (unsigned طبق سیاست) + **lint ۰ خطا** — با رفع یک WrongConstant قدیمی TrackingService (registerReceiver خام → الگوی ContextCompat خود کدبیس + حذف import بلااستفاده).
+- **کشف امضا (شفاف):** کلید dev.1 (`5875ccd7…`) در `medpad-work/keystore-debug/` خارج مخزن بود و با بازیافت سندباکس **از بین رفت** (در git نیست — `git log --all` بررسی شد؛ برخلاف فرض handoff). کلید این سشن: گواهی `0dd11fcd…61e1` → ارتقا از dev.1 = حذف/نصب مجدد؛ هشدار + مسیر نجات داده (ابزار legacy) در README-fa و یادداشت ریلیز. کپی keystore برای مالک: `download/medpad-debug-keystore-v1.9.14-dev.2.keystore` (رمز استاندارد android).
+- **باندل پنل:** دست‌نخورده (diff فقط اندروید/tools/نصب‌کننده‌ها/مستندات) → ZIP ریلیز همان باندل ۲۶/۲۶-تست‌شدهٔ Customer-360 (الگوی اثبات dev.3 با diff خالی).
+
+Stage Summary:
+- (پس از انتشار تکمیل می‌شود)
