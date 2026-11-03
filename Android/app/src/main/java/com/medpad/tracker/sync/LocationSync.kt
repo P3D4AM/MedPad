@@ -154,11 +154,25 @@ object LocationSync {
         val version = try {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
         } catch (_: Exception) { null }
+        // phase 4 — «اعمال‌شده روی دستگاه»: report the tracking config this
+        // device has ACTUALLY adopted (TrackingConfig.current — the same
+        // clamped values the server handed out and the app persists for
+        // offline use). The panel compares it with the saved policy and
+        // shows saved-vs-applied honestly instead of assuming a save reached
+        // the field. Piggy-backed on the SAME periodic report — no extra
+        // round trip, no extra battery.
+        val applied = TrackingConfig.current
         return JSONObject()
             .put("locationPermission", perm)
             .put("backgroundLocation", bg)
             .put("serviceRunning", true) // the tracker service is the reporter
             .put("batteryUnrestricted", batteryUnrestricted)
+            .put("appliedConfig", JSONObject()
+                .put("enabled", applied.enabled)
+                .put("moveIntervalSec", applied.moveIntervalSec)
+                .put("stillIntervalSec", applied.stillIntervalSec)
+                .put("motionThresholdM", applied.motionThresholdM)
+                .put("maxAgeSec", applied.maxAgeSec))
             .apply { version?.let { put("appVersion", it) } }
     }
 

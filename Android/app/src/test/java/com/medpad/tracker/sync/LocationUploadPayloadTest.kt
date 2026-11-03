@@ -4,6 +4,7 @@ import com.medpad.tracker.db.PendingLocation
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -74,5 +75,63 @@ class LocationUploadPayloadTest {
     fun `empty batch produces an empty array (server rejects, caller skips)`() {
         val payload = LocationSync.buildPayload(emptyList(), emptyList(), JSONObject())
         assertEquals(0, payload.getJSONArray("locations").length())
+    }
+
+    // ── phase 4: «اعمال‌شده روی دستگاه» — the applied-config ack ──────
+    // The status snapshot now carries the tracking config the device has
+    // ACTUALLY adopted, so the panel can show saved-vs-applied honestly.
+    // Contract mirrored from the server route (status.appliedConfig):
+    //  - five fields with the SAME names/ranges as the server policy;
+    //  - the values are TrackingConfig.current — after updateFrom() adopts
+    //    a server response, the NEXT status snapshot reports exactly it;
+    //  - the ack is piggy-backed (no separate round trip).
+
+    @Test
+    fun `status snapshot carries the applied config ack`() {
+        val ctx = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val st = LocationSync.statusSnapshot(ctx)
+        assertTrue("status must carry appliedConfig", st.has("appliedConfig"))
+        val ac = st.getJSONObject("appliedConfig")
+        val cur = com.medpad.tracker.location.TrackingConfig.current
+        assertEquals(cur.enabled, ac.getBoolean("enabled"))
+        assertEquals(cur.moveIntervalSec, ac.getInt("moveIntervalSec"))
+        assertEquals(cur.stillIntervalSec, ac.getInt("stillIntervalSec"))
+        assertEquals(cur.motionThresholdM, ac.getInt("motionThresholdM"))
+        assertEquals(cur.maxAgeSec, ac.getInt("maxAgeSec"))
+    }
+
+    @Test
+    fun `ack mirrors the config after adopting a server response`() {
+        val ctx = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val adopted = com.medpad.tracker.location.TrackingConfig.updateFrom(
+            JSONObject().put(
+                "config",
+                JSONObject()
+                    .put("enabled", true)
+                    .put("moveIntervalSec", 120)
+                    .put("stillIntervalSec", 480)
+                    .put("motionThresholdM", 25)
+                    .put("maxAgeSec", 1800)
+                    .put("batchSize", 50),
+            ),
+        )
+        assertNotNull("valid config must be adopted", adopted)
+        val st = LocationSync.statusSnapshot(ctx)
+        val ac = st.getJSONObject("appliedConfig")
+        assertEquals(120, ac.getInt("moveIntervalSec"))
+        assertEquals(480, ac.getInt("stillIntervalSec"))
+        assertEquals(25, ac.getInt("motionThresholdM"))
+        assertEquals(1800, ac.getInt("maxAgeSec"))
+        assertTrue(ac.getBoolean("enabled"))
+    }
+
+    @Test
+    fun `ack travels inside the upload payload status object`() {
+        val ctx = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val st = LocationSync.statusSnapshot(ctx)
+        val payload = LocationSync.buildPayload(rows, listOf("aaa-111", "bbb-222"), st)
+        val ac = payload.getJSONObject("status").getJSONObject("appliedConfig")
+        assertTrue(ac.has("moveIntervalSec"))
+        assertTrue(ac.has("enabled"))
     }
 }
