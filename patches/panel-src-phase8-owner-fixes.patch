@@ -1,0 +1,1376 @@
+# panel-src phase 8 — owner fix batch (Nov 2026, v1.9.15-dev.1)
+#
+# 1. REAL HTTP Range serving in /api/media/[...path] (206 + Content-Range
+#    + 416) — iPhone Safari requires byte-range support for <audio>;
+#    playback there errored out while Android worked.
+# 2. Assignment notifications go ONLY to the assigned rep: the admin-side
+#    notifyAdmin + the realtime emitEvent('notification') with the
+#    REP-FACING text («...به شما اختصاص داده شد») are removed from both
+#    /api/assignments and /api/assignments/bulk — the admin (the ACTOR)
+#    used to receive a Windows/browser notification phrased as if THEY
+#    were the assignee.
+# 3. /api/app/customers incremental sync is ASSIGNMENT-AWARE: a change is
+#    now Customer.updatedAt > since OR a fresh Assignment.createdAt > since
+#    for this employee — an old customer newly assigned finally syncs.
+#    serverTime is captured BEFORE the query (race-free watermark for the
+#    app, which no longer uses local max(updatedAt)).
+# 4. /api/planned-visits window.today — the REAL server-local today (the
+#    panel's «امروز» button used window.dayKey, which equals the REQUESTED
+#    date, so clicking it did nothing).
+# 5. PlansTab: Jalali MONTH CALENDAR (per-day counts, red overdue days,
+#    click-to-open) + «همهٔ روزها» view (±۴۵ days, OVERDUE pinned section)
+#    + rows carry their Jalali date in that view.
+# 6. CustomersTab: per-customer assign/revoke dialog (checkbox list of
+#    reps — single-customer counterpart to the existing bulk operations).
+# 7. NEW src/lib/jalali.ts — the same jalaali-js algorithms the Android
+#    app uses, for the month calendar.
+diff -ruN a/src/app/api/app/customers/route.ts src/src/app/api/app/customers/route.ts
+--- a/src/app/api/app/customers/route.ts	2026-11-07 09:41:57.781414519 +0000
++++ b/src/app/api/app/customers/route.ts	2026-11-07 09:36:35.640990291 +0000
+@@ -9,12 +9,27 @@
+  * app to filter locally — a UI-only restriction that any direct API call
+  * could bypass.) The admin panel uses /api/customers, which is unaffected.
+  * LWW client compares updatedAt; `since` = incremental sync.
++ *
++ * owner fix (customers never reached a device unless re-edited): the
++ * incremental filter used ONLY Customer.updatedAt — but a NEW ASSIGNMENT
++ * of an OLD customer does not bump Customer.updatedAt, so the customer
++ * never crossed the `since` threshold and never synced. A change is now
++ * EITHER a customer edit (updatedAt > since) OR a fresh assignment to
++ * THIS employee (assignments.some.createdAt > since), so an assigned-old
++ * customer arrives on the next incremental sync.
++ *
++ * `serverTime` is captured BEFORE the query: any row written after this
++ * instant has a timestamp > it and is picked up by the NEXT incremental
++ * sync — the app stores it as its watermark (replacing the old
++ * max-local-updatedAt watermark, which also broke on user switches).
+  */
+ export async function GET(req: Request) {
+   const emp = await appEmployee(req)
+   if (!emp) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
+   const url = new URL(req.url)
+   const since = url.searchParams.get('since') // incremental sync
++  // capture the watermark BEFORE reading — see the header comment
++  const serverNow = new Date()
+ 
+   const assigned = await db.assignment.findMany({
+     where: { employeeId: emp.id },
+@@ -23,13 +38,23 @@
+   const assignedIds = assigned.map((a) => a.customerId)
+ 
+   const where: Record<string, unknown> = { id: { in: assignedIds } }
+-  if (since) where.updatedAt = { gt: new Date(since) }
++  if (since) {
++    const sinceDate = new Date(since)
++    if (!Number.isNaN(sinceDate.getTime())) {
++      where.OR = [
++        { updatedAt: { gt: sinceDate } },
++        // owner fix — a fresh ASSIGNMENT of an (old) customer is a change
++        // for THIS employee even when the customer row itself is untouched
++        { assignments: { some: { employeeId: emp.id, createdAt: { gt: sinceDate } } } },
++      ]
++    }
++  }
+ 
+   const customers = await db.customer.findMany({ where })
+   return NextResponse.json({
+     ok: true,
+     customers,
+     assignedIds,
+-    serverTime: new Date().toISOString(),
++    serverTime: serverNow.toISOString(),
+   })
+ }
+diff -ruN a/src/app/api/assignments/bulk/route.ts src/src/app/api/assignments/bulk/route.ts
+--- a/src/app/api/assignments/bulk/route.ts	2026-11-07 09:41:57.803414564 +0000
++++ b/src/app/api/assignments/bulk/route.ts	2026-11-07 09:36:20.148972322 +0000
+@@ -1,10 +1,8 @@
+ import { NextResponse } from 'next/server'
+ import { db } from '@/lib/db'
+ import { isAdmin } from '@/lib/auth'
+-import { notifyAdmin, notifyEmployee } from '@/lib/notify'
++import { notifyEmployee } from '@/lib/notify'
+ import { writeAudit } from '@/lib/audit'
+-import { emitEvent } from '@/lib/emit'
+-import { createHash } from 'crypto'
+ 
+ /**
+  * package 7 (phase 2 / task 5) — BULK assignment / unassignment.
+@@ -134,9 +132,11 @@
+     })
+ 
+     // per-pair rep notifications (same contract as the single-assign route;
+-    // eventKey on the row id makes a retried bulk a no-op for notifications)
++    // eventKey on the row id makes a retried bulk a no-op for notifications).
++    // owner fix: ONLY the reps are notified — no admin bell, no realtime
++    // toast with the rep-facing text (the admin is the actor and already
++    // sees the exact counters in the UI).
+     for (const r of createdRows) {
+-      const emp = empById.get(r.employeeId)
+       const cus = cusById.get(r.customerId)
+       await notifyEmployee({
+         employeeId: r.employeeId,
+@@ -148,14 +148,6 @@
+         entityType: 'customer',
+         entityId: r.customerId,
+       })
+-      if (emp) {
+-        await emitEvent('notification', {
+-          employeeId: r.employeeId,
+-          employeeName: emp.name,
+-          title: 'مشتری جدید اختصاص یافت',
+-          body: `«${cus?.name ?? ''}» توسط مدیر به شما اختصاص داده شد.`,
+-        })
+-      }
+     }
+   } else {
+     // unassign — either from the selected employees or from everyone
+@@ -196,22 +188,9 @@
+     }
+   }
+ 
+-  // one admin bell entry per batch (deterministic eventKey: retrying the
+-  // exact same bulk never rings twice)
+-  const batchKey = createHash('sha256')
+-    .update(`${action}|${allEmployees ? 'all' : [...employeeIds].sort().join(',')}|${[...customerIds].sort().join(',')}`)
+-    .digest('hex')
+-    .slice(0, 24)
+-  if ((action === 'assign' && created > 0) || (action === 'unassign' && removed > 0)) {
+-    await notifyAdmin({
+-      kind: 'assignment',
+-      title: action === 'assign' ? 'انتساب گروهی انجام شد' : 'لغو انتساب گروهی انجام شد',
+-      body: action === 'assign'
+-        ? `${created} انتساب جدید برای ${customerIds.length} مشتری ایجاد شد${already > 0 ? ` (${already} مورد از قبل موجود بود)` : ''}.`
+-        : `${removed} انتساب حذف شد${missing > 0 ? ` (${missing} مورد وجود نداشت)` : ''}.`,
+-      eventKey: `bulk-${action}:${batchKey}`,
+-    })
+-  }
++  // owner fix: the batch-summary admin bell + browser Push are REMOVED —
++  // the admin performed the bulk operation and the response counters are
++  // shown in the UI; only the assigned reps get notifications.
+ 
+   await writeAudit({
+     action: action === 'assign' ? 'assignment.bulk' : 'assignment.bulk-unassign',
+diff -ruN a/src/app/api/assignments/route.ts src/src/app/api/assignments/route.ts
+--- a/src/app/api/assignments/route.ts	2026-11-07 09:41:57.803414564 +0000
++++ b/src/app/api/assignments/route.ts	2026-11-07 09:35:52.587939557 +0000
+@@ -1,8 +1,7 @@
+ import { NextResponse } from 'next/server'
+ import { db } from '@/lib/db'
+ import { isAdmin } from '@/lib/auth'
+-import { emitEvent } from '@/lib/emit'
+-import { notifyAdmin, notifyEmployee } from '@/lib/notify'
++import { notifyEmployee } from '@/lib/notify'
+ 
+ export async function GET() {
+   if (!(await isAdmin())) {
+@@ -42,9 +41,12 @@
+   }
+   const row = await db.assignment.create({ data: { employeeId, customerId } })
+ 
+-  // in-app notification + panel notification + realtime toast
+-  // package 4: routed through notifyEmployee/notifyAdmin with a stable
+-  // eventKey so a retried POST can never duplicate either side.
++  // owner fix (admin received «…به شما اختصاص داده شد» as a Windows/browser
++  // notification): an assignment notifies ONLY the ASSIGNED rep. The admin
++  // performed the action and sees the result in the UI — the old extra
++  // notifyAdmin (browser Push to every admin) AND the realtime
++  // emitEvent('notification', …) with the REP-FACING text («به شما…»)
++  // are both removed; the toast text was shown to the wrong audience.
+   const eventKey = `assignment:${row.id}`
+   await notifyEmployee({
+     employeeId,
+@@ -56,20 +58,6 @@
+     entityType: 'customer',
+     entityId: customerId,
+   })
+-  await notifyAdmin({
+-    kind: 'assignment',
+-    title: 'انتساب جدید',
+-    body: `«${cus.name}» به ${emp.name} اختصاص یافت.`,
+-    employeeId,
+-    customerId,
+-    eventKey,
+-  })
+-  await emitEvent('notification', {
+-    employeeId,
+-    employeeName: emp.name,
+-    title: 'مشتری جدید اختصاص یافت',
+-    body: `«${cus.name}» توسط مدیر به شما اختصاص داده شد.`,
+-  })
+   return NextResponse.json({ ok: true, assignment: row })
+ }
+ 
+diff -ruN a/src/app/api/media/[...path]/route.ts src/src/app/api/media/[...path]/route.ts
+--- a/src/app/api/media/[...path]/route.ts	2026-11-07 09:41:57.807414573 +0000
++++ b/src/app/api/media/[...path]/route.ts	2026-11-07 09:35:25.252906384 +0000
+@@ -2,7 +2,7 @@
+ import { db } from '@/lib/db'
+ import { appEmployee, isAdmin } from '@/lib/auth'
+ import { VOICE_DIR, contentTypeFor, safeName } from '@/lib/media'
+-import { readFile } from 'fs/promises'
++import { readFile, stat } from 'fs/promises'
+ import path from 'path'
+ 
+ /**
+@@ -20,6 +20,16 @@
+  *                association is resolved. Orphans are NEVER auto-deleted.
+  * An unpredictable filename is not authorization: every download is
+  * authorized against the DB, not the URL.
++ *
++ * owner fix (iPhone Safari playback): Safari on iOS REQUIRES real
++ * byte-range support for media elements — it probes the URL with
++ * `Range: bytes=0-1` and, when the answer is a plain 200 that ignores
++ * the header, playback aborts with «cannot play». The route previously
++ * advertised `accept-ranges: bytes` without ever honouring a Range
++ * header. It now answers 206 Partial Content with a correct
++ * Content-Range slice (and a valid, unsatisfiable-range 416), which is
++ * what Chrome already tolerated and Safari demands. Content-Length is
++ * always exact; Android/desktop playback is unchanged.
+  */
+ export async function GET(req: Request, ctx: { params: Promise<{ path: string[] }> }) {
+   const { path: parts } = await ctx.params
+@@ -72,13 +82,74 @@
+   }
+ 
+   const file = path.join(VOICE_DIR, safe)
++  let size: number
++  try {
++    size = (await stat(file)).size
++  } catch {
++    return NextResponse.json({ ok: false, error: 'not found' }, { status: 404 })
++  }
++
++  const contentType = contentTypeFor(safe)
++  const rangeHeader = req.headers.get('range')
++
++  // ── owner fix: real byte-range serving (iOS Safari) ──
++  if (rangeHeader) {
++    const m = rangeHeader.match(/^bytes=(\d*)-(\d*)$/)
++    if (!m || (m[1] === '' && m[2] === '')) {
++      return new NextResponse(null, {
++        status: 416,
++        headers: { 'content-range': `bytes */${size}` },
++      })
++    }
++    let start: number
++    let end: number
++    if (m[1] === '') {
++      // suffix range: last N bytes
++      const n = Math.min(parseInt(m[2], 10) || 0, size)
++      start = size - n
++      end = size - 1
++    } else {
++      start = parseInt(m[1], 10)
++      end = m[2] === '' ? size - 1 : Math.min(parseInt(m[2], 10), size - 1)
++    }
++    if (start >= size || start > end) {
++      return new NextResponse(null, {
++        status: 416,
++        headers: { 'content-range': `bytes */${size}` },
++      })
++    }
++    try {
++      const fh = await import('fs/promises').then((fsp) => fsp.open(file, 'r'))
++      try {
++        const len = end - start + 1
++        const buf = Buffer.alloc(len)
++        await fh.read(buf, 0, len, start)
++        return new NextResponse(new Uint8Array(buf), {
++          status: 206,
++          headers: {
++            'content-type': contentType,
++            'content-length': String(len),
++            'content-range': `bytes ${start}-${end}/${size}`,
++            'accept-ranges': 'bytes',
++            'cache-control': 'private, max-age=3600',
++          },
++        })
++      } finally {
++        await fh.close()
++      }
++    } catch {
++      return NextResponse.json({ ok: false, error: 'not found' }, { status: 404 })
++    }
++  }
++
+   try {
+     const data = await readFile(file)
+     return new NextResponse(new Uint8Array(data), {
+       headers: {
+-        'content-type': contentTypeFor(safe),
+-        'cache-control': 'private, max-age=3600',
++        'content-type': contentType,
++        'content-length': String(size),
+         'accept-ranges': 'bytes',
++        'cache-control': 'private, max-age=3600',
+       },
+     })
+   } catch {
+diff -ruN a/src/app/api/planned-visits/route.ts src/src/app/api/planned-visits/route.ts
+--- a/src/app/api/planned-visits/route.ts	2026-11-07 09:41:57.803414564 +0000
++++ b/src/app/api/planned-visits/route.ts	2026-11-07 09:36:42.959998944 +0000
+@@ -126,6 +126,11 @@
+     window: {
+       mode: rangeMode,
+       dayKey: localDayKey(range.start),
++      // owner fix («امروز» button did nothing): the window's OWN day is NOT
++      // today when a specific date was requested — the panel used it as
++      // "serverToday" and the button re-selected the currently viewed day.
++      // `today` is the REAL server-local today, independent of the window.
++      today: localDayKey(new Date()),
+       start: range.start.toISOString(),
+       end: range.end.toISOString(),
+     },
+diff -ruN a/src/components/panel/CustomersTab.tsx src/src/components/panel/CustomersTab.tsx
+--- a/src/components/panel/CustomersTab.tsx	2026-11-07 09:41:57.810414579 +0000
++++ b/src/components/panel/CustomersTab.tsx	2026-11-07 09:40:51.266296795 +0000
+@@ -104,6 +104,67 @@
+   // package 8 — imperative map re-center (bump key to re-focus same coords)
+   const [focus, setFocus] = useState<{ lat: number; lng: number; zoom?: number; key: number } | null>(null)
+ 
++  // owner request — SINGLE-customer assignment management (assign/revoke
++  // per rep, complements the existing bulk operations)
++  const [assignTarget, setAssignTarget] = useState<CustomerRow | null>(null)
++  const [assignEmps, setAssignEmps] = useState<Set<string>>(new Set())
++  const [assignBusy, setAssignBusy] = useState(false)
++
++  function openAssign(c: CustomerRow) {
++    setAssignTarget(c)
++    setAssignEmps(new Set((c.assignments ?? []).map((a) => a.employee.id)))
++  }
++
++  /** owner request — save the single-customer assignment set: create the
++   *  missing pairs (POST /api/assignments) and revoke the removed ones
++   *  (DELETE /api/assignments) one by one; the result dialog lists every
++   *  outcome honestly (same no-false-success rule as the bulk route). */
++  async function saveAssign() {
++    if (!assignTarget) return
++    setAssignBusy(true)
++    const results: string[] = []
++    try {
++      const target = new Set(assignEmps)
++      const current = new Set((assignTarget.assignments ?? []).map((a) => a.employee.id))
++      for (const empId of target) {
++        if (current.has(empId)) continue
++        const emp = employees.find((e) => e.id === empId)
++        try {
++          const res = await fetch('/api/assignments', {
++            method: 'POST',
++            headers: { 'content-type': 'application/json' },
++            body: JSON.stringify({ employeeId: empId, customerId: assignTarget.id }),
++          })
++          const data = await res.json().catch(() => null)
++          if (data?.ok) results.push(`✅ ${emp?.name ?? empId} — منتسب شد`)
++          else results.push(`⚠ ${emp?.name ?? empId} — ${data?.error || 'خطا در انتساب'}`)
++        } catch {
++          results.push(`⚠ ${emp?.name ?? empId} — خطای شبکه`)
++        }
++      }
++      for (const empId of current) {
++        if (target.has(empId)) continue
++        const emp = employees.find((e) => e.id === empId)
++        try {
++          const res = await fetch(
++            `/api/assignments?employeeId=${encodeURIComponent(empId)}&customerId=${encodeURIComponent(assignTarget.id)}`,
++            { method: 'DELETE' },
++          )
++          const data = await res.json().catch(() => null)
++          if (data?.ok) results.push(`✅ ${emp?.name ?? empId} — انتساب لغو شد`)
++          else results.push(`⚠ ${emp?.name ?? empId} — ${data?.error || 'خطا در لغو انتساب'}`)
++        } catch {
++          results.push(`⚠ ${emp?.name ?? empId} — خطای شبکه`)
++        }
++      }
++      await load()
++      setAssignTarget(null)
++      alert(`«${assignTarget.name}»:\n\n${results.join('\n') || 'تغییری اعمال نشد'}`)
++    } finally {
++      setAssignBusy(false)
++    }
++  }
++
+   const load = useCallback(async () => {
+     setLoading(true)
+     try {
+@@ -560,6 +621,18 @@
+                     className="h-8 w-8"
+                     onClick={(e) => {
+                       e.stopPropagation()
++                      openAssign(c)
++                    }}
++                    title="مدیریت تخصیص (انتساب/لغو به مدرپ‌ها)"
++                  >
++                    <UserRound className="h-4 w-4 text-primary" />
++                  </Button>
++                  <Button
++                    variant="ghost"
++                    size="icon"
++                    className="h-8 w-8"
++                    onClick={(e) => {
++                      e.stopPropagation()
+                       setPickMode({ customerId: c.id, name: c.name })
+                     }}
+                     title="جابه‌جایی روی نقشه"
+@@ -742,6 +815,65 @@
+             </Button>
+           </DialogFooter>
+         </DialogContent>
++      </Dialog>
++
++      {/* owner request — SINGLE-customer assignment dialog (assign/revoke
++          per rep; the bulk operations above stay unchanged) */}
++      <Dialog open={assignTarget !== null} onOpenChange={(o) => !o && setAssignTarget(null)}>
++        <DialogContent dir="rtl" className="sm:max-w-md">
++          <DialogHeader>
++            <DialogTitle>مدیریت تخصیص — {assignTarget?.name}</DialogTitle>
++          </DialogHeader>
++          <div className="grid gap-3">
++            <p className="text-sm text-muted-foreground">
++              مدرپ‌های علامت‌خورده این مشتری را دارند. با علامت‌زدن/برداشتن، انتساب‌ها بلافاصله پس از ذخیره اعمال یا لغو می‌شوند. سوابق بازدید و چک‌این همیشه محفوظ می‌مانند.
++            </p>
++            <div className="space-y-1">
++              <Label>مدرپ‌ها</Label>
++              <ScrollArea className="h-48 rounded-lg border p-2">
++                <div className="space-y-1.5">
++                  {employees.length === 0 && (
++                    <p className="p-2 text-sm text-muted-foreground">مدرپی وجود ندارد</p>
++                  )}
++                  {employees.map((e) => (
++                    <label
++                      key={e.id}
++                      className="flex cursor-pointer items-center gap-2 rounded p-1.5 text-sm hover:bg-muted/60"
++                    >
++                      <Checkbox
++                        checked={assignEmps.has(e.id)}
++                        onCheckedChange={() =>
++                          setAssignEmps((prev) => {
++                            const next = new Set(prev)
++                            if (next.has(e.id)) next.delete(e.id)
++                            else next.add(e.id)
++                            return next
++                          })
++                        }
++                      />
++                      <span className="flex-1">{e.name}</span>
++                      {!e.active && <Badge variant="destructive">غیرفعال</Badge>}
++                      <span className="text-xs text-muted-foreground" dir="ltr">{e.username}</span>
++                    </label>
++                  ))}
++                </div>
++              </ScrollArea>
++              <p className="text-xs text-muted-foreground">
++                {assignEmps.size > 0
++                  ? `${assignEmps.size.toLocaleString('fa-IR')} مدرپ انتخاب شده`
++                  : 'بدون تخصیص (مشتری بدون مدرپ)'}
++              </p>
++            </div>
++          </div>
++          <DialogFooter>
++            <Button variant="outline" onClick={() => setAssignTarget(null)}>
++              انصراف
++            </Button>
++            <Button className="bg-primary hover:bg-primary/90" onClick={saveAssign} disabled={assignBusy}>
++              {assignBusy ? 'در حال ذخیره…' : 'ذخیرهٔ تخصیص‌ها'}
++            </Button>
++          </DialogFooter>
++        </DialogContent>
+       </Dialog>
+ 
+       {/* Edit / Create dialog — Customer-360 extended form */}
+diff -ruN a/src/components/panel/PlansTab.tsx src/src/components/panel/PlansTab.tsx
+--- a/src/components/panel/PlansTab.tsx	2026-11-07 09:41:57.811414581 +0000
++++ b/src/components/panel/PlansTab.tsx	2026-11-07 09:40:03.000238740 +0000
+@@ -35,6 +35,15 @@
+ } from 'lucide-react'
+ import type { Customer, Employee, PlanPriority, PlanStatus, PlannedVisit } from '@/lib/types'
+ import { faDate, faTime } from '@/lib/realtime'
++import {
++  JALALI_MONTH_NAMES,
++  dayKeyToJalali,
++  faDigits,
++  jalaliMonthDayRange,
++  jalaliToDayKey,
++  jalaliWeekDayIndex,
++  jalaliMonthLength,
++} from '@/lib/jalali'
+ 
+ /**
+  * phase 2 / task 1 — planned-visit management (Persian, RTL).
+@@ -48,6 +57,19 @@
+  * and every completed plan shows the REAL visit time that completed it.
+  * All mutations go through the admin API; the server re-validates
+  * everything (this UI never assumes trust).
++ *
++ * owner fix batch (Nov 2026):
++ *  - MONTH CALENDAR: a full Jalali month grid (شنبه…جمعه, RTL, Persian
++ *    digits, per-day plan counts, red marking for days with overdue
++ *    plans); clicking a day opens it in the day view.
++ *  - «امروز» actually works now: the server window carries the REAL
++ *    today (window.today) — the old code read the window's own dayKey
++ *    (which equals the REQUESTED date, so the button re-selected the
++ *    current day and nothing happened).
++ *  - «همهٔ روزها» view: a ±۴۵-day window in ONE list — OVERDUE plans are
++ *    pinned to the top in their own red section (the owner asked for
++ *    overdue plans to be visible across all days) and every row carries
++ *    its Jalali date.
+  */
+ 
+ const STATUS_META: Record<PlanStatus, { label: string; cls: string }> = {
+@@ -82,6 +104,10 @@
+   return end < now
+ }
+ 
++/** «همهٔ روزها» window width around today (the admin API has no span cap). */
++const ALL_VIEW_BACK_DAYS = 45
++const ALL_VIEW_AHEAD_DAYS = 45
++
+ interface FormState {
+   employeeId: string
+   customerId: string
+@@ -108,12 +134,20 @@
+   const [truncated, setTruncated] = useState(false)
+   const [serverToday, setServerToday] = useState<string | null>(null)
+ 
++  // owner request — view mode: single day | all days (±۴۵)
++  const [viewMode, setViewMode] = useState<'day' | 'all'>('day')
++
+   // day view + filters
+   const [dayKey, setDayKey] = useState<string>('') // '' = let the server pick today
+   const [fEmployee, setFEmployee] = useState('all')
+   const [fCustomer, setFCustomer] = useState('all')
+   const [fStatus, setFStatus] = useState<'all' | PlanStatus>('all')
+ 
++  // month calendar (owner request) — the displayed Jalali month + its plans
++  const [calJy, setCalJy] = useState(0)
++  const [calJm, setCalJm] = useState(0)
++  const [monthPlans, setMonthPlans] = useState<PlannedVisit[]>([])
++
+   const [employees, setEmployees] = useState<Employee[]>([])
+   const [customers, setCustomers] = useState<Customer[]>([])
+ 
+@@ -132,7 +166,13 @@
+     setLoadError(null)
+     try {
+       const params = new URLSearchParams()
+-      if (dayKey) params.set('date', dayKey)
++      if (viewMode === 'all') {
++        const anchor = serverToday || dayKey || new Date().toISOString().slice(0, 10)
++        params.set('from', shiftDay(anchor, -ALL_VIEW_BACK_DAYS))
++        params.set('to', shiftDay(anchor, ALL_VIEW_AHEAD_DAYS))
++      } else {
++        if (dayKey) params.set('date', dayKey)
++      }
+       if (fEmployee !== 'all') params.set('employeeId', fEmployee)
+       if (fCustomer !== 'all') params.set('customerId', fCustomer)
+       if (fStatus !== 'all') params.set('status', fStatus)
+@@ -143,20 +183,43 @@
+       setPlans(data.plans)
+       setTruncated(!!data.truncated)
+       if (data.window?.dayKey) {
+-        setServerToday(data.window.dayKey)
+-        if (!dayKey) setDayKey(data.window.dayKey) // first load: adopt the server's today
++        // owner fix — the REAL today comes from window.today now; the
++        // window's own dayKey is just the requested day
++        if (data.window.today) setServerToday(data.window.today)
++        if (!dayKey && data.window.today) setDayKey(data.window.today)
+       }
+     } catch (e) {
+       setLoadError(e instanceof Error ? e.message : 'خطا در دریافت برنامه‌ها')
+     } finally {
+       setLoading(false)
+     }
+-  }, [dayKey, fEmployee, fCustomer, fStatus])
++  }, [dayKey, fEmployee, fCustomer, fStatus, viewMode, serverToday])
+ 
+   useEffect(() => {
+     load()
+   }, [load, refreshKey])
+ 
++  /** month-calendar data — the whole displayed Jalali month, employee +
++   *  customer filters applied, ALL statuses (counts are the point). */
++  const loadMonth = useCallback(async () => {
++    if (!calJy || !calJm) return
++    try {
++      const { from, to } = jalaliMonthDayRange(calJy, calJm)
++      const params = new URLSearchParams({ from, to })
++      if (fEmployee !== 'all') params.set('employeeId', fEmployee)
++      if (fCustomer !== 'all') params.set('customerId', fCustomer)
++      const res = await fetch(`/api/planned-visits?${params.toString()}`, { cache: 'no-store' })
++      const data = await res.json().catch(() => null)
++      if (data?.ok) setMonthPlans(data.plans)
++    } catch {
++      /* the calendar is an aid — a failure keeps the previous counts */
++    }
++  }, [calJy, calJm, fEmployee, fCustomer])
++
++  useEffect(() => {
++    loadMonth()
++  }, [loadMonth, refreshKey])
++
+   // dropdown data (admin lists — one fetch, cached in state)
+   useEffect(() => {
+     Promise.all([
+@@ -168,6 +231,27 @@
+     })
+   }, [refreshKey])
+ 
++  // keep the displayed month anchored on the selected day
++  useEffect(() => {
++    if (viewMode !== 'day' || !dayKey) return
++    const j = dayKeyToJalali(dayKey)
++    if (j && (j.jy !== calJy || j.jm !== calJm)) {
++      setCalJy(j.jy)
++      setCalJm(j.jm)
++    }
++  }, [dayKey, viewMode, calJy, calJm])
++
++  // initialize the month once the server's today arrives
++  useEffect(() => {
++    if (!calJy && serverToday) {
++      const j = dayKeyToJalali(serverToday)
++      if (j) {
++        setCalJy(j.jy)
++        setCalJm(j.jm)
++      }
++    }
++  }, [serverToday, calJy])
++
+   const now = Date.now()
+   const summary = useMemo(() => {
+     const s = { total: plans.length, done: 0, remaining: 0, overdue: 0, cancelled: 0, needsResched: 0 }
+@@ -183,6 +267,45 @@
+     return s
+   }, [plans, now])
+ 
++  // ── month calendar model ──
++  const monthModel = useMemo(() => {
++    if (!calJy || !calJm) return null
++    const len = jalaliMonthLength(calJy, calJm)
++    const firstDow = jalaliWeekDayIndex(calJy, calJm, 1)
++    const counts = new Map<string, { total: number; overdue: number }>()
++    const nowMs = Date.now()
++    for (const p of monthPlans) {
++      const dk = p.scheduledAtLocal?.slice(0, 10) || p.scheduledAt.slice(0, 10)
++      const cur = counts.get(dk) ?? { total: 0, overdue: 0 }
++      cur.total++
++      if (isOverdue(p, nowMs)) cur.overdue++
++      counts.set(dk, cur)
++    }
++    const cells: ({ day: number; dayKey: string; total: number; overdue: number } | null)[] = []
++    for (let i = 0; i < firstDow; i++) cells.push(null)
++    for (let d = 1; d <= len; d++) {
++      const dk = jalaliToDayKey(calJy, calJm, d)
++      const c = counts.get(dk)
++      cells.push({ day: d, dayKey: dk, total: c?.total ?? 0, overdue: c?.overdue ?? 0 })
++    }
++    return { cells, len }
++  }, [calJy, calJm, monthPlans])
++
++  function shiftMonth(delta: number) {
++    setCalJm((m) => {
++      const nm = m + delta
++      if (nm === 0) {
++        setCalJy((y) => y - 1)
++        return 12
++      }
++      if (nm === 13) {
++        setCalJy((y) => y + 1)
++        return 1
++      }
++      return nm
++    })
++  }
++
+   function openCreate() {
+     const active = employees.filter((e) => e.active)
+     setEditing(null)
+@@ -244,6 +367,7 @@
+         // keep the view on the plan's new day after an edit/reschedule
+         if (data.plan?.scheduledAtLocal) setDayKey(data.plan.scheduledAtLocal.slice(0, 10))
+         await load()
++        await loadMonth()
+       } else {
+         toast({ title: 'خطا', description: data?.error || 'ثبت برنامه ممکن نشد', variant: 'destructive' })
+       }
+@@ -267,6 +391,7 @@
+         toast({ title: 'برنامه به زمان جدید منتقل شد' })
+         if (data.plan?.scheduledAtLocal) setDayKey(data.plan.scheduledAtLocal.slice(0, 10))
+         await load()
++        await loadMonth()
+       } else {
+         toast({ title: 'خطا', description: data?.error || 'برنامه‌ریزی مجدد ممکن نشد', variant: 'destructive' })
+       }
+@@ -290,6 +415,7 @@
+         setCancelReason('')
+         toast({ title: 'برنامه لغو شد' })
+         await load()
++        await loadMonth()
+       } else {
+         toast({ title: 'خطا', description: data?.error || 'لغو برنامه ممکن نشد', variant: 'destructive' })
+       }
+@@ -302,49 +428,228 @@
+   const jalaliLabel = dayKey ? faDate(`${dayKey}T12:00:00Z`) : ''
+   const isToday = !!serverToday && dayKey === serverToday
+ 
++  // owner request — «همهٔ روزها»: overdue plans pinned on top
++  const overduePlans = useMemo(() => plans.filter((p) => isOverdue(p, now)), [plans, now])
++  const otherPlans = useMemo(() => plans.filter((p) => !isOverdue(p, now)), [plans, now])
++
++  /** one plan row (shared by both views; showDate adds the Jalali date). */
++  function renderPlanRow(p: PlannedVisit, showDate: boolean) {
++    const overdue = isOverdue(p, now)
++    const assigned = employees
++      .find((e) => e.id === p.employeeId)
++      ?.assignments?.some((a) => a.customer.id === p.customerId)
++    return (
++      <div
++        key={p.id}
++        className={`flex flex-col gap-2 p-4 sm:flex-row sm:items-center ${
++          overdue ? 'border-r-4 border-r-rose-400 bg-rose-50/40' : ''
++        }`}
++      >
++        {/* time + duration (+ date in «همهٔ روزها») */}
++        <div className="flex min-w-[120px] flex-col items-start gap-0.5">
++          <span className="font-mono text-lg font-bold" dir="ltr">
++            {faTime(p.scheduledAt)}
++          </span>
++          {showDate && (
++            <span className="text-xs font-medium text-muted-foreground">{faDate(p.scheduledAt)}</span>
++          )}
++          <span className="flex items-center gap-1 text-xs text-muted-foreground">
++            <Clock className="h-3 w-3" />
++            {p.durationMin.toLocaleString('fa-IR')} دقیقه
++          </span>
++        </div>
++
++        {/* employee + customer */}
++        <div className="flex min-w-[220px] flex-col gap-0.5 text-sm">
++          <span className="font-medium">
++            {p.employee.name}
++            {!p.employee.active && (
++              <Badge variant="outline" className="mr-1 bg-gray-100 text-gray-500">
++                غیرفعال
++              </Badge>
++            )}
++          </span>
++          <span className="text-muted-foreground">
++            {p.customer.name}
++            <span className="text-xs">
++              {' '}
++              ({CUSTOMER_TYPE_LABEL[p.customer.type] || p.customer.type})
++            </span>
++            {assigned === false && (
++              <Badge variant="outline" className="mr-1 bg-warning/10 text-warning" title="چک‌این فقط برای مشتریان منتسب امکان‌پذیر است">
++                منتسب نیست
++              </Badge>
++            )}
++          </span>
++        </div>
++
++        {/* status / priority / overdue / linked-visit badges */}
++        <div className="flex flex-1 flex-wrap items-center gap-1.5">
++          <Badge className={`gap-1 ${STATUS_META[p.status]?.cls ?? ''}`}>
++            {p.status === 'done' ? <Check className="h-3 w-3" /> : null}
++            {STATUS_META[p.status]?.label ?? p.status}
++          </Badge>
++          <Badge variant="outline" className={PRIORITY_META[p.priority]?.cls ?? ''}>
++            {PRIORITY_META[p.priority]?.label ?? p.priority}
++          </Badge>
++          {overdue && (
++            <Badge variant="outline" className="border-rose-300 bg-rose-100 text-rose-700">
++              عقب‌افتاده
++            </Badge>
++          )}
++          {p.status === 'done' && p.visit && (
++            <Badge variant="outline" className="bg-emerald-50 text-emerald-700" title="بازدید واقعی ثبت‌شده">
++              بازدید واقعی: {faTime(p.visit.startAt)}
++            </Badge>
++          )}
++          {/* mission item 8 — the persisted plan deviation (set by the
++              check-in linkage; NULL = plan-less, never invented) */}
++          {p.status === 'done' && p.visit?.deviationMin != null && (
++            <Badge
++              variant="outline"
++              data-testid={`plan-deviation-${p.id}`}
++              className={
++                p.visit.deviationMin === 0
++                  ? 'bg-emerald-50 text-emerald-700'
++                  : p.visit.deviationMin < 0
++                    ? 'bg-warning/10 text-warning'
++                    : 'bg-rose-50 text-rose-700'
++              }
++              title="اختلاف شروع ویزیت واقعی با زمان برنامه‌ریزی‌شده"
++            >
++              {p.visit.deviationMin === 0
++                ? 'به‌موقع'
++                : p.visit.deviationMin < 0
++                  ? `${Math.abs(p.visit.deviationMin).toLocaleString('fa-IR')} دقیقه تعجیل`
++                  : `${p.visit.deviationMin.toLocaleString('fa-IR')} دقیقه تأخیر`}
++            </Badge>
++          )}
++          {p.status !== 'done' && p.actualVisit && (
++            <Badge
++              variant="outline"
++              className="bg-sky-50 text-sky-700"
++              title="بازدید واقعی هم‌روز بدون اتصال به این برنامه — پیوند خودکار انجام نشده است"
++            >
++              بازدید ثبت‌شده بدون پیوند: {faTime(p.actualVisit.startAt)}
++            </Badge>
++          )}
++        </div>
++
++        {/* note */}
++        <div className="min-w-[160px] max-w-[280px] flex-1 text-sm">
++          {p.note ? (
++            <p className="line-clamp-2 whitespace-pre-line">{p.note}</p>
++          ) : (
++            <p className="text-muted-foreground">بدون توضیح</p>
++          )}
++        </div>
++
++        {/* actions */}
++        <div className="flex items-center gap-1">
++          {(p.status === 'scheduled' || p.status === 'needs_reschedule') && (
++            <>
++              <Button variant="ghost" size="icon" title="ویرایش" onClick={() => openEdit(p)}>
++                <Pencil className="h-4 w-4" />
++              </Button>
++              <Button
++                variant="ghost"
++                size="icon"
++                title="برنامه‌ریزی مجدد"
++                onClick={() => {
++                  setReschedPlan(p)
++                  setReschedAt(p.scheduledAtLocal || p.scheduledAt.slice(0, 16))
++                }}
++              >
++                <CalendarClock className="h-4 w-4 text-warning" />
++              </Button>
++              <Button
++                variant="ghost"
++                size="icon"
++                title="لغو برنامه"
++                onClick={() => {
++                  setCancelPlan(p)
++                  setCancelReason('')
++                }}
++              >
++                <X className="h-4 w-4 text-destructive" />
++              </Button>
++            </>
++          )}
++        </div>
++      </div>
++    )
++  }
++
+   return (
+     <div className="space-y-4">
+-      {/* ── day navigation + filters ── v1.9.13-dev.2 (user report #3):
+-          restructured for phones — day nav on one row, filters as a 2-col
+-          grid that becomes one flex row from sm: up. The old single
+-          flex-wrap row with three fixed 150px selects + buttons did not fit
+-          a 390px screen and pushed the page sideways. */}
++      {/* ── view mode + day navigation + filters ── */}
+       <div className="flex flex-col gap-2">
+         <div className="flex flex-wrap items-center gap-2">
+-          <div className="flex items-center gap-1">
+-            <Button
+-              variant="outline"
+-              size="icon"
+-              title="روز قبل"
+-              disabled={!dayKey}
+-              onClick={() => setDayKey(shiftDay(dayKey, -1))}
++          {/* owner request — view mode: روز / همهٔ روزها */}
++          <div className="flex overflow-hidden rounded-lg border" data-testid="plans-view-mode">
++            <button
++              className={`px-3 py-1.5 text-sm font-medium transition-colors ${
++                viewMode === 'day' ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:bg-muted'
++              }`}
++              onClick={() => setViewMode('day')}
+             >
+-              <ChevronRight className="h-4 w-4" />
+-            </Button>
+-            <Input
+-              dir="ltr"
+-              type="date"
+-              className="w-[140px] text-left sm:w-[150px]"
+-              value={dayKey}
+-              onChange={(e) => e.target.value && setDayKey(e.target.value)}
+-            />
+-            <Button
+-              variant="outline"
+-              size="icon"
+-              title="روز بعد"
+-              disabled={!dayKey}
+-              onClick={() => setDayKey(shiftDay(dayKey, 1))}
++              روز
++            </button>
++            <button
++              className={`px-3 py-1.5 text-sm font-medium transition-colors ${
++                viewMode === 'all' ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:bg-muted'
++              }`}
++              onClick={() => setViewMode('all')}
+             >
+-              <ChevronLeft className="h-4 w-4" />
+-            </Button>
+-            <Button variant="outline" size="sm" onClick={() => setDayKey(serverToday || dayKey)}>
+-              امروز
+-            </Button>
+-          </div>
+-          <div className="text-sm font-medium text-muted-foreground">
+-            {jalaliLabel}
+-            {isToday && <span className="mr-1 text-primary">(امروز)</span>}
++              همهٔ روزها
++            </button>
+           </div>
++
++          {viewMode === 'day' && (
++            <div className="flex items-center gap-1">
++              <Button
++                variant="outline"
++                size="icon"
++                title="روز قبل"
++                disabled={!dayKey}
++                onClick={() => setDayKey(shiftDay(dayKey, -1))}
++              >
++                <ChevronRight className="h-4 w-4" />
++              </Button>
++              <Input
++                dir="ltr"
++                type="date"
++                className="w-[140px] text-left sm:w-[150px]"
++                value={dayKey}
++                onChange={(e) => e.target.value && setDayKey(e.target.value)}
++              />
++              <Button
++                variant="outline"
++                size="icon"
++                title="روز بعد"
++                disabled={!dayKey}
++                onClick={() => setDayKey(shiftDay(dayKey, 1))}
++              >
++                <ChevronLeft className="h-4 w-4" />
++              </Button>
++              {/* owner fix — «امروز» uses the REAL server today (window.today) */}
++              <Button variant="outline" size="sm" onClick={() => setDayKey(serverToday || dayKey)}>
++                امروز
++              </Button>
++            </div>
++          )}
++          {viewMode === 'day' && (
++            <div className="text-sm font-medium text-muted-foreground">
++              {jalaliLabel}
++              {isToday && <span className="mr-1 text-primary">(امروز)</span>}
++            </div>
++          )}
++          {viewMode === 'all' && (
++            <div className="text-sm font-medium text-muted-foreground">
++              همهٔ روزها — از {serverToday ? faDate(`${shiftDay(serverToday, -ALL_VIEW_BACK_DAYS)}T12:00:00Z`) : ''} تا{' '}
++              {serverToday ? faDate(`${shiftDay(serverToday, ALL_VIEW_AHEAD_DAYS)}T12:00:00Z`) : ''}
++            </div>
++          )}
+           <div className="flex flex-wrap items-center gap-2 sm:mr-auto">
+             <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+@@ -398,6 +703,77 @@
+         </div>
+       </div>
+ 
++      {/* ── owner request — the Jalali MONTH CALENDAR ── */}
++      {monthModel && (
++        <div className="rounded-xl border bg-card p-3" data-testid="plans-month-calendar">
++          <div className="mb-2 flex items-center justify-between">
++            <Button variant="ghost" size="icon" title="ماه قبل" onClick={() => shiftMonth(-1)}>
++              <ChevronRight className="h-4 w-4" />
++            </Button>
++            <div className="text-sm font-bold">
++              {JALALI_MONTH_NAMES[calJm - 1]} {faDigits(calJy)}
++            </div>
++            <Button variant="ghost" size="icon" title="ماه بعد" onClick={() => shiftMonth(1)}>
++              <ChevronLeft className="h-4 w-4" />
++            </Button>
++          </div>
++          <div className="grid grid-cols-7 gap-1 text-center text-[11px] text-muted-foreground" dir="rtl">
++            {['ش', 'ی', 'د', 'س', 'چ', 'پ', 'ج'].map((d, i) => (
++              <span key={i} className="py-1 font-medium">
++                {d}
++              </span>
++            ))}
++          </div>
++          <div className="mt-1 grid grid-cols-7 gap-1" dir="rtl">
++            {monthModel.cells.map((c, i) =>
++              c === null ? (
++                <span key={`b${i}`} />
++              ) : (
++                <button
++                  key={c.dayKey}
++                  onClick={() => {
++                    setViewMode('day')
++                    setDayKey(c.dayKey)
++                  }}
++                  title={
++                    c.total > 0
++                      ? `${c.total.toLocaleString('fa-IR')} برنامه${c.overdue > 0 ? ` — ${c.overdue.toLocaleString('fa-IR')} عقب‌افتاده` : ''}`
++                      : 'بدون برنامه'
++                  }
++                  className={`relative flex h-11 flex-col items-center justify-center rounded-lg text-sm transition-colors ${
++                    c.dayKey === dayKey && viewMode === 'day'
++                      ? 'bg-primary font-bold text-primary-foreground'
++                      : c.dayKey === serverToday
++                        ? 'bg-amber-500/90 font-bold text-white'
++                        : c.overdue > 0
++                          ? 'bg-rose-50 font-medium text-rose-800 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-200'
++                          : 'bg-muted/50 text-foreground hover:bg-muted'
++                  }`}
++                >
++                  {faDigits(c.day)}
++                  {c.total > 0 && (
++                    <span
++                      className={`absolute bottom-0.5 rounded-full px-1 text-[9px] leading-tight ${
++                        c.dayKey === dayKey && viewMode === 'day'
++                          ? 'bg-white/25 text-white'
++                          : c.overdue > 0
++                            ? 'bg-rose-600 text-white'
++                            : 'bg-primary/15 text-primary'
++                      }`}
++                    >
++                      {faDigits(c.total)}
++                    </span>
++                  )}
++                </button>
++              ),
++            )}
++          </div>
++          <p className="mt-2 text-[11px] text-muted-foreground">
++            عدد داخل هر روز = تعداد برنامه‌های آن روز؛ روزهای عقب‌افتاده با رنگ قرمز مشخص‌اند. روی هر روز کلیک کنید تا برنامه‌هایش باز شود.
++          </p>
++        </div>
++      )}
++
+       {/* ── day summary (plain numbers — no decorative charts) ── */}
+       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border bg-muted/30 px-4 py-2 text-sm">
+         <span className="font-medium">{summary.total.toLocaleString('fa-IR')} برنامه</span>
+@@ -424,151 +800,32 @@
+       <ScrollArea className="h-[56vh] rounded-xl border">
+         <div className="divide-y mp-scroll">
+           {plans.length === 0 && !loading && (
+-            <p className="p-8 text-center text-muted-foreground">برنامه‌ای برای این روز ثبت نشده است</p>
++            <p className="p-8 text-center text-muted-foreground">
++              {viewMode === 'all'
++                ? 'در بازهٔ ۹۰ روزهٔ اخیر برنامه‌ای مطابق فیلترها یافت نشد'
++                : 'برنامه‌ای برای این روز ثبت نشده است'}
++            </p>
+           )}
+-          {plans.map((p) => {
+-            const overdue = isOverdue(p, now)
+-            const assigned = employees
+-              .find((e) => e.id === p.employeeId)
+-              ?.assignments?.some((a) => a.customer.id === p.customerId)
+-            return (
+-              <div
+-                key={p.id}
+-                className={`flex flex-col gap-2 p-4 sm:flex-row sm:items-center ${
+-                  overdue ? 'border-r-4 border-r-rose-400 bg-rose-50/40' : ''
+-                }`}
+-              >
+-                {/* time + duration */}
+-                <div className="flex min-w-[120px] flex-col items-start gap-0.5">
+-                  <span className="font-mono text-lg font-bold" dir="ltr">
+-                    {faTime(p.scheduledAt)}
+-                  </span>
+-                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
+-                    <Clock className="h-3 w-3" />
+-                    {p.durationMin.toLocaleString('fa-IR')} دقیقه
+-                  </span>
+-                </div>
+-
+-                {/* employee + customer */}
+-                <div className="flex min-w-[220px] flex-col gap-0.5 text-sm">
+-                  <span className="font-medium">
+-                    {p.employee.name}
+-                    {!p.employee.active && (
+-                      <Badge variant="outline" className="mr-1 bg-gray-100 text-gray-500">
+-                        غیرفعال
+-                      </Badge>
+-                    )}
+-                  </span>
+-                  <span className="text-muted-foreground">
+-                    {p.customer.name}
+-                    <span className="text-xs">
+-                      {' '}
+-                      ({CUSTOMER_TYPE_LABEL[p.customer.type] || p.customer.type})
+-                    </span>
+-                    {assigned === false && (
+-                      <Badge variant="outline" className="mr-1 bg-warning/10 text-warning" title="چک‌این فقط برای مشتریان منتسب امکان‌پذیر است">
+-                        منتسب نیست
+-                      </Badge>
+-                    )}
+-                  </span>
+-                </div>
+ 
+-                {/* status / priority / overdue / linked-visit badges */}
+-                <div className="flex flex-1 flex-wrap items-center gap-1.5">
+-                  <Badge className={`gap-1 ${STATUS_META[p.status]?.cls ?? ''}`}>
+-                    {p.status === 'done' ? <Check className="h-3 w-3" /> : null}
+-                    {STATUS_META[p.status]?.label ?? p.status}
+-                  </Badge>
+-                  <Badge variant="outline" className={PRIORITY_META[p.priority]?.cls ?? ''}>
+-                    {PRIORITY_META[p.priority]?.label ?? p.priority}
+-                  </Badge>
+-                  {overdue && (
+-                    <Badge variant="outline" className="border-rose-300 bg-rose-100 text-rose-700">
+-                      عقب‌افتاده
+-                    </Badge>
+-                  )}
+-                  {p.status === 'done' && p.visit && (
+-                    <Badge variant="outline" className="bg-emerald-50 text-emerald-700" title="بازدید واقعی ثبت‌شده">
+-                      بازدید واقعی: {faTime(p.visit.startAt)}
+-                    </Badge>
+-                  )}
+-                  {/* mission item 8 — the persisted plan deviation (set by the
+-                      check-in linkage; NULL = plan-less, never invented) */}
+-                  {p.status === 'done' && p.visit?.deviationMin != null && (
+-                    <Badge
+-                      variant="outline"
+-                      data-testid={`plan-deviation-${p.id}`}
+-                      className={
+-                        p.visit.deviationMin === 0
+-                          ? 'bg-emerald-50 text-emerald-700'
+-                          : p.visit.deviationMin < 0
+-                            ? 'bg-warning/10 text-warning'
+-                            : 'bg-rose-50 text-rose-700'
+-                      }
+-                      title="اختلاف شروع ویزیت واقعی با زمان برنامه‌ریزی‌شده"
+-                    >
+-                      {p.visit.deviationMin === 0
+-                        ? 'به‌موقع'
+-                        : p.visit.deviationMin < 0
+-                          ? `${Math.abs(p.visit.deviationMin).toLocaleString('fa-IR')} دقیقه تعجیل`
+-                          : `${p.visit.deviationMin.toLocaleString('fa-IR')} دقیقه تأخیر`}
+-                    </Badge>
+-                  )}
+-                  {p.status !== 'done' && p.actualVisit && (
+-                    <Badge
+-                      variant="outline"
+-                      className="bg-sky-50 text-sky-700"
+-                      title="بازدید واقعی هم‌روز بدون اتصال به این برنامه — پیوند خودکار انجام نشده است"
+-                    >
+-                      بازدید ثبت‌شده بدون پیوند: {faTime(p.actualVisit.startAt)}
+-                    </Badge>
+-                  )}
+-                </div>
+-
+-                {/* note */}
+-                <div className="min-w-[160px] max-w-[280px] flex-1 text-sm">
+-                  {p.note ? (
+-                    <p className="line-clamp-2 whitespace-pre-line">{p.note}</p>
+-                  ) : (
+-                    <p className="text-muted-foreground">بدون توضیح</p>
+-                  )}
++          {/* owner request — OVERDUE PINNED FIRST (both views; in «همهٔ روزها»
++              this is the across-all-days overdue section the owner asked for) */}
++          {overduePlans.length > 0 && (
++            <>
++              <div className="flex items-center gap-2 bg-rose-50 px-4 py-2 text-sm font-bold text-rose-800 dark:bg-rose-950/40 dark:text-rose-200">
++                <span className="h-2 w-2 rounded-full bg-rose-600" />
++                برنامه‌های عقب‌افتاده ({overduePlans.length.toLocaleString('fa-IR')})
++                {viewMode === 'all' && <span className="font-normal">— از همهٔ روزها</span>}
++              </div>
++              {overduePlans.map((p) => renderPlanRow(p, true))}
++              {otherPlans.length > 0 && (
++                <div className="flex items-center gap-2 bg-muted/60 px-4 py-2 text-sm font-medium text-muted-foreground">
++                  سایر برنامه‌ها ({otherPlans.length.toLocaleString('fa-IR')})
+                 </div>
++              )}
++            </>
++          )}
+ 
+-                {/* actions */}
+-                <div className="flex items-center gap-1">
+-                  {(p.status === 'scheduled' || p.status === 'needs_reschedule') && (
+-                    <>
+-                      <Button variant="ghost" size="icon" title="ویرایش" onClick={() => openEdit(p)}>
+-                        <Pencil className="h-4 w-4" />
+-                      </Button>
+-                      <Button
+-                        variant="ghost"
+-                        size="icon"
+-                        title="برنامه‌ریزی مجدد"
+-                        onClick={() => {
+-                          setReschedPlan(p)
+-                          setReschedAt(p.scheduledAtLocal || p.scheduledAt.slice(0, 16))
+-                        }}
+-                      >
+-                        <CalendarClock className="h-4 w-4 text-warning" />
+-                      </Button>
+-                      <Button
+-                        variant="ghost"
+-                        size="icon"
+-                        title="لغو برنامه"
+-                        onClick={() => {
+-                          setCancelPlan(p)
+-                          setCancelReason('')
+-                        }}
+-                      >
+-                        <X className="h-4 w-4 text-destructive" />
+-                      </Button>
+-                    </>
+-                  )}
+-                </div>
+-              </div>
+-            )
+-          })}
++          {otherPlans.map((p) => renderPlanRow(p, viewMode === 'all'))}
+         </div>
+       </ScrollArea>
+ 
+diff -ruN a/src/lib/jalali.ts src/src/lib/jalali.ts
+--- a/src/lib/jalali.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/lib/jalali.ts	2026-11-07 09:37:12.464034475 +0000
+@@ -0,0 +1,144 @@
++/**
++ * owner fix batch (Nov 2026) — Jalali (Persian) calendar math for the
++ * panel's month calendar in the plans tab. Clean port of the SAME
++ * jalaali-js algorithms the Android app uses (JalaliDate.kt) so both
++ * sides agree on month lengths, leap years and weekday indices.
++ * All months/days are 1-based.
++ */
++
++export interface JDate {
++  jy: number
++  jm: number
++  jd: number
++}
++
++const div = (a: number, b: number) => Math.trunc(a / b)
++const mod = (a: number, b: number) => {
++  const r = a % b
++  return r < 0 ? r + b : r
++}
++
++export function isLeapJalali(jy: number): boolean {
++  const m = mod(jy, 33)
++  return [1, 5, 9, 13, 17, 22, 26, 30].includes(m)
++}
++
++function jalCal(jy: number): number[] {
++  const breaks = [
++    -61, 9, 38, 199, 426, 686, 756, 818, 1111, 1181, 1210, 1635, 2060, 2097,
++    2192, 2262, 2324, 2394, 2456, 3178,
++  ]
++  const gy = jy + 621
++  let leapJ = -14
++  let jp = breaks[0]
++  let jump = 0
++  for (let i = 1; i < breaks.length; i++) {
++    const jm = breaks[i]
++    jump = jm - jp
++    if (jy < jm) break
++    leapJ += div(jump, 33) * 8 + div(mod(jump, 33), 4)
++    jp = jm
++  }
++  let n = jy - jp
++  leapJ += div(n, 33) * 8 + div(mod(n, 33) + 3, 4)
++  if (mod(jump, 33) === 4 && jump - n === 4) leapJ += 1
++  const leapG = div(gy, 4) - div((div(gy, 100) + 1) * 3, 4) - 150
++  const march = 20 + leapJ - leapG
++  if (jump - n < 6) n = n - jump + div(jump + 4, 33) * 33
++  let leap = mod(mod(n + 1, 33) - 1, 4)
++  if (leap === -1) leap = 4
++  return [leap, gy, march]
++}
++
++function g2d(gy: number, gm: number, gd: number): number {
++  let d =
++    div((gy + div(gm - 8, 6) + 100100) * 1461, 4) +
++    div(153 * mod(gm + 9, 12) + 2, 5) +
++    gd -
++    34840408
++  d = d - div(div(gy + 100100 + div(gm - 8, 6), 100) * 3, 4) + 752
++  return d
++}
++
++function d2g(jdn: number): number[] {
++  let j = 4 * jdn + 139361631
++  j = j + div(div(4 * jdn + 183187720, 146097) * 3, 4) * 4 - 3908
++  const i = div(mod(j, 1461), 4) * 5 + 308
++  const gd = div(mod(i, 153), 5) + 1
++  const gm = mod(div(i, 153), 12) + 1
++  const gy = div(j, 1461) - 100100 + div(8 - gm, 6)
++  return [gy, gm, gd]
++}
++
++/** Gregorian (UTC civil fields) → Jalali */
++export function toJalali(gy: number, gm: number, gd: number): JDate {
++  const jdn = g2d(gy, gm, gd)
++  const r = jalCal(gy - 621)
++  const jdn1f = g2d(r[1], 3, r[2])
++  let k = jdn - jdn1f
++  let jy = gy - 621
++  if (k >= 0) {
++    if (k <= 185) return { jy, jm: 1 + div(k, 31), jd: mod(k, 31) + 1 }
++    k -= 186
++  } else {
++    jy -= 1
++    k += 179
++    if (r[0] === 1) k += 1
++  }
++  return { jy, jm: 7 + div(k, 30), jd: mod(k, 30) + 1 }
++}
++
++/** Jalali → Gregorian [gy, gm, gd] */
++export function toGregorian(jy: number, jm: number, jd: number): number[] {
++  const r = jalCal(jy)
++  let jdn = g2d(r[1], 3, r[2])
++  jdn += (jm - 1) * 31 - div(jm, 7) * (jm - 7)
++  jdn += jd - 1
++  return d2g(jdn)
++}
++
++/** Jalali month length (29..31). */
++export function jalaliMonthLength(jy: number, jm: number): number {
++  if (jm <= 6) return 31
++  if (jm <= 11) return 30
++  return isLeapJalali(jy) ? 30 : 29
++}
++
++export const JALALI_MONTH_NAMES = [
++  'فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور',
++  'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند',
++]
++
++/** 0-based Persian weekday of a Jalali date: 0 = شنبه … 6 = جمعه */
++export function jalaliWeekDayIndex(jy: number, jm: number, jd: number): number {
++  const g = toGregorian(jy, jm, jd)
++  const cal = new Date(Date.UTC(g[0], g[1] - 1, g[2]))
++  const dow = cal.getUTCDay() // SUNDAY=0 … SATURDAY=6
++  return (dow + 1) % 7 // SATURDAY(6)→0=شنبه, SUNDAY(0)→1, … FRIDAY(5)→6=جمعه
++}
++
++const FA_DIGITS = '۰۱۲۳۴۵۶۷۸۹'
++export function faDigits(n: number | string): string {
++  return String(n).replace(/\d/g, (d) => FA_DIGITS[+d])
++}
++
++/** The Jalali date of a YYYY-MM-DD day key. */
++export function dayKeyToJalali(dayKey: string): JDate | null {
++  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayKey)
++  if (!m) return null
++  return toJalali(Number(m[1]), Number(m[2]), Number(m[3]))
++}
++
++/** The YYYY-MM-DD day key of a Jalali date. */
++export function jalaliToDayKey(jy: number, jm: number, jd: number): string {
++  const g = toGregorian(jy, jm, jd)
++  return `${String(g[0]).padStart(4, '0')}-${String(g[1]).padStart(2, '0')}-${String(g[2]).padStart(2, '0')}`
++}
++
++/** Inclusive [from, to] YYYY-MM-DD range covering the given Jalali month. */
++export function jalaliMonthDayRange(jy: number, jm: number): { from: string; to: string } {
++  return {
++    from: jalaliToDayKey(jy, jm, 1),
++    to: jalaliToDayKey(jy, jm, jalaliMonthLength(jy, jm)),
++  }
++}

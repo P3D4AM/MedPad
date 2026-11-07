@@ -19,7 +19,13 @@
 #           phase7-central-settings (phase 4 comprehensive: UNIFIED settings
 #           section with the 11 pre-defined categories + saved-vs-applied
 #           device ack + browser Push (VAPID boot-gen, PushSubscription,
-#           sw.js) + duplicate permission-bell icon removal — last)
+#           sw.js) + duplicate permission-bell icon removal) →
+#           phase8-owner-fixes (Nov 2026 owner fix batch: real HTTP Range
+#           serving for iOS Safari voice playback, assignment notifications
+#           go ONLY to the assigned rep, assignment-aware incremental app
+#           customers sync, plans window.today, Jalali month calendar +
+#           همهٔ روزها view with pinned overdue section, per-customer
+#           assign/revoke dialog — last)
 #
 # This script performs the WHOLE reproducible pipeline and verifies it:
 #   1. fresh extraction of the base source (git archive)
@@ -55,7 +61,7 @@ set -euo pipefail
 REPO_ROOT="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
 WORK="${2:-$REPO_ROOT/panel-build}"
 BASE_REF="bd9c80b:medpad-full-1.9/inst-stage/panel-src"
-CHAIN="phase1-task1 phase2-remediation phase2-task1 phase2-task2 phase2-dev2-fixes phase2-package4 phase2-madrep phase2-package6 phase2-package7 phase2-package9 phase2-package5 phase2-package13 phase3-package14 phase4-package15 phase5-package16 phase6-customer360 phase7-central-settings"
+CHAIN="phase1-task1 phase2-remediation phase2-task1 phase2-task2 phase2-dev2-fixes phase2-package4 phase2-madrep phase2-package6 phase2-package7 phase2-package9 phase2-package5 phase2-package13 phase3-package14 phase4-package15 phase5-package16 phase6-customer360 phase7-central-settings phase8-owner-fixes"
 
 # RESUME mode (sandbox convenience): with MEDPAD_BUILD_RESUME=1 an existing
 # $WORK/src with node_modules (from an interrupted run — e.g. a sandbox that
@@ -105,6 +111,8 @@ fi
 # phase 7 markers (comprehensive phase 4 — unified settings + browser Push)
 [ -f "$WORK/src/src/components/panel/SettingsTab.tsx" ] || die "patch chain did not produce SettingsTab.tsx"
 [ -f "$WORK/src/public/sw.js" ] || die "patch chain did not produce public/sw.js"
+# phase 8 markers (owner fix batch — Jalali calendar lib + month calendar)
+[ -f "$WORK/src/src/lib/jalali.ts" ] || die "patch chain did not produce src/lib/jalali.ts"
 cd "$WORK/src"
 
 # ── 3. npm install ──────────────────────────────────────────────────────────
