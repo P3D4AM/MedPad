@@ -6,12 +6,15 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.text.InputType
+import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageButton
+import android.widget.LinearLayout
+import android.widget.NumberPicker
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -39,15 +42,27 @@ import java.util.GregorianCalendar
  * «برنامهٔ بازدیدها» — phase 2 / task 2.
  *
  * Shows the employee's own server-planned visits, grouped by SERVER-local
- * day (dayKey) with sections for remaining / done / needs-reschedule /
- * cancelled. Plans are READ-ONLY: tapping one shows details and, when the
- * customer is currently assigned, opens the EXISTING check-in flow with
- * the customer preselected. The plan's status is only ever updated from
- * the server (check-in linkage) — never by a local write.
+ * day (dayKey) with sections for overdue / remaining / done /
+ * needs-reschedule / cancelled. Plans are READ-ONLY: tapping one shows
+ * details and, when the customer is currently assigned, opens the EXISTING
+ * check-in flow with the customer preselected. The plan's status is only
+ * ever updated from the server (check-in linkage) — never by a local write.
  *
  * Offline behaviour: the Room cache of the last successful sync stays
  * fully browsable; the sync line shows the last-sync time (or "offline").
  * A plans fetch failure never touches the check-in offline queue.
+ *
+ * owner fix batch (Nov 2026):
+ *  - FILTERING: view mode (روز / همهٔ روزها) + status + customer chips.
+ *  - OVERDUE plans are pinned to the TOP of the list (a dedicated red
+ *    section across ALL cached days) and a warning banner tells the rep
+ *    they are behind schedule («شما از برنامه عقب هستید»).
+ *  - «همهٔ روزها» view: every cached day is listed (grouped by day, today
+ *    first, then upcoming, then past) — overdue plans stay visible there.
+ *  - «امروز» button jumps back to today from any day.
+ *  - The calendar icon OPENS the Jalali date picker (it used to refresh).
+ *  - The extra PLUS button is gone from the header.
+ *  - Day arrows rotated 180° (prev = ←, next = →).
  */
 class PlansActivity : AppCompatActivity() {
 
@@ -61,12 +76,22 @@ class PlansActivity : AppCompatActivity() {
     private lateinit var tvTodayChip: TextView
     private lateinit var tvSyncInfo: TextView
     private lateinit var boxSummary: ViewGroup
+    private lateinit var boxFilters: LinearLayout
+    private lateinit var tvOverdueWarning: TextView
     private val adapter = PlansAdapter()
 
     /** The selected server-local day (YYYY-MM-DD). */
     private var dayKey: String = PlansSync.deviceDayKey(0)
 
+    // owner request — view mode + filters
+    private var mode: String = MODE_DAY          // day | all
+    private var fStatus: String = "all"          // all|scheduled|overdue|done|needs_reschedule|cancelled
+    private var fCustomer: String = "all"        // customer id | "all"
+
     companion object {
+        const val MODE_DAY = "day"
+        const val MODE_ALL = "all"
+
         /** mission item 3 — open THIS exact plan (notification tap): jump to
          *  its day, highlight the row and open its details dialog. */
         const val EXTRA_PLAN_ID = "medpad.extra.PLAN_ID"
@@ -84,6 +109,9 @@ class PlansActivity : AppCompatActivity() {
 
     /** true while a sync is in flight (drives the loading state). */
     private var syncing = false
+
+    /** generation guard for the async customer-chip load */
+    private var chipsGen = 0
 
     private var authDialogShown = false
 
@@ -107,15 +135,19 @@ class PlansActivity : AppCompatActivity() {
         tvTodayChip = findViewById(R.id.tvTodayChip)
         tvSyncInfo = findViewById(R.id.tvSyncInfo)
         boxSummary = findViewById(R.id.boxSummary)
+        boxFilters = findViewById(R.id.boxFilters)
+        tvOverdueWarning = findViewById(R.id.tvOverdueWarning)
 
         recycler.layoutManager = LinearLayoutManager(this)
         recycler.adapter = adapter
 
         findViewById<ImageButton>(R.id.btnBack).setOnClickListener { finish() }
-        findViewById<ImageButton>(R.id.btnRequests).setOnClickListener { showMyRequests() }
-        findViewById<ImageButton>(R.id.btnRefresh).setOnClickListener { sync(true) }
+        // owner fix — the header calendar icon opens the Jalali picker now
+        // (refresh still runs on every resume); the plus button is gone.
+        findViewById<ImageButton>(R.id.btnPickDate).setOnClickListener { showJalaliDatePicker() }
         findViewById<ImageButton>(R.id.btnPrevDay).setOnClickListener { shiftDay(-1) }
         findViewById<ImageButton>(R.id.btnNextDay).setOnClickListener { shiftDay(+1) }
+        findViewById<Button>(R.id.btnToday).setOnClickListener { gotoToday() }
         btnRetry.setOnClickListener { sync(true) }
 
         // anchor on the server's today when we have one (device clock may skew)
@@ -127,6 +159,7 @@ class PlansActivity : AppCompatActivity() {
         pendingFocusPlanId = intent.getStringExtra(EXTRA_PLAN_ID)?.takeIf { it.isNotEmpty() }
         pendingOpenRequests = intent.getBooleanExtra(EXTRA_OPEN_REQUESTS, false)
 
+        buildFilterChips()
         sync(false)
     }
 
@@ -140,6 +173,17 @@ class PlansActivity : AppCompatActivity() {
     private fun shiftDay(delta: Int) {
         val next = PlansSync.dayKeyPlus(dayKey, delta) ?: return
         dayKey = next
+        mode = MODE_DAY // owner fix — day navigation returns to the day view
+        buildFilterChips()
+        render()
+    }
+
+    /** owner request — «امروز»: back to today + the day view. */
+    private fun gotoToday() {
+        val today = PlansSync.serverToday().ifEmpty { PlansSync.deviceDayKey(0) }
+        dayKey = today
+        mode = MODE_DAY
+        buildFilterChips()
         render()
     }
 
@@ -194,6 +238,7 @@ class PlansActivity : AppCompatActivity() {
                 }
                 // jump to the plan's day and focus its row
                 dayKey = plan.dayKey
+                mode = MODE_DAY
                 highlightedPlanId = plan.id
                 render()
                 focusPlanRow(plan)
@@ -220,22 +265,48 @@ class PlansActivity : AppCompatActivity() {
         scope.launch {
             val plans = withContext(Dispatchers.IO) {
                 // read through the same singleton the sync writes to
-                com.medpad.tracker.db.AppDatabase
+                val dao = com.medpad.tracker.db.AppDatabase
                     .get(com.medpad.tracker.sync.TrackerContext.app)
-                    .plannedVisitDao().byDay(dayKey)
+                    .plannedVisitDao()
+                // owner request — «همهٔ روزها» reads the WHOLE cached window
+                if (mode == MODE_ALL) dao.all() else dao.byDay(dayKey)
             }
-            renderDay(plans)
+            renderPlans(plans)
         }
     }
 
-    private fun renderDay(plans: List<PlannedVisitEntity>) {
+    /** owner request — status classification used by the filter + sections:
+     *  an OPEN scheduled plan whose time has passed is OVERDUE (the server
+     *  computes the flag on its clock so every device agrees). */
+    private fun statusKey(p: PlannedVisitEntity): String = when {
+        p.status == "scheduled" && p.overdue -> "overdue"
+        else -> p.status
+    }
+
+    private fun matchesFilters(p: PlannedVisitEntity): Boolean {
+        if (fStatus != "all" && statusKey(p) != fStatus) return false
+        if (fCustomer != "all" && p.customerId != fCustomer) return false
+        return true
+    }
+
+    private fun renderPlans(plans: List<PlannedVisitEntity>) {
+        val filtered = plans.filter { matchesFilters(it) }
         renderDayLabel()
 
-        val remaining = plans.filter { it.status == "scheduled" }
-        val done = plans.filter { it.status == "done" }
-        val needs = plans.filter { it.status == "needs_reschedule" }
-        val cancelled = plans.filter { it.status == "cancelled" }
-        val overdueCount = remaining.count { it.overdue }
+        val overdue = filtered.filter { statusKey(it) == "overdue" }
+        val remaining = filtered.filter { it.status == "scheduled" && !it.overdue }
+        val done = filtered.filter { it.status == "done" }
+        val needs = filtered.filter { it.status == "needs_reschedule" }
+        val cancelled = filtered.filter { it.status == "cancelled" }
+        val overdueCount = overdue.size
+
+        // ── owner request — the warning banner: «شما از برنامه عقب هستید» ──
+        if (overdueCount > 0) {
+            tvOverdueWarning.text = getString(R.string.plan_overdue_warning, JalaliDate.faDigits(overdueCount))
+            tvOverdueWarning.visibility = View.VISIBLE
+        } else {
+            tvOverdueWarning.visibility = View.GONE
+        }
 
         // ── summary chips ──
         boxSummary.removeAllViews()
@@ -256,30 +327,59 @@ class PlansActivity : AppCompatActivity() {
             lp.marginStart = pad / 2
             boxSummary.addView(tv, lp)
         }
+        chip(getString(R.string.plan_overdue), overdueCount, R.drawable.bg_badge_red, 0xFF991B1B.toInt())
         chip(getString(R.string.plan_section_done), done.size, R.drawable.bg_badge_green, 0xFF166534.toInt())
         chip(getString(R.string.plan_section_remaining), remaining.size, R.drawable.bg_badge_amber, 0xFF92400E.toInt())
-        if (overdueCount > 0) chip(getString(R.string.plan_overdue), overdueCount, R.drawable.bg_badge_red, 0xFF991B1B.toInt())
         chip(getString(R.string.plan_section_needs_reschedule), needs.size, R.drawable.bg_badge_blue, 0xFF1E40AF.toInt())
         chip(getString(R.string.plan_section_cancelled), cancelled.size, R.drawable.bg_badge_gray, 0xFF374151.toInt())
 
-        // ── list with section headers (actionable first) ──
+        // ── list ──
         val items = ArrayList<Row>()
-        if (remaining.isNotEmpty()) {
-            items.add(Row.Header(getString(R.string.plan_section_remaining), remaining.size))
-            remaining.forEach { items.add(Row.Plan(it)) }
+
+        // owner request — OVERDUE FIRST, at the very top, in BOTH modes
+        // (in «همهٔ روزها» this is the across-all-days overdue section)
+        if (overdue.isNotEmpty()) {
+            items.add(Row.Header(getString(R.string.plan_overdue), overdue.size))
+            overdue.sortedBy { it.scheduledAtMs }.forEach { items.add(Row.Plan(it)) }
         }
-        if (done.isNotEmpty()) {
-            items.add(Row.Header(getString(R.string.plan_section_done), done.size))
-            done.forEach { items.add(Row.Plan(it)) }
+
+        if (mode == MODE_DAY) {
+            if (remaining.isNotEmpty()) {
+                items.add(Row.Header(getString(R.string.plan_section_remaining), remaining.size))
+                remaining.forEach { items.add(Row.Plan(it)) }
+            }
+            if (done.isNotEmpty()) {
+                items.add(Row.Header(getString(R.string.plan_section_done), done.size))
+                done.forEach { items.add(Row.Plan(it)) }
+            }
+            if (needs.isNotEmpty()) {
+                items.add(Row.Header(getString(R.string.plan_section_needs_reschedule), needs.size))
+                needs.forEach { items.add(Row.Plan(it)) }
+            }
+            if (cancelled.isNotEmpty()) {
+                items.add(Row.Header(getString(R.string.plan_section_cancelled), cancelled.size))
+                cancelled.forEach { items.add(Row.Plan(it)) }
+            }
+        } else {
+            // «همهٔ روزها» — group the non-overdue plans by day: today
+            // first, then upcoming days ascending, then past days
+            // descending. Overdue rows were already pinned above.
+            val today = PlansSync.serverToday().ifEmpty { PlansSync.deviceDayKey(0) }
+            val rest = remaining + done + needs + cancelled
+            val byDay = rest.groupBy { it.dayKey }
+            // today first, then upcoming days ascending, then past days
+            // descending (newest past first — the practical reading order)
+            val ordered = byDay.keys.filter { it >= today }.sorted() +
+                byDay.keys.filter { it < today }.sortedDescending()
+            for (dk in ordered) {
+                val dayPlans = byDay[dk].orEmpty().sortedWith(
+                    compareBy<PlannedVisitEntity> { statusKey(it) == "scheduled" }.thenBy { it.scheduledAtMs },
+                )
+                items.add(Row.Header(dayHeaderLabel(dk, today), dayPlans.size))
+                dayPlans.forEach { items.add(Row.Plan(it)) }
+            }
         }
-        if (needs.isNotEmpty()) {
-            items.add(Row.Header(getString(R.string.plan_section_needs_reschedule), needs.size))
-            needs.forEach { items.add(Row.Plan(it)) }
-        }
-        if (cancelled.isNotEmpty()) {
-            items.add(Row.Header(getString(R.string.plan_section_cancelled), cancelled.size))
-            cancelled.forEach { items.add(Row.Plan(it)) }
-        }
+
         adapter.items = items
         adapter.notifyDataSetChanged()
 
@@ -292,7 +392,26 @@ class PlansActivity : AppCompatActivity() {
         }
     }
 
+    /** «همهٔ روزها» day header: weekday + Jalali date (+ «امروز»). */
+    private fun dayHeaderLabel(dk: String, today: String): String {
+        val m = Regex("^(\\d{4})-(\\d{2})-(\\d{2})$").find(dk) ?: return dk
+        val (y, mo, d) = m.destructured
+        val cal = GregorianCalendar(y.toInt(), mo.toInt() - 1, d.toInt()).apply {
+            timeZone = java.util.TimeZone.getTimeZone("UTC")
+        }
+        val j = JalaliDate.fromGregorian(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH))
+        val weekday = JalaliDate.WEEK_DAYS[(cal.get(Calendar.DAY_OF_WEEK) - Calendar.SATURDAY + 7) % 7]
+        return if (dk == today) "$weekday ${JalaliDate.formatFa(j)} — ${getString(R.string.plan_today)}"
+        else "$weekday ${JalaliDate.formatFa(j)}"
+    }
+
     private fun renderDayLabel() {
+        if (mode == MODE_ALL) {
+            // «همهٔ روزها» — the day-nav line explains the view instead
+            tvDay.text = getString(R.string.plan_view_all_days)
+            tvTodayChip.visibility = View.GONE
+            return
+        }
         val m = Regex("^(\\d{4})-(\\d{2})-(\\d{2})$").find(dayKey)
         if (m == null) {
             tvDay.text = dayKey
@@ -322,6 +441,207 @@ class PlansActivity : AppCompatActivity() {
         }
     }
 
+    // ── owner request — filter chips (view mode + status + customer) ──
+
+    private fun buildFilterChips() {
+        boxFilters.removeAllViews()
+        val pad = (10 * resources.displayMetrics.density).toInt()
+
+        fun chip(label: String, selected: Boolean, tint: Int, onClick: () -> Unit): Button {
+            val b = Button(this).apply {
+                text = label
+                isAllCaps = false
+                textSize = 12f
+                minHeight = 0
+                minWidth = 0
+                setPadding(pad, pad / 2, pad, pad / 2)
+                gravity = Gravity.CENTER
+                val lp = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                )
+                lp.marginEnd = pad / 2
+                layoutParams = lp
+                if (selected) {
+                    setTextColor(0xFFFFFFFF.toInt())
+                    background.setTint(tint)
+                } else {
+                    setTextColor(ContextCompat.getColor(this@PlansActivity, R.color.gray_500))
+                    background.setTint(ContextCompat.getColor(this@PlansActivity, R.color.gray_200))
+                }
+                setOnClickListener { onClick() }
+            }
+            return b
+        }
+
+        // view mode
+        boxFilters.addView(chip(getString(R.string.plan_view_day), mode == MODE_DAY, 0xFF0D9488.toInt()) {
+            mode = MODE_DAY; buildFilterChips(); render()
+        })
+        boxFilters.addView(chip(getString(R.string.plan_view_all_days), mode == MODE_ALL, 0xFF0D9488.toInt()) {
+            mode = MODE_ALL; buildFilterChips(); render()
+        })
+
+        // status
+        val statuses = listOf(
+            "all" to getString(R.string.filter_all),
+            "overdue" to getString(R.string.plan_overdue),
+            "scheduled" to getString(R.string.plan_section_remaining),
+            "done" to getString(R.string.plan_section_done),
+            "needs_reschedule" to getString(R.string.plan_section_needs_reschedule),
+            "cancelled" to getString(R.string.plan_section_cancelled),
+        )
+        statuses.forEach { (k, label) ->
+            boxFilters.addView(chip(label, fStatus == k, 0xFF2563EB.toInt()) {
+                fStatus = k; buildFilterChips(); render()
+            })
+        }
+
+        // customer — chips derived from the cached plans themselves
+        boxFilters.addView(chip(getString(R.string.filter_customer_all), fCustomer == "all", 0xFF7C3AED.toInt()) {
+            fCustomer = "all"; buildFilterChips(); render()
+        })
+        // generation guard: a rebuild during the async load must not
+        // re-append stale chips
+        val gen = ++chipsGen
+        scope.launch {
+            val customers = withContext(Dispatchers.IO) {
+                try {
+                    val dao = com.medpad.tracker.db.AppDatabase
+                        .get(com.medpad.tracker.sync.TrackerContext.app)
+                        .plannedVisitDao()
+                    val seen = LinkedHashMap<String, String>()
+                    dao.all().forEach { p ->
+                        if (p.customerAssigned && !p.customerName.isNullOrEmpty() && !seen.containsKey(p.customerId)) {
+                            seen[p.customerId] = p.customerName
+                        }
+                    }
+                    seen.entries.map { it.key to it.value }
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            }
+            if (customers.isEmpty() || gen != chipsGen) return@launch
+            customers.forEach { (id, name) ->
+                val b = chip(name, fCustomer == id, 0xFF7C3AED.toInt()) {
+                    fCustomer = id; buildFilterChips(); render()
+                }
+                boxFilters.post { if (gen == chipsGen) boxFilters.addView(b) }
+            }
+        }
+    }
+
+    // ── owner fix — the Jalali date picker (calendar icon) ──
+
+    /** Three Persian NumberPickers (year / month / day) anchored on the
+     *  current dayKey. Selecting a date switches to that server-local day
+     *  in DAY mode. Pure UI — the plan data still comes only from the
+     *  server cache. */
+    private fun showJalaliDatePicker() {
+        val m = Regex("^(\\d{4})-(\\d{2})-(\\d{2})$").find(dayKey)
+        var jy: Int
+        var jm: Int
+        var jd: Int
+        if (m != null) {
+            val (y, mo, d) = m.destructured
+            val cal = GregorianCalendar(y.toInt(), mo.toInt() - 1, d.toInt()).apply {
+                timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }
+            val j = JalaliDate.fromGregorian(
+                cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH),
+            )
+            jy = j.year; jm = j.month; jd = j.day
+        } else {
+            val now = Calendar.getInstance().apply { timeZone = java.util.TimeZone.getTimeZone("Asia/Tehran") }
+            val j = JalaliDate.fromGregorian(
+                now.get(Calendar.YEAR), now.get(Calendar.MONTH) + 1, now.get(Calendar.DAY_OF_MONTH),
+            )
+            jy = j.year; jm = j.month; jd = j.day
+        }
+
+        val pad = (16 * resources.displayMetrics.density).toInt()
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad / 2, pad, 0)
+        }
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+
+        val nowCal = Calendar.getInstance().apply { timeZone = java.util.TimeZone.getTimeZone("Asia/Tehran") }
+        val thisYear = JalaliDate.fromGregorian(
+            nowCal.get(Calendar.YEAR), nowCal.get(Calendar.MONTH) + 1, nowCal.get(Calendar.DAY_OF_MONTH),
+        ).year
+        val minYear = thisYear - 3
+        val yearLabels = ((thisYear - 3)..(thisYear + 3)).map { JalaliDate.faDigits(it) }
+        val monthLabels = JalaliDate.MONTH_NAMES.toList()
+
+        var dayPicker: NumberPicker? = null
+
+        /** keep the day wheel valid for the selected (year, month) */
+        fun relabelDays() {
+            val len = JalaliDate.monthLength(jy, jm)
+            if (jd > len) jd = len
+            dayPicker?.apply {
+                minValue = 0
+                maxValue = len - 1
+                displayedValues = (1..len).map { JalaliDate.faDigits(it) }.toTypedArray()
+                value = jd - 1
+            }
+        }
+
+        fun picker(values: List<String>, initialIdx: Int, wrap: Boolean, onSet: (Int) -> Unit): NumberPicker {
+            val p = NumberPicker(this)
+            p.minValue = 0
+            p.maxValue = values.size - 1
+            p.value = initialIdx.coerceIn(0, values.size - 1)
+            p.displayedValues = values.toTypedArray()
+            p.wrapSelectorWheel = wrap
+            p.setOnValueChangedListener { _, _, newVal -> onSet(newVal) }
+            return p
+        }
+
+        val yearPicker = picker(yearLabels, jy - minYear, false) { idx ->
+            jy = idx + minYear; relabelDays()
+        }
+        val monthPicker = picker(monthLabels, jm - 1, true) { idx ->
+            jm = idx + 1; relabelDays()
+        }
+        dayPicker = picker((1..JalaliDate.monthLength(jy, jm)).map { JalaliDate.faDigits(it) }, jd - 1, true) { idx ->
+            jd = idx + 1
+        }
+
+        fun label(textRes: Int): TextView = TextView(this).apply {
+            setText(textRes)
+            textSize = 12f
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+
+        val labelsRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        labelsRow.addView(label(R.string.dp_year))
+        labelsRow.addView(label(R.string.dp_month))
+        labelsRow.addView(label(R.string.dp_day))
+        yearPicker.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        monthPicker.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        dayPicker!!.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        row.addView(yearPicker); row.addView(monthPicker); row.addView(dayPicker)
+        box.addView(labelsRow); box.addView(row)
+
+        AlertDialog.Builder(this)
+            .setTitle(R.string.plan_pick_date_title)
+            .setView(box)
+            .setPositiveButton(R.string.plan_pick_ok) { _, _ ->
+                // jump to the picked server-local day
+                val g = JalaliDate.toGregorian(jy, jm, jd)
+                val picked = String.format(java.util.Locale.US, "%04d-%02d-%02d", g[0], g[1], g[2])
+                dayKey = picked
+                mode = MODE_DAY
+                buildFilterChips()
+                render()
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
     // ── state helpers ───────────────────────────────────────
 
     private fun showLoading() {
@@ -335,7 +655,9 @@ class PlansActivity : AppCompatActivity() {
     private fun showEmpty() {
         boxState.visibility = View.VISIBLE
         progress.visibility = View.GONE
-        tvState.text = getString(R.string.plan_empty)
+        tvState.text = getString(
+            if (mode == MODE_ALL) R.string.plan_empty_all_days else R.string.plan_empty,
+        )
         btnRetry.visibility = View.VISIBLE
         recycler.visibility = View.GONE
     }
@@ -369,7 +691,7 @@ class PlansActivity : AppCompatActivity() {
         val view = LayoutInflater.from(this).inflate(R.layout.dialog_plan, null)
 
         view.findViewById<TextView>(R.id.tvTime).text =
-            "${plan.timeLocal} — ${dayKeyLabelShort()}"
+            "${plan.timeLocal} — ${dayKeyLabelShort(plan.dayKey)}"
 
         val tvCustomer = view.findViewById<TextView>(R.id.tvCustomer)
         val tvType = view.findViewById<TextView>(R.id.tvCustomerType)
@@ -448,8 +770,8 @@ class PlansActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    private fun dayKeyLabelShort(): String {
-        val m = Regex("^(\\d{4})-(\\d{2})-(\\d{2})$").find(dayKey) ?: return dayKey
+    private fun dayKeyLabelShort(dk: String): String {
+        val m = Regex("^(\\d{4})-(\\d{2})-(\\d{2})$").find(dk) ?: return dk
         val (y, mo, d) = m.destructured
         val j = JalaliDate.fromGregorian(y.toInt(), mo.toInt(), d.toInt())
         return JalaliDate.formatFa(j)
@@ -490,6 +812,11 @@ class PlansActivity : AppCompatActivity() {
      * sees (and can never request by) a name it isn't entitled to. Needs
      * the server (a request is a server-side workflow — no offline queue
      * here by design; the error paths say so honestly).
+     *
+     * owner fix: a generic failure now gets its OWN message («ارسال
+     * درخواست ناموفق بود: …») with the exception detail — the old text
+     * claimed the REQUESTS LIST failed to load, which read as «cannot
+     * connect to server» with no way to tell what actually happened.
      */
     private fun showRequestAssign(plan: PlannedVisitEntity) {
         val input = EditText(this).apply {
@@ -529,9 +856,17 @@ class PlansActivity : AppCompatActivity() {
                             // (duplicate pending / already assigned / …)
                             Toast.makeText(this@PlansActivity, e.message, Toast.LENGTH_LONG).show()
                         }
-                    } catch (_: Exception) {
+                    } catch (e: Exception) {
                         sending = false
-                        Toast.makeText(this@PlansActivity, R.string.arq_load_error, Toast.LENGTH_LONG).show()
+                        // owner fix — honest, SPECIFIC failure text
+                        Toast.makeText(
+                            this@PlansActivity,
+                            getString(
+                                R.string.arq_send_error,
+                                e.javaClass.simpleName + (e.message?.let { ": $it" } ?: ""),
+                            ),
+                            Toast.LENGTH_LONG,
+                        ).show()
                     }
                 }
             }

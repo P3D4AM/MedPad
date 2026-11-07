@@ -48,7 +48,14 @@
             </intent-filter>
         </activity>
 
-        <activity android:name=".ui.MainActivity" android:exported="false" />
+        <!-- owner fix (back-stack duplication): singleTop + the tap
+             intent's CLEAR_TOP means a notification tap always COLLAPSES
+             to the existing home instance (onNewIntent) instead of
+             stacking a new MainActivity on every tap. -->
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="false"
+            android:launchMode="singleTop" />
         <activity android:name=".ui.ReportsActivity" android:exported="false" />
         <activity android:name=".ui.PlansActivity" android:exported="false" />
         <activity android:name=".ui.DoctorsMapActivity" android:exported="false" />

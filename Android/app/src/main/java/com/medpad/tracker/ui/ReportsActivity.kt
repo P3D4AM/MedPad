@@ -2,6 +2,7 @@ package com.medpad.tracker.ui
 
 import android.os.Bundle
 import android.text.InputType
+import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -13,7 +14,7 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.res.ResourcesCompat
+import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -35,12 +36,33 @@ import java.util.Calendar
  * VoiceMiniPlayerHub — play/pause/resume/stop, speed 1×/1.5×/2×, seek bar,
  * played/total, resume-from-breakpoint, loading + error states, and ONE
  * player row PER recording (mission item 9) with no simultaneous playback.
+ *
+ * owner fix batch (Nov 2026):
+ *  - DEFAULT RANGE = last 7 days (was: everything) + «۷ روز اخیر» /
+ *    «۳۰ روز اخیر» / «همه روزها» range chips.
+ *  - FILTERING: kind (چک‌این/چک‌اوت) + customer chips.
+ *  - «امروز» button jumps to the current day from anywhere.
+ *  - the day cell is a TextView (Material3 Button ignored the custom
+ *    background → unreadable numbers) and TODAY is a filled amber cell
+ *    with white text — a clearly distinct colour.
+ *  - month arrows rotated 180° (prev = ←, next = →).
  */
 class ReportsActivity : AppCompatActivity() {
 
     private val scope = CoroutineScope(Dispatchers.Main)
     private var allReports: List<JSONObject> = emptyList()
     private var filterDay: J? = null
+
+    // owner fix — range mode (applies when filterDay == null):
+    // 7 | 30 | 0 (=all). DEFAULT 7 → the screen opens on the last 7 days.
+    private var rangeDays: Int = 7
+
+    // owner request — kind + customer filters
+    private var fKind: String = "all"        // all | checkin | checkout
+    private var fCustomer: String = "all"    // customer id | "all"
+
+    // customer chip data (id → display name), derived from the reports
+    private var reportCustomers: List<Pair<String, String>> = emptyList()
 
     // mission 12 / item 6 — the single-flight mini-player hub (ONE
     // MediaPlayer for the whole screen; per-file resume memory)
@@ -56,6 +78,7 @@ class ReportsActivity : AppCompatActivity() {
     private lateinit var calWeekHeader: LinearLayout
     private lateinit var tvMonthName: TextView
     private lateinit var tvEmpty: TextView
+    private lateinit var boxFilters: LinearLayout
     private val adapter = ReportsAdapter()
     private val calAdapter = CalAdapter()
 
@@ -69,6 +92,7 @@ class ReportsActivity : AppCompatActivity() {
         calWeekHeader = findViewById(R.id.calWeekHeader)
         tvMonthName = findViewById(R.id.tvMonthName)
         tvEmpty = findViewById(R.id.tvEmpty)
+        boxFilters = findViewById(R.id.boxFilters)
         players = VoiceMiniPlayerHub(this, scope)
 
         // mission 12 / item 7 — full-RTL calendar: the app does not declare
@@ -95,8 +119,26 @@ class ReportsActivity : AppCompatActivity() {
 
         findViewById<ImageButton>(R.id.btnBack).setOnClickListener { finish() }
         findViewById<Button>(R.id.btnAll).setOnClickListener {
+            // «همه روزها» — leave day mode, show everything, and offer the
+            // calendar (a day can still be picked from it afterwards)
             filterDay = null
+            rangeDays = 0
             calendarBox.visibility = if (calendarBox.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+            buildFilterChips()
+            renderCalendar()
+            applyFilter()
+        }
+
+        // owner fix — «امروز»: jump the calendar to the current month and
+        // select TODAY (Tehran day), from anywhere
+        findViewById<Button>(R.id.btnToday).setOnClickListener {
+            val t = todayTehran()
+            calYear = t.year
+            calMonth = t.month
+            filterDay = t
+            calendarBox.visibility = View.GONE
+            buildFilterChips()
+            renderCalendar()
             applyFilter()
         }
 
@@ -105,6 +147,7 @@ class ReportsActivity : AppCompatActivity() {
         calYear = j.year
         calMonth = j.month
 
+        // owner fix — arrows rotated 180°: prev now points LEFT, next RIGHT
         findViewById<ImageButton>(R.id.btnPrevMonth).setOnClickListener {
             calMonth--; if (calMonth == 0) { calMonth = 12; calYear-- }
             renderCalendar()
@@ -114,6 +157,7 @@ class ReportsActivity : AppCompatActivity() {
             renderCalendar()
         }
 
+        buildFilterChips()
         load()
     }
 
@@ -128,9 +172,102 @@ class ReportsActivity : AppCompatActivity() {
                     emptyList()
                 }
             }
+            rebuildCustomerChips()
             renderCalendar()
             applyFilter()
         }
+    }
+
+    /** distinct customers appearing in the reports (id → name) — the
+     *  customer filter is built from what the reports actually contain. */
+    private fun rebuildCustomerChips() {
+        val seen = LinkedHashMap<String, String>()
+        for (r in allReports) {
+            val c = if (r.has("customer") && !r.isNull("customer")) r.optJSONObject("customer") else null
+            if (c != null) {
+                val id = c.optString("id")
+                if (id.isNotEmpty() && !seen.containsKey(id)) seen[id] = c.optString("name").ifEmpty { id }
+            }
+        }
+        reportCustomers = seen.entries.map { it.key to it.value }
+    }
+
+    // ── filter chips row (owner request) ────────────────────
+
+    private fun buildFilterChips() {
+        boxFilters.removeAllViews()
+        val pad = (10 * resources.displayMetrics.density).toInt()
+
+        fun chip(label: String, selected: Boolean, tint: Int, onClick: () -> Unit): Button {
+            val b = Button(this).apply {
+                text = label
+                isAllCaps = false
+                textSize = 12f
+                minHeight = 0
+                minWidth = 0
+                setPadding(pad, pad / 2, pad, pad / 2)
+                gravity = Gravity.CENTER
+                val lp = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                )
+                lp.marginEnd = pad / 2
+                layoutParams = lp
+                if (selected) {
+                    setTextColor(0xFFFFFFFF.toInt())
+                    background.setTint(tint)
+                } else {
+                    setTextColor(ContextCompat.getColor(this@ReportsActivity, R.color.gray_500))
+                    background.setTint(ContextCompat.getColor(this@ReportsActivity, R.color.gray_200))
+                }
+                setOnClickListener { onClick() }
+            }
+            return b
+        }
+
+        // range chips — only one is active when in RANGE mode (no day)
+        addChipRow(chip(getString(R.string.reports_range_7), filterDay == null && rangeDays == 7, 0xFF0D9488.toInt()) {
+            filterDay = null; rangeDays = 7; buildFilterChips(); applyFilter()
+        })
+        addChipRow(chip(getString(R.string.reports_range_30), filterDay == null && rangeDays == 30, 0xFF0D9488.toInt()) {
+            filterDay = null; rangeDays = 30; buildFilterChips(); applyFilter()
+        })
+        addChipRow(chip(getString(R.string.all_days), filterDay == null && rangeDays == 0, 0xFF0D9488.toInt()) {
+            filterDay = null; rangeDays = 0; buildFilterChips(); applyFilter()
+        })
+
+        // kind chips
+        addChipRow(chip(getString(R.string.filter_all), fKind == "all", 0xFF2563EB.toInt()) {
+            fKind = "all"; buildFilterChips(); applyFilter()
+        })
+        addChipRow(chip(getString(R.string.filter_kind_checkin), fKind == "checkin", 0xFF2563EB.toInt()) {
+            fKind = "checkin"; buildFilterChips(); applyFilter()
+        })
+        addChipRow(chip(getString(R.string.filter_kind_checkout), fKind == "checkout", 0xFF2563EB.toInt()) {
+            fKind = "checkout"; buildFilterChips(); applyFilter()
+        })
+
+        // customer chips (from the reports themselves)
+        addChipRow(chip(getString(R.string.filter_customer_all), fCustomer == "all", 0xFF7C3AED.toInt()) {
+            fCustomer = "all"; buildFilterChips(); applyFilter()
+        })
+        reportCustomers.forEach { (id, name) ->
+            addChipRow(chip(name, fCustomer == id, 0xFF7C3AED.toInt()) {
+                fCustomer = id; buildFilterChips(); applyFilter()
+            })
+        }
+    }
+
+    /** append a chip to the filter row (keeps buildFilterChips readable) */
+    private fun addChipRow(b: Button) {
+        boxFilters.addView(b)
+    }
+
+    private fun todayTehran(): J {
+        val nowCal = Calendar.getInstance().apply { timeZone = java.util.TimeZone.getTimeZone("Asia/Tehran") }
+        return JalaliDate.fromGregorian(
+            nowCal.get(Calendar.YEAR), nowCal.get(Calendar.MONTH) + 1, nowCal.get(Calendar.DAY_OF_MONTH),
+        )
     }
 
     private fun renderCalendar() {
@@ -142,10 +279,7 @@ class ReportsActivity : AppCompatActivity() {
         val cells = ArrayList<DayCell?>(firstDow + days)
         repeat(firstDow) { cells.add(null) }
         // the Jalali «today» for the TODAY marker (device clock, Tehran day)
-        val nowCal = Calendar.getInstance().apply { timeZone = java.util.TimeZone.getTimeZone("Asia/Tehran") }
-        val today = JalaliDate.fromGregorian(
-            nowCal.get(Calendar.YEAR), nowCal.get(Calendar.MONTH) + 1, nowCal.get(Calendar.DAY_OF_MONTH),
-        )
+        val today = todayTehran()
         // days that carry at least one report (the dot badge)
         val reportDays = HashSet<Int>()
         for (r in allReports) {
@@ -162,15 +296,44 @@ class ReportsActivity : AppCompatActivity() {
     }
 
     private fun applyFilter() {
+        val nowCal = Calendar.getInstance().apply { timeZone = java.util.TimeZone.getTimeZone("Asia/Tehran") }
+        nowCal.set(Calendar.HOUR_OF_DAY, 0); nowCal.set(Calendar.MINUTE, 0)
+        nowCal.set(Calendar.SECOND, 0); nowCal.set(Calendar.MILLISECOND, 0)
+        val todayStart = nowCal.timeInMillis
+        val rangeStart = if (rangeDays > 0) todayStart - (rangeDays - 1) * 86_400_000L else 0L
+
         val list = allReports.filter { r ->
-            val f = filterDay ?: return@filter true
-            val created = parseDate(r)
-            created.year == f.year && created.month == f.month && created.day == f.day
+            val createdMs = parseMs(r)
+            if (filterDay != null) {
+                // exact-day mode (calendar pick / «امروز»)
+                val created = parseDate(r)
+                if (created != filterDay) return@filter false
+            } else if (rangeDays > 0) {
+                // owner fix — default range: last N days (today included).
+                // Reports without a parseable date never match a range.
+                if (createdMs <= 0L || createdMs < rangeStart) return@filter false
+            }
+            // kind filter
+            if (fKind != "all" && r.optString("kind", "checkin") != fKind) return@filter false
+            // customer filter
+            if (fCustomer != "all") {
+                val rc = if (r.has("customer") && !r.isNull("customer"))
+                    r.optJSONObject("customer")?.optString("id") ?: "" else ""
+                if (rc != fCustomer) return@filter false
+            }
+            true
         }
         adapter.items = list
         adapter.notifyDataSetChanged()
+        tvEmpty.setText(if (filterDay == null && rangeDays > 0) R.string.no_reports_range else R.string.no_reports)
         tvEmpty.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
         recycler.visibility = if (list.isEmpty()) View.GONE else View.VISIBLE
+    }
+
+    private fun parseMs(r: JSONObject): Long = try {
+        java.time.Instant.parse(r.optString("createdAt")).toEpochMilli()
+    } catch (_: Exception) {
+        0L
     }
 
     private fun parseDate(r: JSONObject): J {
@@ -266,8 +429,12 @@ class ReportsActivity : AppCompatActivity() {
     inner class CalAdapter : RecyclerView.Adapter<CalAdapter.VH>() {
         var cells: List<DayCell?> = emptyList()
 
+        // owner fix — the cell is a TextView now: Material3's Button
+        // (MaterialButton) ignored the custom android:background and drew
+        // dark digits on a filled teal pill (unreadable). A TextView
+        // renders the background, the dot badge and the colours exactly.
         inner class VH(v: View) : RecyclerView.ViewHolder(v) {
-            val btn: Button = v.findViewById(R.id.btnDay)
+            val btn: TextView = v.findViewById(R.id.btnDay)
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH =
@@ -289,18 +456,23 @@ class ReportsActivity : AppCompatActivity() {
             // mission 12 / item 7 — Persian digits («۱۴» not "14")
             h.btn.text = JalaliDate.faDigits(c.day)
             h.btn.background = when {
-                c.selected -> ResourcesCompat.getDrawable(
+                c.selected -> androidx.core.content.res.ResourcesCompat.getDrawable(
                     resources, R.drawable.day_selected, null,
                 )
-                c.today -> ResourcesCompat.getDrawable(
+                // owner fix — TODAY is a FILLED amber cell (distinct colour)
+                c.today -> androidx.core.content.res.ResourcesCompat.getDrawable(
                     resources, R.drawable.day_today, null,
                 )
-                else -> ResourcesCompat.getDrawable(
+                else -> androidx.core.content.res.ResourcesCompat.getDrawable(
                     resources, R.drawable.day_normal, null,
                 )
             }
             h.btn.setTextColor(
-                if (c.selected) 0xFFFFFFFF.toInt() else 0xFF1C1917.toInt(),
+                when {
+                    c.selected -> 0xFFFFFFFF.toInt() // filled teal
+                    c.today -> 0xFFFFFFFF.toInt()     // filled amber
+                    else -> 0xFF1C1917.toInt()
+                },
             )
             // mission 12 / item 7 — the dot badge marks days that carry at
             // least one report (hidden on the selected day: the filled
@@ -310,7 +482,7 @@ class ReportsActivity : AppCompatActivity() {
             )
             h.btn.setOnClickListener {
                 filterDay = J(calYear, calMonth, c.day)
-                calendarBox.visibility = View.GONE
+                buildFilterChips()
                 renderCalendar()
                 applyFilter()
             }

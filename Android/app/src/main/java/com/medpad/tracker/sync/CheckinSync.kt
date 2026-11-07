@@ -351,11 +351,40 @@ object CheckinSync {
     }
 
     // ── doctors LWW sync ────────────────────────────────────
+
+    /** owner fix (customers not syncing between devices/users): the sync
+     *  watermark + the employee it belongs to, persisted in their own prefs
+     *  file. The OLD watermark was the local MAX(updatedAt) of the doctor
+     *  rows — which (a) came from ANOTHER user's data after a user switch
+     *  and (b) could not notice a NEW ASSIGNMENT of an old customer
+     *  (assignments do not bump Customer.updatedAt). Now:
+     *    - a DIFFERENT logged-in employee → FULL resync (since=null) with a
+     *      clean mirror (offline-created rows survive);
+     *    - the same employee → incremental since = the SERVER-reported
+     *      serverTime of the last successful sync (the server also treats
+     *      a fresh assignment.createdAt as a change, see
+     *      /api/app/customers). */
+    private const val SYNC_PREFS = "medpad_customers_sync"
+    private const val KEY_SYNC_EMP = "employee_id"
+    private const val KEY_SYNC_WATERMARK = "watermark"
+
     suspend fun syncDoctors(): Boolean = withContext(Dispatchers.IO) {
         try {
             val db = AppDatabase.get(TrackerContext.app)
-            val maxUpdated = db.doctorDao().maxUpdatedAt() ?: 0L
-            val since = if (maxUpdated > 0) java.time.Instant.ofEpochMilli(maxUpdated).toString() else null
+            val sp = TrackerContext.app.getSharedPreferences(SYNC_PREFS, android.content.Context.MODE_PRIVATE)
+            val empId = Session.employeeId
+            val lastEmp = sp.getString(KEY_SYNC_EMP, null)
+            val watermark = sp.getString(KEY_SYNC_WATERMARK, null)
+            val userChanged = lastEmp != null && lastEmp != empId
+            val since = if (lastEmp == empId && watermark != null) watermark else null
+
+            if (userChanged) {
+                // fresh mirror for the new user — offline-created rows
+                // (pendingLocalId) are exempt, everything else belonged to
+                // the previous account
+                db.doctorDao().clearExceptPending()
+            }
+
             val resp = ApiClient.customers(since)
             if (!resp.optBoolean("ok")) return@withContext false
 
@@ -413,6 +442,11 @@ object CheckinSync {
             // EXEMPT — they are not on the server yet and must survive.
             if (assignedIds.isEmpty()) db.doctorDao().clearExceptPending()
             else db.doctorDao().keepOnlyExceptPending(assignedIds.toList())
+            // owner fix — persist the server's own clock as the next
+            // watermark (with the employee it belongs to)
+            resp.optString("serverTime").takeIf { it.isNotEmpty() }?.let { st ->
+                sp.edit().putString(KEY_SYNC_EMP, empId).putString(KEY_SYNC_WATERMARK, st).apply()
+            }
             lastError = null
             markSessionAlive() // a successful authed call proves the token works
             true

@@ -88,10 +88,18 @@ class PlansAndReportsSmokeTest {
             recycler.adapter?.itemCount ?: 0
         }
 
-        // 6 plans + 4 section headers (remaining / done / needs-reschedule / cancelled)
-        val expectedRows = 6 + 4
+        // 6 plans + 5 section headers (owner fix: عقب‌افتاده FIRST, then
+        // remaining / done / needs-reschedule / cancelled — the seeded p5
+        // is a scheduled+overdue plan, so the overdue section is present)
+        val expectedRows = 6 + 5
         assertEquals(expectedRows, recycler.adapter?.itemCount)
         assertEquals(View.VISIBLE, recycler.visibility)
+
+        // owner request — the overdue warning banner is VISIBLE (p5 is overdue)
+        assertEquals(
+            View.VISIBLE,
+            activity.findViewById<TextView>(R.id.tvOverdueWarning).visibility,
+        )
 
         // day navigation must not crash either (renderDayLabel → JalaliDate)
         activity.findViewById<android.widget.ImageButton>(R.id.btnNextDay).performClick()
@@ -99,6 +107,10 @@ class PlansAndReportsSmokeTest {
         activity.findViewById<android.widget.ImageButton>(R.id.btnPrevDay).performClick()
         shadowOf(Looper.getMainLooper()).idle()
         activity.findViewById<android.widget.ImageButton>(R.id.btnPrevDay).performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        // owner request — «امروز» returns to today without crashing
+        activity.findViewById<android.widget.Button>(R.id.btnToday).performClick()
         shadowOf(Looper.getMainLooper()).idle()
 
         controller.pause().stop().destroy()

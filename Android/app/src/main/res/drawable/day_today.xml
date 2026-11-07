@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- mission 12 / item 7 — TODAY marker: a teal ring (selection stays the
-     filled circle from day_selected; today is the ring, a report-day is
-     the dot badge under the number). -->
+<!-- owner fix — TODAY marker: a FILLED amber cell with white text (a
+     clearly DISTINCT colour, as requested) instead of the old faint teal
+     ring that was easy to miss. Selection stays the filled teal circle
+     from day_selected; a report-day keeps the dot badge. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <solid android:color="#E6F7F5" />
+    <solid android:color="#D97706" />
     <corners android:radius="10dp" />
-    <stroke android:width="2dp" android:color="@color/teal_600" />
 </shape>

@@ -36,8 +36,13 @@ object PlansSync {
     private const val KEY_LAST_SYNC = "last_sync_ms"
     private const val KEY_SERVER_TODAY = "server_today"
 
-    /** How far back / ahead the sync window reaches (device-anchored). */
-    const val WINDOW_BACK_DAYS = 8
+    /** How far back / ahead the sync window reaches (device-anchored).
+     *  owner fix: BACK widened to 30 days — overdue plans up to a month old
+     *  must stay visible in the app's «همهٔ روزها» view (the owner asked
+     *  for overdue plans to be shown across all days). The server caps ONE
+     *  request at 31 days, so the window is fetched as TWO ranges
+     *  (past: -30..0, future: +1..+15) — both inside the cap. */
+    const val WINDOW_BACK_DAYS = 30
     const val WINDOW_AHEAD_DAYS = 15
 
     sealed class Result {
@@ -82,44 +87,60 @@ object PlansSync {
         cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH),
     )
 
-    /** Sync now: device-today-8 … device-today+15 (inclusive). */
+    /** Sync now: two server ranges (device-today-30 … device-today, then
+     *  device-today+1 … device-today+15) — each inside the server's 31-day
+     *  cap, together covering the whole ±window. */
     suspend fun sync(): Result = withContext(Dispatchers.IO) {
-        val from = deviceDayKey(-WINDOW_BACK_DAYS)
-        val to = deviceDayKey(WINDOW_AHEAD_DAYS)
+        val pastFrom = deviceDayKey(-WINDOW_BACK_DAYS)
+        val pastTo = deviceDayKey(0)
+        val futureFrom = deviceDayKey(1)
+        val futureTo = deviceDayKey(WINDOW_AHEAD_DAYS)
         try {
-            val resp = ApiClient.plannedVisits(from, to)
-            if (!resp.optBoolean("ok")) {
-                return@withContext Result.Error(resp.optString("error", "").ifEmpty { "server said not ok" })
+            val respPast = ApiClient.plannedVisits(pastFrom, pastTo)
+            if (!respPast.optBoolean("ok")) {
+                return@withContext Result.Error(respPast.optString("error", "").ifEmpty { "server said not ok" })
+            }
+            // the future range is best-effort on top of the past range: an
+            // old panel that rejects the second call still gets the past
+            // window (overdue visibility is the point of this sync)
+            val respFuture = try {
+                ApiClient.plannedVisits(futureFrom, futureTo)
+            } catch (_: Exception) {
+                null
             }
 
-            val arr: JSONArray = resp.optJSONArray("plans") ?: JSONArray()
-            val list = ArrayList<PlannedVisitEntity>(arr.length())
-            for (i in 0 until arr.length()) {
-                val o = arr.getJSONObject(i)
-                val cust = o.optJSONObject("customer")
-                fun nullable(key: String): String? = if (o.isNull(key)) null else o.optString(key).ifEmpty { null }
-                list.add(
-                    PlannedVisitEntity(
-                        id = o.getString("id"),
-                        customerId = o.getString("customerId"),
-                        dayKey = o.optString("dayKey", ""),
-                        timeLocal = o.optString("timeLocal", "--:--"),
-                        scheduledAtMs = parseIsoMs(o.optString("scheduledAt")),
-                        durationMin = o.optInt("durationMin", 30),
-                        priority = o.optString("priority", "normal"),
-                        status = o.optString("status", "scheduled"),
-                        note = nullable("note"),
-                        visitId = nullable("visitId"),
-                        visitStartLocal = if (o.isNull("visitStartLocal")) null else o.optString("visitStartLocal", null),
-                        visitOpen = o.optBoolean("visitOpen", false),
-                        overdue = o.optBoolean("overdue", false),
-                        customerName = if (cust == null || cust.isNull("name")) null else cust.optString("name"),
-                        customerType = if (cust == null || cust.isNull("type")) null else cust.optString("type"),
-                        customerAddress = if (cust == null || cust.isNull("address")) null else cust.optString("address").ifEmpty { null },
-                        customerPhone = if (cust == null || cust.isNull("phone")) null else cust.optString("phone").ifEmpty { null },
-                        customerAssigned = cust?.optBoolean("assigned", false) ?: false,
+            val list = ArrayList<PlannedVisitEntity>()
+            for (resp in listOf(respPast, respFuture)) {
+                if (resp == null) continue
+                val arr: JSONArray = resp.optJSONArray("plans") ?: JSONArray()
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    fun nullable(key: String): String? = if (o.isNull(key)) null else o.optString(key).ifEmpty { null }
+                    list.add(
+                        PlannedVisitEntity(
+                            id = o.getString("id"),
+                            customerId = o.getString("customerId"),
+                            dayKey = o.optString("dayKey", ""),
+                            timeLocal = o.optString("timeLocal", "--:--"),
+                            scheduledAtMs = parseIsoMs(o.optString("scheduledAt")),
+                            durationMin = o.optInt("durationMin", 30),
+                            priority = o.optString("priority", "normal"),
+                            status = o.optString("status", "scheduled"),
+                            note = nullable("note"),
+                            visitId = nullable("visitId"),
+                            visitStartLocal = if (o.isNull("visitStartLocal")) null else o.optString("visitStartLocal", null),
+                            visitOpen = o.optBoolean("visitOpen", false),
+                            overdue = o.optBoolean("overdue", false),
+                            // masked customers carry JSON-null fields — never
+                            // render the literal string "null"
+                            customerName = o.optJSONObject("customer")?.let { c -> if (c.isNull("name")) null else c.optString("name") },
+                            customerType = o.optJSONObject("customer")?.let { c -> if (c.isNull("type")) null else c.optString("type") },
+                            customerAddress = o.optJSONObject("customer")?.let { c -> if (c.isNull("address")) null else c.optString("address").ifEmpty { null } },
+                            customerPhone = o.optJSONObject("customer")?.let { c -> if (c.isNull("phone")) null else c.optString("phone").ifEmpty { null } },
+                            customerAssigned = o.optJSONObject("customer")?.optBoolean("assigned", false) ?: false,
+                        )
                     )
-                )
+                }
             }
 
             // Atomic full replace — the server window is complete truth for
@@ -130,7 +151,7 @@ object PlansSync {
                 db.plannedVisitDao().upsertAll(list)
             }
 
-            val serverToday = resp.optJSONObject("window")?.optString("today") ?: ""
+            val serverToday = respPast.optJSONObject("window")?.optString("today") ?: ""
             TrackerContext.app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .edit()
                 .putLong(KEY_LAST_SYNC, System.currentTimeMillis())

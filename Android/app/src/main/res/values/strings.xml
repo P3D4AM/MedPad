@@ -80,11 +80,21 @@
     <string name="pick_date">انتخاب روز</string>
     <string name="all_days">همه روزها</string>
     <string name="no_reports">گزارشی برای این روز نیست</string>
+    <string name="no_reports_range">گزارشی در این بازه نیست</string>
     <string name="voice_play_failed">پخش صدا ممکن نشد</string>
     <string name="today">امروز</string>
+    <!-- Reports — range filters (owner fix: default = last 7 days) -->
+    <string name="reports_range_7">۷ روز اخیر</string>
+    <string name="reports_range_30">۳۰ روز اخیر</string>
+    <!-- Reports — kind + customer filters (owner request) -->
+    <string name="filter_kind_checkin">فقط چک‌این</string>
+    <string name="filter_kind_checkout">فقط چک‌اوت</string>
+    <string name="filter_customer_all">همهٔ مشتریان</string>
 
-    <!-- Map -->
-    <string name="map_title">مشتریان من</string>
+    <!-- Map — owner fix: the map screen/card must say «نقشه», not a second
+         «مشتریان من» (two identical menu labels were confusing). -->
+    <string name="map_title">نقشه</string>
+    <string name="map_card_title">نقشه</string>
     <string name="map_hint">کشیدن با یک انگشت = جابه‌جایی نقشه • نگه‌داشتن ۱ ثانیه = افزودن مشتری</string>
     <string name="add_customer">افزودن مشتری</string>
     <string name="customer_name">نام مشتری</string>
@@ -186,6 +196,15 @@
     <string name="plan_next_day">روز بعد</string>
     <string name="plan_today">امروز</string>
     <string name="plan_refresh">به‌روزرسانی</string>
+    <string name="plan_view_day">روز</string>
+    <string name="plan_view_all_days">همه روزها</string>
+    <string name="plan_overdue_warning">⚠ شما از برنامه عقب هستید — %s برنامهٔ عقب‌افتاده انجام‌نشده دارید</string>
+    <string name="plan_pick_date_title">انتخاب تاریخ</string>
+    <string name="plan_pick_ok">انتخاب</string>
+    <string name="dp_year">سال</string>
+    <string name="dp_month">ماه</string>
+    <string name="dp_day">روز</string>
+    <string name="plan_empty_all_days">در بازهٔ همگام‌سازی برنامه‌ای ثبت نشده است</string>
     <string name="plan_section_remaining">باقی‌مانده</string>
     <string name="plan_section_done">انجام‌شده</string>
     <string name="plan_section_needs_reschedule">نیازمند برنامه‌ریزی مجدد</string>
@@ -231,6 +250,7 @@
     <string name="arq_sent">درخواست تخصیص ثبت شد — پس از بررسی مدیر، نتیجه از طریق اعلان اعلام می‌شود</string>
     <string name="arq_none">هنوز درخواستی ثبت نکرده‌اید. در جزئیات برنامهٔ یک مشتری منتسب‌نشده می‌توانید درخواست تخصیص بدهید.</string>
     <string name="arq_load_error">دریافت درخواست‌ها ناموفق بود — اتصال به سرور لازم است</string>
+    <string name="arq_send_error">ارسال درخواست ناموفق بود: %s</string>
     <string name="arq_status_pending">در انتظار بررسی مدیر</string>
     <string name="arq_status_approved">تأیید شد</string>
     <string name="arq_status_rejected">رد شد</string>

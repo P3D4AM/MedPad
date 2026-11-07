@@ -35,23 +35,21 @@
             android:textStyle="bold"
             android:textColor="@color/teal_700" />
 
+        <!-- owner fix — the extra PLUS button (in-app requests list) is
+             removed from the header: «درخواست‌های من» now opens only from its
+             notification, and the header icon no longer looks like a stray
+             add/FAB button. -->
+        <!-- owner fix — the calendar icon now OPENS the Jalali date picker
+             (it used to be a refresh button — the icon promised a picker).
+             Refresh still happens on every resume. -->
         <ImageButton
-            android:id="@+id/btnRequests"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:src="@drawable/ic_add"
-            app:tint="@color/teal_700"
-            android:contentDescription="@string/arq_requests_title" />
-
-        <ImageButton
-            android:id="@+id/btnRefresh"
+            android:id="@+id/btnPickDate"
             android:layout_width="44dp"
             android:layout_height="44dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:src="@drawable/ic_calendar"
             app:tint="@color/teal_700"
-            android:contentDescription="@string/plan_refresh" />
+            android:contentDescription="@string/plan_pick_date_title" />
     </LinearLayout>
 
     <!-- day navigation -->
@@ -69,7 +67,6 @@
             android:layout_width="44dp"
             android:layout_height="44dp"
             android:background="?attr/selectableItemBackgroundBorderless"
-            android:rotation="180"
             android:src="@drawable/ic_back"
             app:tint="@color/teal_700"
             android:contentDescription="@string/plan_prev_day" />
@@ -105,11 +102,20 @@
                 android:textColor="#166534" />
         </LinearLayout>
 
+        <!-- owner request — «امروز» button: jump back to today from any day -->
+        <Button
+            android:id="@+id/btnToday"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/plan_today" />
+
         <ImageButton
             android:id="@+id/btnNextDay"
             android:layout_width="44dp"
             android:layout_height="44dp"
             android:background="?attr/selectableItemBackgroundBorderless"
+            android:rotation="180"
             android:src="@drawable/ic_back"
             app:tint="@color/teal_700"
             android:contentDescription="@string/plan_next_day" />
@@ -125,6 +131,38 @@
         android:paddingBottom="8dp"
         android:textSize="11sp"
         android:textColor="@color/gray_500" />
+
+    <!-- owner request — view mode (روز / همه روزها) + status/customer
+         filters, built programmatically like the customers screen. -->
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:id="@+id/boxFilters"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="4dp" />
+    </HorizontalScrollView>
+
+    <!-- owner request — overdue warning banner (red, above the list) -->
+    <TextView
+        android:id="@+id/tvOverdueWarning"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="4dp"
+        android:padding="8dp"
+        android:background="@drawable/bg_badge_red"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:textColor="#7F1D1D"
+        android:visibility="gone" />
 
     <!-- day summary -->
     <HorizontalScrollView

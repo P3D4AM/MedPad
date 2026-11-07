@@ -47,6 +47,13 @@ import java.util.UUID
  */
 object Customers360 {
 
+    /** owner fix — localId → REAL server id of every offline CREATE the
+     *  LAST flush confirmed. The create-customer flow uses this to request
+     *  assignment for EXACTLY the customer it just created (the old code
+     *  guessed "newest non-local row", which could pick a different
+     *  customer and send the request for the wrong id). */
+    val createdIds: MutableMap<String, String> = java.util.concurrent.ConcurrentHashMap()
+
     /** queue + insert the temp row; returns the temp Doctor (visible now). */
     suspend fun enqueueCreate(form: ApiClient.CustomerForm): Doctor = withContext(Dispatchers.IO) {
         val db = AppDatabase.get(TrackerContext.app)
@@ -303,6 +310,9 @@ object Customers360 {
                 )
             )
             if (temp != null) db.doctorDao().deleteById(temp.id)
+            // owner fix — remember the localId→realId mapping so the caller
+            // can act on EXACTLY this customer (assignment request)
+            createdIds[op.localId] = c.optString("id")
         }
         return true
     }

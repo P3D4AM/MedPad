@@ -280,16 +280,24 @@ object CustomerFormDialog {
                         CoroutineScope(Dispatchers.Main).launch {
                             var ok = false
                             var queued = false
+                            // owner fix — the real server id of the customer
+                            // THIS dialog just created (flush confirmed it);
+                            // the assignment request targets exactly it
+                            var createdServerId: String? = null
                             withContext(Dispatchers.IO) {
                                 try {
                                     if (existing == null) {
-                                        Customers360.enqueueCreate(form)
+                                        val temp = Customers360.enqueueCreate(form)
+                                        // the temp id is "local-<localId>" — the
+                                        // flush maps that localId to the real id
+                                        val localId = temp.id.removePrefix("local-")
+                                        Customers360.createdIds.remove(localId) // drop a stale mapping
+                                        Customers360.flush()
+                                        createdServerId = Customers360.createdIds[localId]
                                     } else {
                                         Customers360.enqueueEdit(existing.id, form)
                                     }
                                     // immediate flush — online confirms instantly
-                                    val before = Customers360.pendingCount()
-                                    Customers360.flush()
                                     val after = Customers360.pendingCount()
                                     queued = after > 0
                                     ok = true
@@ -312,31 +320,50 @@ object CustomerFormDialog {
                                     // mission-12/item-1 honest flow: online
                                     // create is registered but UNASSIGNED —
                                     // offer the assignment request
+                                    val requestTargetId = createdServerId
                                     AlertDialog.Builder(activity)
                                         .setTitle(R.string.customer_saved_unassigned_title)
                                         .setMessage(R.string.customer_saved_unassigned_body)
                                         .setPositiveButton(R.string.customer_request_assignment) { _, _ ->
+                                            if (requestTargetId == null) {
+                                                // offline-queued create — the server id
+                                                // does not exist yet; the request must
+                                                // wait (honest message, no wrong guess)
+                                                Toast.makeText(
+                                                    activity,
+                                                    R.string.customer_request_failed,
+                                                    Toast.LENGTH_LONG,
+                                                ).show()
+                                                return@setPositiveButton
+                                            }
                                             CoroutineScope(Dispatchers.Main).launch {
-                                                val sent = withContext(Dispatchers.IO) {
-                                                    try {
-                                                        // the freshly-created row is the newest
-                                                        // non-pending one; ask the server by localId
-                                                        val db = com.medpad.tracker.db.AppDatabase
-                                                            .get(activity.applicationContext)
-                                                        val newest = db.doctorDao().all()
-                                                            .filter { !it.id.startsWith("local-") }
-                                                            .maxByOrNull { it.updatedAt }
-                                                        newest?.let {
-                                                            ApiClient.createAssignmentRequest(it.id, "")
-                                                                .optBoolean("ok")
-                                                        } ?: false
-                                                    } catch (_: Exception) {
-                                                        false
+                                                var sent = false
+                                                var errMsg: String? = null
+                                                try {
+                                                    // owner fix — request assignment for
+                                                    // EXACTLY the customer this dialog
+                                                    // created (the old "newest non-local
+                                                    // row" guess could target another
+                                                    // customer and 409/404)
+                                                    sent = withContext(Dispatchers.IO) {
+                                                        ApiClient.createAssignmentRequest(requestTargetId, "")
+                                                            .optBoolean("ok")
                                                     }
+                                                } catch (e: ApiClient.HttpException) {
+                                                    errMsg = e.message
+                                                } catch (e: Exception) {
+                                                    errMsg = e.javaClass.simpleName +
+                                                        (e.message?.let { ": $it" } ?: "")
                                                 }
                                                 Toast.makeText(
                                                     activity,
-                                                    if (sent) R.string.request_sent else R.string.customer_request_failed,
+                                                    when {
+                                                        sent -> activity.getString(R.string.request_sent)
+                                                        else -> activity.getString(
+                                                            R.string.arq_send_error,
+                                                            errMsg ?: activity.getString(R.string.customer_request_failed),
+                                                        )
+                                                    },
                                                     Toast.LENGTH_LONG,
                                                 ).show()
                                             }

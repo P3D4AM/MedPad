@@ -1,8 +1,16 @@
-<?xml version="1.0" encoding="utf-8"?>
-<Button xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- owner fix — the day cell is a TextView, NOT a Button: under the
+     Material3 theme a plain <Button> inflates as MaterialButton, which
+     IGNORES android:background (leaving the default filled teal) and
+     does not render compound drawables — the day numbers were dark on
+     teal and unreadable. A TextView applies the custom background, the
+     report-day dot badge and the text colour exactly as coded. -->
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/btnDay"
     android:layout_width="match_parent"
     android:layout_height="44dp"
     android:layout_margin="3dp"
     android:background="@drawable/day_normal"
-    android:textSize="13sp" />
+    android:gravity="center"
+    android:textSize="14sp"
+    android:textStyle="bold"
+    android:textColor="#1C1917" />

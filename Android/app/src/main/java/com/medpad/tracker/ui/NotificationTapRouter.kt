@@ -106,7 +106,14 @@ object NotificationTapRouter {
         }
     }
 
-    /** The contentIntent every notification carries. */
+    /** The contentIntent every notification carries.
+     *
+     *  owner fix (back-stack duplication): FLAG_ACTIVITY_CLEAR_TOP is added
+     *  so a tap while [Main, Destination] is already stacked CLEARS the
+     *  destination and redelivers to the existing home (onNewIntent —
+     *  MainActivity is singleTop) before forwarding once. Without it, every
+     *  extra tap piled ANOTHER [Main, Destination] pair on the back stack
+     *  and the user had to press back once per tap. */
     fun pendingIntent(
         context: Context,
         kind: String?,
@@ -116,7 +123,11 @@ object NotificationTapRouter {
     ): PendingIntent {
         val route = routeForEntity(kind, customerId, entityType, entityId)
         val intent = Intent(context, MainActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP,
+            )
             putExtra(EXTRA_ROUTE, route.route)
             if (!route.customerId.isNullOrEmpty()) putExtra(EXTRA_CUSTOMER_ID, route.customerId)
             if (!route.entityType.isNullOrEmpty()) putExtra(EXTRA_ENTITY_TYPE, route.entityType)

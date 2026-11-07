@@ -38,7 +38,35 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/all_days" />
+
+        <!-- owner fix — «امروز» button: jumps to the current day (selects
+             it) from anywhere in the calendar -->
+        <Button
+            android:id="@+id/btnToday"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:text="@string/today" />
     </LinearLayout>
+
+    <!-- owner request — filter row: range (۷/۳۰ روز / همه) + kind +
+         customer. Chips are built programmatically (same pattern as the
+         customers screen). -->
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:id="@+id/boxFilters"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="6dp" />
+    </HorizontalScrollView>
 
     <!-- Jalali month grid -->
     <LinearLayout
@@ -61,7 +89,6 @@
                 android:layout_width="40dp"
                 android:layout_height="40dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
-                android:rotation="180"
                 android:src="@drawable/ic_back"
                 app:tint="@color/teal_600"
                 android:contentDescription="@string/pick_date" />
@@ -81,6 +108,7 @@
                 android:layout_width="40dp"
                 android:layout_height="40dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
+                android:rotation="180"
                 android:src="@drawable/ic_back"
                 app:tint="@color/teal_600"
                 android:contentDescription="@string/pick_date" />
