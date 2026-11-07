@@ -1747,3 +1747,12 @@ Stage Summary (Task 63):
 - نسخه: **1.9.15-dev.1 / vCode 22** · نسخه‌های نصب‌کننده/مدیریت/APP-VERSION همه dev.1.
 - وصله: `patches/panel-src-phase8-owner-fixes.patch` (۸ فایل) · زنجیرهٔ build-panel.sh اکنون ۱۸ وصله · باندل جدید در `app/panel/.next` ترویج شد.
 - وضعیت: DONE_LOCAL تا لحظهٔ پوش؛ جزئیات پوش/تگ/ریلیز در ادامهٔ همین Task پس از انجام ثبت شد.
+
+Stage Summary (Task 63 — انتشار):
+- پوش سه‌کامیتی `8981326..094b6ce` (پنل+باندل · اندروید · مستندات) — SHA از GitHub با ls-remote تأیید شد (`094b6ce0ae561447c98ec13cf86c40dcc151228d`)؛ `main` دست‌نخورده (`8db3319`).
+- تگ annotated `v1.9.15-dev.1` = `12aed4e` روی `094b6ce` (ls-remote تأیید).
+- ZIP از خود تگ با همان مسیرهای مستثنای dev.3 (بدون Android/audit-tests/۷ گزارش قدیمی/SHA256SUMS کهنه) → **۳٬۰۳۰ فایل / ۱۴۴,۸۹۶,۴۵۸ بایت**؛ unzip -t OK؛ رشته‌های نسخه و CRLF پیش از انتشار بررسی شد: APP-VERSION=dev.1 · INSTALLER_VER=dev.1 · عنوان README-fa=dev.1 · install.bat **۱۹۲×CRLF / ۰×LF-only** · وصلهٔ phase8 و باندل کامل داخل ZIP حاضر.
+- APK debug = ۹,۱۴۶,۱۵۴ بایت (vCode 22 / 1.9.15-dev.1؛ SHA-256 `517d13a8c624aa8b033e7d19aa375a503f6e22a6b71b26074bcf7a814c35aecc`؛ SHA-1 `28021644938f5b88feb937e7317569a631c2dbb9`)؛ apksigner VERIFIED (کلید Debug تازهٔ سندباکس — ارتقا از dev.3 = حذف/نصب مجدد با مسیر نجات بکاپ؛ در متن ریلیز).
+- **Release prerelease id 437494845 با ۴ asset** (APK · ZIP · SHA1SUMS · SHA256SUMS) → **دانلود-برگشتی از GitHub: هر دو فایل بایت‌به‌بایت یکسان + SHA-256/SHA-1 مطابق + unzip -t سالم.** https://github.com/P3D4AM/MedPad/releases/tag/v1.9.15-dev.1 — ۱۳ ریلیز زنده.
+- کپی keystore دیباگ به مالک: `download/medpad-debug-keystore-v1.9.15-dev.1.keystore`.
+- وضعیت: **DONE_VERIFIED**. قدم بعدی: بازخورد مالک روی ۱۷ مورد (به‌ویژه پخش iOS، همگام‌سازی مشتریان پس از تعویض کاربر، و اعلان‌ها)؛ سپس فاز ۵ (جغرافیای مشهد) طبق نقشهٔ §۸.
