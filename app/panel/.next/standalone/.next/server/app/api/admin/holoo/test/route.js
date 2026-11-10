@@ -1,0 +1,10 @@
+var R=require("../../../../../chunks/[turbopack]_runtime.js")("server/app/api/admin/holoo/test/route.js")
+R.c("server/chunks/[root-of-the-server]__13dli42gmpx5g._.js")
+R.c("server/chunks/src_lib_holoo_ts_0d1rig_719i12._.js")
+R.c("server/chunks/src_lib_holoo-config_ts_1egu8t31qrh_q._.js")
+R.c("server/chunks/_0q0-a3qf_lt1q._.js")
+R.c("server/chunks/[root-of-the-server]__1v1-l-83czzsr._.js")
+R.c("server/chunks/[root-of-the-server]__0v3n36cech4i9._.js")
+R.c("server/chunks/_next-internal_server_app_api_admin_holoo_test_route_actions_0oclcl0nay2c0.js")
+R.m(43095)
+module.exports=R.m(43095).exports

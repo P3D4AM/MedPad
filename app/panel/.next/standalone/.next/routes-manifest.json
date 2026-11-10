@@ -198,6 +198,36 @@
       "namedRegex": "^/api/admin/events(?:/)?$"
     },
     {
+      "page": "/api/admin/holoo/products",
+      "regex": "^/api/admin/holoo/products(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/admin/holoo/products(?:/)?$"
+    },
+    {
+      "page": "/api/admin/holoo/settings",
+      "regex": "^/api/admin/holoo/settings(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/admin/holoo/settings(?:/)?$"
+    },
+    {
+      "page": "/api/admin/holoo/status",
+      "regex": "^/api/admin/holoo/status(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/admin/holoo/status(?:/)?$"
+    },
+    {
+      "page": "/api/admin/holoo/sync",
+      "regex": "^/api/admin/holoo/sync(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/admin/holoo/sync(?:/)?$"
+    },
+    {
+      "page": "/api/admin/holoo/test",
+      "regex": "^/api/admin/holoo/test(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/admin/holoo/test(?:/)?$"
+    },
+    {
       "page": "/api/admin/media-orphans",
       "regex": "^/api/admin/media\\-orphans(?:/)?$",
       "routeKeys": {},

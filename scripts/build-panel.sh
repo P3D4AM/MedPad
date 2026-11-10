@@ -25,7 +25,13 @@
 #           go ONLY to the assigned rep, assignment-aware incremental app
 #           customers sync, plans window.today, Jalali month calendar +
 #           همهٔ روزها view with pinned overdue section, per-customer
-#           assign/revoke dialog — last)
+#           assign/revoke dialog) →
+#           phase9-holoo (Nov 2026 Holoo ERP integration: ErpCustomer/
+#           ErpProduct/ErpPayment/HolooSyncLog + Customer.erpCode bridge,
+#           lib/holoo{,-config,-sync} client/settings/orchestrator with the
+#           boot-started periodic scheduler, 5 admin /api/admin/holoo/*
+#           routes, erp blocks on the app customers/profile APIs, the
+#           «هلو» dashboard tab + the 360 profile financial block — last)
 #
 # This script performs the WHOLE reproducible pipeline and verifies it:
 #   1. fresh extraction of the base source (git archive)
@@ -61,7 +67,7 @@ set -euo pipefail
 REPO_ROOT="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
 WORK="${2:-$REPO_ROOT/panel-build}"
 BASE_REF="bd9c80b:medpad-full-1.9/inst-stage/panel-src"
-CHAIN="phase1-task1 phase2-remediation phase2-task1 phase2-task2 phase2-dev2-fixes phase2-package4 phase2-madrep phase2-package6 phase2-package7 phase2-package9 phase2-package5 phase2-package13 phase3-package14 phase4-package15 phase5-package16 phase6-customer360 phase7-central-settings phase8-owner-fixes"
+CHAIN="phase1-task1 phase2-remediation phase2-task1 phase2-task2 phase2-dev2-fixes phase2-package4 phase2-madrep phase2-package6 phase2-package7 phase2-package9 phase2-package5 phase2-package13 phase3-package14 phase4-package15 phase5-package16 phase6-customer360 phase7-central-settings phase8-owner-fixes phase9-holoo"
 
 # RESUME mode (sandbox convenience): with MEDPAD_BUILD_RESUME=1 an existing
 # $WORK/src with node_modules (from an interrupted run — e.g. a sandbox that
@@ -113,6 +119,10 @@ fi
 [ -f "$WORK/src/public/sw.js" ] || die "patch chain did not produce public/sw.js"
 # phase 8 markers (owner fix batch — Jalali calendar lib + month calendar)
 [ -f "$WORK/src/src/lib/jalali.ts" ] || die "patch chain did not produce src/lib/jalali.ts"
+# phase 9 markers (Holoo integration — client + orchestrator + tab)
+[ -f "$WORK/src/src/lib/holoo.ts" ] || die "patch chain did not produce src/lib/holoo.ts"
+[ -f "$WORK/src/src/lib/holoo-sync.ts" ] || die "patch chain did not produce src/lib/holoo-sync.ts"
+[ -f "$WORK/src/src/components/panel/HolooTab.tsx" ] || die "patch chain did not produce HolooTab.tsx"
 cd "$WORK/src"
 
 # ── 3. npm install ──────────────────────────────────────────────────────────
@@ -198,7 +208,16 @@ chk "web-push external in runtime"  "[ -d node_modules/web-push ]"
 chk "settings tab UI chunks"        "grep -rq 'settings-cat-' --include='*.js' ."
 chk "device-ack + history chunks"   "grep -rq 'settings-device-ack' --include='*.js' ."
 chk "vapid bootstrap in server"     "grep -rq 'vapidPublicKey' .next/server --include='*.js'"
-echo "   hardening: PASS=$P FAIL=$F / 33"
+# phase 9 (Holoo integration): the five admin API surfaces + the erp block
+# on the app customers API + the tab UI must ship in the bundle
+chk "api: holoo settings"          "[ -f .next/server/app/api/admin/holoo/settings/route.js ]"
+chk "api: holoo test"              "[ -f .next/server/app/api/admin/holoo/test/route.js ]"
+chk "api: holoo sync"              "[ -f .next/server/app/api/admin/holoo/sync/route.js ]"
+chk "api: holoo status"            "[ -f .next/server/app/api/admin/holoo/status/route.js ]"
+chk "api: holoo products"          "[ -f .next/server/app/api/admin/holoo/products/route.js ]"
+chk "holoo client in server"        "grep -rq 'userinfo' .next/server --include='*.js'"
+chk "holoo tab UI chunks"           "grep -rq 'اطلاعات مالی هلو' --include='*.js' ."
+echo "   hardening: PASS=$P FAIL=$F / 41"
 LAST_HARDENING="$P/$F PASS"
 [ "$F" -eq 0 ] || die "hardening checks failed"
 

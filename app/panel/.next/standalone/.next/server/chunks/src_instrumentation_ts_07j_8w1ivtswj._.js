@@ -34,7 +34,7 @@ module.exports=[23322,T=>{"use strict";let E=['ALTER TABLE "AppToken" ADD COLUMN
   "customerId" TEXT,
   "readAt" DATETIME,
   "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-)`,A=`CREATE TABLE IF NOT EXISTS "OpEvent" (
+)`,L=`CREATE TABLE IF NOT EXISTS "OpEvent" (
   "id" TEXT NOT NULL PRIMARY KEY,
   "employeeId" TEXT,
   "type" TEXT NOT NULL,
@@ -48,7 +48,7 @@ module.exports=[23322,T=>{"use strict";let E=['ALTER TABLE "AppToken" ADD COLUMN
   "requestId" TEXT,
   "attempt" INTEGER,
   "appVersion" TEXT
-)`,L=`CREATE TABLE IF NOT EXISTS "AssignmentRequest" (
+)`,A=`CREATE TABLE IF NOT EXISTS "AssignmentRequest" (
   "id" TEXT NOT NULL PRIMARY KEY,
   "employeeId" TEXT NOT NULL,
   "customerId" TEXT NOT NULL,
@@ -68,7 +68,7 @@ module.exports=[23322,T=>{"use strict";let E=['ALTER TABLE "AppToken" ADD COLUMN
   "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "CheckinNoteVersion_checkinId_fkey" FOREIGN KEY ("checkinId") REFERENCES "Checkin" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT "CheckinNoteVersion_editorId_fkey" FOREIGN KEY ("editorId") REFERENCES "Employee" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
-)`,n=`CREATE TABLE IF NOT EXISTS "LocationPing" (
+)`,o=`CREATE TABLE IF NOT EXISTS "LocationPing" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "employeeId" TEXT NOT NULL,
     "localId" TEXT NOT NULL,
@@ -94,7 +94,7 @@ module.exports=[23322,T=>{"use strict";let E=['ALTER TABLE "AppToken" ADD COLUMN
   "seq" INTEGER NOT NULL DEFAULT 0,
   "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "VoiceFile_checkinId_fkey" FOREIGN KEY ("checkinId") REFERENCES "Checkin" ("id") ON DELETE CASCADE ON UPDATE CASCADE
-)`,o=['ALTER TABLE "Customer" ADD COLUMN "lastName" TEXT','ALTER TABLE "Customer" ADD COLUMN "title" TEXT','ALTER TABLE "Customer" ADD COLUMN "specialty" TEXT','ALTER TABLE "Customer" ADD COLUMN "managerName" TEXT','ALTER TABLE "Customer" ADD COLUMN "phone2" TEXT','ALTER TABLE "Customer" ADD COLUMN "district" TEXT','ALTER TABLE "Customer" ADD COLUMN "postalCode" TEXT','ALTER TABLE "Customer" ADD COLUMN "notes" TEXT','ALTER TABLE "Customer" ADD COLUMN "active" BOOLEAN NOT NULL DEFAULT true','ALTER TABLE "Customer" ADD COLUMN "appLocalId" TEXT'],O=`CREATE TABLE IF NOT EXISTS "CustomerLink" (
+)`,n=['ALTER TABLE "Customer" ADD COLUMN "lastName" TEXT','ALTER TABLE "Customer" ADD COLUMN "title" TEXT','ALTER TABLE "Customer" ADD COLUMN "specialty" TEXT','ALTER TABLE "Customer" ADD COLUMN "managerName" TEXT','ALTER TABLE "Customer" ADD COLUMN "phone2" TEXT','ALTER TABLE "Customer" ADD COLUMN "district" TEXT','ALTER TABLE "Customer" ADD COLUMN "postalCode" TEXT','ALTER TABLE "Customer" ADD COLUMN "notes" TEXT','ALTER TABLE "Customer" ADD COLUMN "active" BOOLEAN NOT NULL DEFAULT true','ALTER TABLE "Customer" ADD COLUMN "appLocalId" TEXT'],O=`CREATE TABLE IF NOT EXISTS "CustomerLink" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "clinicId" TEXT NOT NULL,
     "physicianId" TEXT NOT NULL,
@@ -104,7 +104,7 @@ module.exports=[23322,T=>{"use strict";let E=['ALTER TABLE "AppToken" ADD COLUMN
     "updatedAt" DATETIME NOT NULL,
     CONSTRAINT "CustomerLink_clinicId_fkey" FOREIGN KEY ("clinicId") REFERENCES "Customer" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "CustomerLink_physicianId_fkey" FOREIGN KEY ("physicianId") REFERENCES "Customer" ("id") ON DELETE CASCADE ON UPDATE CASCADE
-)`,c=`CREATE TABLE IF NOT EXISTS "Purchase" (
+)`,r=`CREATE TABLE IF NOT EXISTS "Purchase" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "customerId" TEXT NOT NULL,
     "source" TEXT NOT NULL DEFAULT 'manual',
@@ -118,7 +118,7 @@ module.exports=[23322,T=>{"use strict";let E=['ALTER TABLE "AppToken" ADD COLUMN
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
     CONSTRAINT "Purchase_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
-)`,r=`CREATE TABLE IF NOT EXISTS "PurchaseItem" (
+)`,c=`CREATE TABLE IF NOT EXISTS "PurchaseItem" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "purchaseId" TEXT NOT NULL,
     "productId" TEXT,
@@ -130,7 +130,7 @@ module.exports=[23322,T=>{"use strict";let E=['ALTER TABLE "AppToken" ADD COLUMN
     "total" REAL NOT NULL DEFAULT 0,
     "discount" REAL,
     CONSTRAINT "PurchaseItem_purchaseId_fkey" FOREIGN KEY ("purchaseId") REFERENCES "Purchase" ("id") ON DELETE CASCADE ON UPDATE CASCADE
-)`,s=['ALTER TABLE "TrackStatus" ADD COLUMN "appliedConfigJson" TEXT','ALTER TABLE "TrackStatus" ADD COLUMN "configAckAt" DATETIME'],R=`CREATE TABLE IF NOT EXISTS "PushSubscription" (
+)`,U=['ALTER TABLE "TrackStatus" ADD COLUMN "appliedConfigJson" TEXT','ALTER TABLE "TrackStatus" ADD COLUMN "configAckAt" DATETIME'],s=`CREATE TABLE IF NOT EXISTS "PushSubscription" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "endpoint" TEXT NOT NULL,
     "p256dh" TEXT NOT NULL,
@@ -139,6 +139,65 @@ module.exports=[23322,T=>{"use strict";let E=['ALTER TABLE "AppToken" ADD COLUMN
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "lastSeenAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "PushSubscription_endpoint_key" UNIQUE ("endpoint")
-)`;async function U(){let{PrismaClient:U}=await T.A(83700),D=new U,C=0;for(let T of[...E,e,N,'CREATE UNIQUE INDEX IF NOT EXISTS "PlannedVisit_visitId_key" ON "PlannedVisit"("visitId")','ALTER TABLE "AppNotification" ADD COLUMN "eventKey" TEXT','CREATE UNIQUE INDEX IF NOT EXISTS "AppNotification_eventKey_key" ON "AppNotification"("eventKey")',t,'CREATE UNIQUE INDEX IF NOT EXISTS "PanelNotification_eventKey_key" ON "PanelNotification"("eventKey")',L,'CREATE UNIQUE INDEX IF NOT EXISTS "AssignmentRequest_pending_key" ON "AssignmentRequest"("employeeId","customerId") WHERE "status"=\'pending\'',...i,I,'CREATE INDEX IF NOT EXISTS "CheckinNoteVersion_checkinId_idx" ON "CheckinNoteVersion"("checkinId")',n,'CREATE UNIQUE INDEX IF NOT EXISTS "LocationPing_localId_key" ON "LocationPing"("localId")','CREATE INDEX IF NOT EXISTS "LocationPing_employeeId_recordedAt_idx" ON "LocationPing"("employeeId", "recordedAt")',d,'UPDATE "Visit" SET "open" = 0, "endAt" = COALESCE("endAt", "startAt") WHERE "open" = 1 AND "id" NOT IN (  SELECT "id" FROM "Visit" v2 WHERE v2."open" = 1 AND v2."employeeId" = "Visit"."employeeId"   ORDER BY v2."startAt" DESC LIMIT 1)','CREATE UNIQUE INDEX IF NOT EXISTS "Visit_one_open" ON "Visit"("employeeId") WHERE "open" = 1',A,'CREATE INDEX IF NOT EXISTS "OpEvent_employeeId_serverAt_idx" ON "OpEvent"("employeeId", "serverAt")','CREATE INDEX IF NOT EXISTS "OpEvent_type_serverAt_idx" ON "OpEvent"("type", "serverAt")','CREATE INDEX IF NOT EXISTS "OpEvent_serverAt_idx" ON "OpEvent"("serverAt")','CREATE UNIQUE INDEX IF NOT EXISTS "OpEvent_requestId_key" ON "OpEvent"("requestId")',a,'CREATE UNIQUE INDEX IF NOT EXISTS "VoiceFile_path_key" ON "VoiceFile"("path")','CREATE INDEX IF NOT EXISTS "VoiceFile_checkinId_idx" ON "VoiceFile"("checkinId")','INSERT INTO "VoiceFile" ("id", "checkinId", "path", "seq", "createdAt") SELECT \'vfb_\' || c."id", c."id", c."voicePath", 0, c."createdAt" FROM "Checkin" c WHERE c."voicePath" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM "VoiceFile" vf WHERE vf."path" = c."voicePath")',...o,'CREATE UNIQUE INDEX IF NOT EXISTS "Customer_appLocalId_key" ON "Customer"("appLocalId")',O,'CREATE UNIQUE INDEX IF NOT EXISTS "CustomerLink_clinicId_physicianId_key" ON "CustomerLink"("clinicId", "physicianId")','CREATE INDEX IF NOT EXISTS "CustomerLink_physicianId_idx" ON "CustomerLink"("physicianId")',c,'CREATE INDEX IF NOT EXISTS "Purchase_customerId_date_idx" ON "Purchase"("customerId", "date")','CREATE INDEX IF NOT EXISTS "Purchase_externalId_idx" ON "Purchase"("externalId")','CREATE UNIQUE INDEX IF NOT EXISTS "Purchase_externalId_key" ON "Purchase"("externalId")',r,'CREATE INDEX IF NOT EXISTS "PurchaseItem_purchaseId_idx" ON "PurchaseItem"("purchaseId")',...s,R])try{await D.$executeRawUnsafe(T),C++}catch(e){let E=e instanceof Error?e.message:String(e);if(/duplicate column name|already exists/i.test(E))continue;console.error(`[medpad][migrate] FAILED: ${T} -> ${E}`)}try{let E=await D.config.findUnique({where:{key:"vapidPublicKey"}}),e=await D.config.findUnique({where:{key:"vapidPrivateKey"}}),N=(T,E)=>"string"==typeof T&&T.length>=E;if(!N(E?.value,80)||!N(e?.value,40)){let E=(await T.A(30510)).default.generateVAPIDKeys();await D.config.upsert({where:{key:"vapidPublicKey"},update:{value:E.publicKey},create:{key:"vapidPublicKey",value:E.publicKey}}),await D.config.upsert({where:{key:"vapidPrivateKey"},update:{value:E.privateKey},create:{key:"vapidPrivateKey",value:E.privateKey}}),console.log("edpad][push] generated VAPID key pair (stored in Config)")}}catch(T){console.error("edpad][push] VAPID bootstrap failed:",T instanceof Error?T.message:T)}try{let T=await D.config.findUnique({where:{key:"trackRetentionDays"}}),E=T?Number(T.value):0/0,e=Number.isFinite(E)&&E>=7&&E<=365?Math.trunc(E):30,N=new Date(Date.now()-24*e*36e5),t=await D.locationPing.deleteMany({where:{receivedAt:{lt:N}}});t.count>0&&console.log(`[medpad][tracking] pruned ${t.count} ping(s) older than ${e} day(s)`)}catch{}try{let T=await D.config.findUnique({where:{key:"eventRetentionDays"}}),E=T?Number(T.value):0/0,e=Number.isFinite(E)&&E>=30&&E<=730?Math.trunc(E):90,N=new Date(Date.now()-24*e*36e5),t=await D.opEvent.deleteMany({where:{serverAt:{lt:N}}});t.count>0&&console.log(`edpad][op-event] pruned ${t.count} event(s) older than ${e} day(s)`)}catch{}await D.$disconnect(),C>0&&console.log(`[medpad][migrate] applied ${C} migration statement(s)`)}T.s(["register",0,U])}];
+)`,R=['ALTER TABLE "Customer" ADD COLUMN "erpCode" TEXT','ALTER TABLE "Purchase" ADD COLUMN "holooJson" TEXT'],C=`CREATE TABLE IF NOT EXISTS "ErpCustomer" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "erpCode" TEXT NOT NULL,
+    "code" TEXT,
+    "name" TEXT NOT NULL,
+    "mandeh" REAL NOT NULL DEFAULT 0,
+    "credit" REAL NOT NULL DEFAULT 0,
+    "nationalId" TEXT,
+    "economicId" TEXT,
+    "tel" TEXT,
+    "mobile" TEXT,
+    "city" TEXT,
+    "ostan" TEXT,
+    "mantagheh" TEXT,
+    "zipCode" TEXT,
+    "address" TEXT,
+    "job" TEXT,
+    "email" TEXT,
+    "active" BOOLEAN NOT NULL DEFAULT true,
+    "contentHash" TEXT NOT NULL,
+    "lastSyncedAt" DATETIME NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+)`,D=`CREATE TABLE IF NOT EXISTS "ErpProduct" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "erpCode" TEXT NOT NULL,
+    "code" TEXT,
+    "name" TEXT NOT NULL,
+    "few" TEXT,
+    "buyPrice" REAL,
+    "sellPrice" REAL,
+    "group" TEXT,
+    "active" BOOLEAN NOT NULL DEFAULT true,
+    "contentHash" TEXT NOT NULL,
+    "lastSyncedAt" DATETIME NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+)`,X=`CREATE TABLE IF NOT EXISTS "ErpPayment" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "customerErpCode" TEXT NOT NULL,
+    "code" TEXT,
+    "name" TEXT,
+    "price" REAL NOT NULL DEFAULT 0,
+    "date" DATETIME NOT NULL,
+    "mandeh" REAL,
+    "contentHash" TEXT NOT NULL,
+    "lastSyncedAt" DATETIME NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+)`,S=`CREATE TABLE IF NOT EXISTS "HolooSyncLog" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "kind" TEXT NOT NULL,
+    "status" TEXT NOT NULL,
+    "startedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "finishedAt" DATETIME,
+    "checked" INTEGER NOT NULL DEFAULT 0,
+    "created" INTEGER NOT NULL DEFAULT 0,
+    "updated" INTEGER NOT NULL DEFAULT 0,
+    "unchanged" INTEGER NOT NULL DEFAULT 0,
+    "deactivated" INTEGER NOT NULL DEFAULT 0,
+    "errors" TEXT,
+    "checkpoint" TEXT
+)`;async function p(){let{PrismaClient:p}=await T.A(83700),u=new p,l=0;for(let T of[...E,e,N,'CREATE UNIQUE INDEX IF NOT EXISTS "PlannedVisit_visitId_key" ON "PlannedVisit"("visitId")','ALTER TABLE "AppNotification" ADD COLUMN "eventKey" TEXT','CREATE UNIQUE INDEX IF NOT EXISTS "AppNotification_eventKey_key" ON "AppNotification"("eventKey")',t,'CREATE UNIQUE INDEX IF NOT EXISTS "PanelNotification_eventKey_key" ON "PanelNotification"("eventKey")',A,'CREATE UNIQUE INDEX IF NOT EXISTS "AssignmentRequest_pending_key" ON "AssignmentRequest"("employeeId","customerId") WHERE "status"=\'pending\'',...i,I,'CREATE INDEX IF NOT EXISTS "CheckinNoteVersion_checkinId_idx" ON "CheckinNoteVersion"("checkinId")',o,'CREATE UNIQUE INDEX IF NOT EXISTS "LocationPing_localId_key" ON "LocationPing"("localId")','CREATE INDEX IF NOT EXISTS "LocationPing_employeeId_recordedAt_idx" ON "LocationPing"("employeeId", "recordedAt")',d,'UPDATE "Visit" SET "open" = 0, "endAt" = COALESCE("endAt", "startAt") WHERE "open" = 1 AND "id" NOT IN (  SELECT "id" FROM "Visit" v2 WHERE v2."open" = 1 AND v2."employeeId" = "Visit"."employeeId"   ORDER BY v2."startAt" DESC LIMIT 1)','CREATE UNIQUE INDEX IF NOT EXISTS "Visit_one_open" ON "Visit"("employeeId") WHERE "open" = 1',L,'CREATE INDEX IF NOT EXISTS "OpEvent_employeeId_serverAt_idx" ON "OpEvent"("employeeId", "serverAt")','CREATE INDEX IF NOT EXISTS "OpEvent_type_serverAt_idx" ON "OpEvent"("type", "serverAt")','CREATE INDEX IF NOT EXISTS "OpEvent_serverAt_idx" ON "OpEvent"("serverAt")','CREATE UNIQUE INDEX IF NOT EXISTS "OpEvent_requestId_key" ON "OpEvent"("requestId")',a,'CREATE UNIQUE INDEX IF NOT EXISTS "VoiceFile_path_key" ON "VoiceFile"("path")','CREATE INDEX IF NOT EXISTS "VoiceFile_checkinId_idx" ON "VoiceFile"("checkinId")','INSERT INTO "VoiceFile" ("id", "checkinId", "path", "seq", "createdAt") SELECT \'vfb_\' || c."id", c."id", c."voicePath", 0, c."createdAt" FROM "Checkin" c WHERE c."voicePath" IS NOT NULL AND NOT EXISTS (SELECT 1 FROM "VoiceFile" vf WHERE vf."path" = c."voicePath")',...n,'CREATE UNIQUE INDEX IF NOT EXISTS "Customer_appLocalId_key" ON "Customer"("appLocalId")',O,'CREATE UNIQUE INDEX IF NOT EXISTS "CustomerLink_clinicId_physicianId_key" ON "CustomerLink"("clinicId", "physicianId")','CREATE INDEX IF NOT EXISTS "CustomerLink_physicianId_idx" ON "CustomerLink"("physicianId")',r,'CREATE INDEX IF NOT EXISTS "Purchase_customerId_date_idx" ON "Purchase"("customerId", "date")','CREATE INDEX IF NOT EXISTS "Purchase_externalId_idx" ON "Purchase"("externalId")','CREATE UNIQUE INDEX IF NOT EXISTS "Purchase_externalId_key" ON "Purchase"("externalId")',c,'CREATE INDEX IF NOT EXISTS "PurchaseItem_purchaseId_idx" ON "PurchaseItem"("purchaseId")',...U,s,...R,'CREATE UNIQUE INDEX IF NOT EXISTS "Customer_erpCode_key" ON "Customer"("erpCode")',C,'CREATE UNIQUE INDEX IF NOT EXISTS "ErpCustomer_erpCode_key" ON "ErpCustomer"("erpCode")','CREATE INDEX IF NOT EXISTS "ErpCustomer_active_idx" ON "ErpCustomer"("active")',D,'CREATE UNIQUE INDEX IF NOT EXISTS "ErpProduct_erpCode_key" ON "ErpProduct"("erpCode")',X,'CREATE UNIQUE INDEX IF NOT EXISTS "ErpPayment_customerErpCode_code_key" ON "ErpPayment"("customerErpCode", "code")','CREATE INDEX IF NOT EXISTS "ErpPayment_customerErpCode_idx" ON "ErpPayment"("customerErpCode")',S,'CREATE INDEX IF NOT EXISTS "HolooSyncLog_startedAt_idx" ON "HolooSyncLog"("startedAt")','UPDATE "HolooSyncLog" SET "status" = \'error\', "finishedAt" = CURRENT_TIMESTAMP, "errors" = COALESCE("errors", \'[]\') WHERE "status" = \'running\' AND "startedAt" < datetime(\'now\', \'-30 minutes\')'])try{await u.$executeRawUnsafe(T),l++}catch(e){let E=e instanceof Error?e.message:String(e);if(/duplicate column name|already exists/i.test(E))continue;console.error(`[medpad][migrate] FAILED: ${T} -> ${E}`)}try{let E=await u.config.findUnique({where:{key:"vapidPublicKey"}}),e=await u.config.findUnique({where:{key:"vapidPrivateKey"}}),N=(T,E)=>"string"==typeof T&&T.length>=E;if(!N(E?.value,80)||!N(e?.value,40)){let E=(await T.A(30510)).default.generateVAPIDKeys();await u.config.upsert({where:{key:"vapidPublicKey"},update:{value:E.publicKey},create:{key:"vapidPublicKey",value:E.publicKey}}),await u.config.upsert({where:{key:"vapidPrivateKey"},update:{value:E.privateKey},create:{key:"vapidPrivateKey",value:E.privateKey}}),console.log("edpad][push] generated VAPID key pair (stored in Config)")}}catch(T){console.error("edpad][push] VAPID bootstrap failed:",T instanceof Error?T.message:T)}try{let T=await u.config.findUnique({where:{key:"trackRetentionDays"}}),E=T?Number(T.value):0/0,e=Number.isFinite(E)&&E>=7&&E<=365?Math.trunc(E):30,N=new Date(Date.now()-24*e*36e5),t=await u.locationPing.deleteMany({where:{receivedAt:{lt:N}}});t.count>0&&console.log(`[medpad][tracking] pruned ${t.count} ping(s) older than ${e} day(s)`)}catch{}try{let T=await u.config.findUnique({where:{key:"eventRetentionDays"}}),E=T?Number(T.value):0/0,e=Number.isFinite(E)&&E>=30&&E<=730?Math.trunc(E):90,N=new Date(Date.now()-24*e*36e5),t=await u.opEvent.deleteMany({where:{serverAt:{lt:N}}});t.count>0&&console.log(`edpad][op-event] pruned ${t.count} event(s) older than ${e} day(s)`)}catch{}await u.$disconnect(),l>0&&console.log(`[medpad][migrate] applied ${l} migration statement(s)`);try{let{startHolooScheduler:E}=await T.A(95705);E()}catch(T){console.error("[medpad][holoo] scheduler failed to start:",T instanceof Error?T.message:T)}}T.s(["register",0,p])}];
 
 //# sourceMappingURL=src_instrumentation_ts_07j_8w1ivtswj._.js.map

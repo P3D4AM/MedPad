@@ -1,0 +1,2665 @@
+# panel-src phase 9 — Holoo ERP integration (Nov 2026, per the owner's
+# integration specification + HOLOO-PHASE0-REPORT-fa.md design map)
+#
+# Server-side ONLY additions on the EXISTING Next.js panel (no parallel
+# infrastructure, no new dependencies — Node 24 global fetch):
+#  * prisma/schema.prisma: ErpCustomer / ErpProduct / ErpPayment /
+#    HolooSyncLog models + Customer.erpCode (the single bridge) +
+#    Purchase.holooJson (raw invoice provenance).
+#  * src/instrumentation.ts: idempotent DDL for the four new tables and
+#    the two new columns + the periodic sync scheduler start (a timer in
+#    the SAME server process; config re-read every tick).
+#  * src/lib/holoo-config.ts: connection settings in the existing Config
+#    KV (enabled/baseUrl/dbname/username/password(write-only, base64)/
+#    syncIntervalMin 1..1440 default 3) + token cache helpers.
+#  * src/lib/holoo.ts: the Holoo HTTP client — POST /Login with
+#    {"userinfo":{username,userpass(base64),dbname}}, Authorization header
+#    from the login Token, ONE auto re-login on 401, timeouts, classified
+#    errors (never credentials), tolerant response/list/field mappers and
+#    a sha256 content hash for change detection.
+#  * src/lib/holoo-sync.ts: the orchestrator — periodic FULL comparison
+#    with contentHash upserts keyed by the stable ErpCode (date.from/
+#    date.to NOT trusted for change detection until verified on the real
+#    service), strict data-ownership (only Erp* tables + bridging fields
+#    are written), NO-DELETE policy (absence != delete), MedPad customer
+#    linking (erpCode -> unique normalized name -> new UNASSIGNED row,
+#    never auto-assignment), invoice -> Purchase(source='holoo') with one
+#    total line + holooJson, per-customer payments from Report/GetCustPay
+#    with polite pacing, one-run-at-a-time guard, full per-run logging.
+#  * API routes (admin): holoo/settings (GET/PUT, password never
+#    returned), holoo/test (REAL login + read-only endpoint probing),
+#    holoo/sync (manual trigger, fire-and-forget), holoo/status (counts +
+#    last logs + scheduler state), holoo/products (read-only list).
+#  * /api/app/customers: additive `erp` block (mandeh/credit) + the
+#    incremental-sync trigger ErpCustomer.lastSyncedAt > since — the app
+#    NEVER talks to Holoo directly; /api/customers/[id]/profile and
+#    /api/app/customers/[id]/profile gain erpAccount + erpPayments.
+#  * Panel UI: the new «هلو» dashboard tab (HolooTab — settings, real
+#    connection test with endpoint probe results, manual sync, counts,
+#    logs, products, HTTP/internal-network warning) + the Holoo financial
+#    block in the customer 360 profile.
+diff -ruN a/prisma/schema.prisma src/prisma/schema.prisma
+--- a/prisma/schema.prisma	2026-11-10 09:35:46.364183445 +0000
++++ src/prisma/schema.prisma	2026-11-10 09:16:40.000000000 +0000
+@@ -105,6 +105,13 @@
+   // replay). Unique among NON-NULL values; NULL for panel-created rows.
+   appLocalId  String?  @unique
+ 
++  // ── Holoo integration (phase 1) — the ONLY connection point between a
++  // MedPad Customer and its Holoo counterpart (ErpCustomer.erpCode).
++  // Nullable: every pre-Holoo row keeps NULL. The Holoo sync NEVER writes
++  // any other Customer field through this link — operational ownership
++  // (assignments, visits, notes, active, …) stays 100% MedPad-side.
++  erpCode     String?  @unique
++
+   checkins    Checkin[]
+   visits      Visit[]
+   assignments Assignment[]
+@@ -193,6 +200,11 @@
+   notes         String?
+   // when the (future) Holoo adapter last confirmed this row
+   syncedAt      DateTime  @default(now())
++  // ── Holoo integration (phase 1): the RAW invoice header as returned by
++  // the Holoo API (SumNaghd/Nesiyeh/Check/Levy/Scot/SanadCode/Type/Time …),
++  // stored for provenance & future detail rendering. Written ONLY by the
++  // sync adapter (source='holoo' rows); NULL on manual rows.
++  holooJson     String?
+   createdAt     DateTime  @default(now())
+   updatedAt     DateTime  @updatedAt
+ 
+@@ -582,3 +594,105 @@
+   createdAt   DateTime @default(now())
+   lastSeenAt  DateTime @default(now())
+ }
++
++// ═══════════════════════════════════════════════════════════════════
++// ── Holoo integration (phase 1, Nov 2026) ─────────────────────────
++// ═══════════════════════════════════════════════════════════════════
++// DATA OWNERSHIP (per the owner's integration instruction):
++//  * Holoo owns the ACCOUNTING truth — balances (Mandeh), credit, prices,
++//    invoices, payments. Those live HERE, in the Erp* tables, and are
++//    ONLY ever written by the sync adapter (lib/holoo-sync.ts).
++//  * MedPad owns the OPERATIONAL truth — visits, notes, assignments,
++//    check-ins, CRM fields. The sync NEVER writes those.
++//  * Customer.erpCode is the single bridge: a Holoo customer linked to a
++//    MedPad customer. Linking (or creating an unlinked MedPad row) never
++//    assigns the customer to any rep (no auto-assignment, §10).
++//
++// NO-DELETE POLICY: absence from an API response is NEVER a delete (the
++// Holoo API does not report deletions). Rows stay; deactivation is only
++// recorded when the API explicitly reports an inactive flag.
++
++/// Holoo-side customer (طرف‌حساب) accounting mirror. erpCode is Holoo's
++/// stable external id (base64-ish string) — the sync's idempotency key.
++model ErpCustomer {
++  id           String   @id @default(cuid())
++  erpCode      String   @unique
++  code         String?  // human-facing Holoo code (e.g. 00027)
++  name         String
++  mandeh       Float    @default(0) // مانده حساب (Holoo-owned)
++  credit       Float    @default(0) // اعتبار (Holoo-owned)
++  nationalId   String?  // کد ملی
++  economicId   String?  // کد اقتصادی
++  tel          String?
++  mobile       String?
++  city         String?
++  ostan        String?  // استان
++  mantagheh    String?  // محدوده/منطقه
++  zipCode      String?
++  address      String?
++  job          String?
++  email        String?
++  // Holoo-reported inactivity ONLY (absence from a response never flips
++  // this — see the no-delete policy above). MedPad's Customer.active is a
++  // SEPARATE operational flag the sync never touches.
++  active       Boolean  @default(true)
++  contentHash  String
++  lastSyncedAt DateTime @updatedAt
++  createdAt    DateTime @default(now())
++
++  @@index([active])
++}
++
++/// Holoo-side product (کالا) mirror.
++model ErpProduct {
++  id           String   @id @default(cuid())
++  erpCode      String   @unique
++  code         String?
++  name         String
++  few          String?  // واحد شمارش (unit of measure)
++  buyPrice     Float?
++  sellPrice    Float?
++  group        String?  // main/side group name
++  active       Boolean  @default(true)
++  contentHash  String
++  lastSyncedAt DateTime @updatedAt
++  createdAt    DateTime @default(now())
++}
++
++/// Holoo-side payment (دریافت از مشتری) mirror — from Report/GetCustPay.
++model ErpPayment {
++  id              String   @id @default(cuid())
++  customerErpCode String
++  code            String?  // Holoo document code (sync synthesizes one when the API returns none — see holoo-sync)
++  name            String?
++  price           Float    @default(0)
++  date            DateTime
++  mandeh          Float?
++  contentHash     String
++  lastSyncedAt    DateTime @updatedAt
++  createdAt       DateTime @default(now())
++
++  @@unique([customerErpCode, code])
++  @@index([customerErpCode])
++}
++
++/// One row per sync run (initial | incremental | manual) — the panel's
++/// «وضعیت سینک» view and the scheduler's watermark. `errors` is a JSON
++/// array of SAFE strings (classified error kinds + counts — NEVER
++/// credentials, tokens or raw password material).
++model HolooSyncLog {
++  id          String    @id @default(cuid())
++  kind        String
++  status      String    // running | success | error
++  startedAt   DateTime  @default(now())
++  finishedAt  DateTime?
++  checked     Int       @default(0)
++  created     Int       @default(0)
++  updated     Int       @default(0)
++  unchanged   Int       @default(0)
++  deactivated Int       @default(0)
++  errors      String?
++  checkpoint  String?   // JSON watermark (last success time etc.)
++
++  @@index([startedAt])
++}
+diff -ruN a/src/app/api/admin/holoo/products/route.ts src/src/app/api/admin/holoo/products/route.ts
+--- a/src/app/api/admin/holoo/products/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ src/src/app/api/admin/holoo/products/route.ts	2026-11-10 09:24:30.000000000 +0000
+@@ -0,0 +1,51 @@
++import { NextResponse } from 'next/server'
++import { isAdmin } from '@/lib/auth'
++import { db } from '@/lib/db'
++import type { Prisma } from '@prisma/client'
++
++/**
++ * Holoo integration (phase 1) — the synced product list for the panel
++ * (GET ?q=&page=&pageSize=). Read-only view over ErpProduct (Holoo-owned
++ * accounting data: prices etc.). Search matches name/code/group.
++ */
++export async function GET(req: Request) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const url = new URL(req.url)
++  const q = (url.searchParams.get('q') || '').trim()
++  const page = Math.max(1, Number(url.searchParams.get('page')) || 1)
++  const pageSize = Math.min(100, Math.max(10, Number(url.searchParams.get('pageSize')) || 25))
++
++  const where: Prisma.ErpProductWhereInput = q
++    ? {
++        OR: [
++          { name: { contains: q } },
++          { code: { contains: q } },
++          { group: { contains: q } },
++        ],
++      }
++    : {}
++
++  const [items, total] = await Promise.all([
++    db.erpProduct.findMany({
++      where,
++      orderBy: { name: 'asc' },
++      skip: (page - 1) * pageSize,
++      take: pageSize,
++      select: {
++        erpCode: true,
++        code: true,
++        name: true,
++        few: true,
++        buyPrice: true,
++        sellPrice: true,
++        group: true,
++        active: true,
++        lastSyncedAt: true,
++      },
++    }),
++    db.erpProduct.count({ where }),
++  ])
++  return NextResponse.json({ ok: true, items, total, page, pageSize })
++}
+diff -ruN a/src/app/api/admin/holoo/settings/route.ts src/src/app/api/admin/holoo/settings/route.ts
+--- a/src/app/api/admin/holoo/settings/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ src/src/app/api/admin/holoo/settings/route.ts	2026-11-10 09:24:29.000000000 +0000
+@@ -0,0 +1,46 @@
++import { NextResponse } from 'next/server'
++import { isAdmin } from '@/lib/auth'
++import { writeAudit } from '@/lib/audit'
++import { getHolooConfig, sanitizeHolooConfig, saveHolooConfig } from '@/lib/holoo-config'
++
++/**
++ * Holoo integration (phase 1) — connection settings.
++ *   GET /api/admin/holoo/settings → sanitized config (hasPassword, NEVER the value)
++ *   PUT /api/admin/holoo/settings → validate + persist {enabled, baseUrl,
++ *        dbname, username, password (write-only, empty = keep), syncIntervalMin}
++ * Admin-session only; every change is audited (without secrets);
++ * credential changes drop the cached login token.
++ */
++export async function GET() {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const cfg = await getHolooConfig()
++  return NextResponse.json({ ok: true, settings: sanitizeHolooConfig(cfg) })
++}
++
++export async function PUT(req: Request) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  let body: Record<string, unknown>
++  try {
++    body = (await req.json()) as Record<string, unknown>
++  } catch {
++    return NextResponse.json({ ok: false, error: 'bad-json' }, { status: 400 })
++  }
++  try {
++    const cfg = await saveHolooConfig(body)
++    // audit WITHOUT the password (only the fact that it changed)
++    const passwordChanged =
++      body.password !== undefined && body.password !== null && body.password !== ''
++    await writeAudit({
++      action: 'holoo.settings.update',
++      targetType: 'holoo',
++      detail: `تنظیمات هلو ذخیره شد (baseUrl=${cfg.baseUrl ? 'تنظیم‌شده' : 'خالی'}، dbname=${cfg.dbname || '—'}، interval=${cfg.syncIntervalMin}دق، enabled=${cfg.enabled ? 'روشن' : 'خاموش'}${passwordChanged ? '، رمز تغییر کرد' : ''})`,
++    })
++    return NextResponse.json({ ok: true, settings: sanitizeHolooConfig(cfg) })
++  } catch (e) {
++    return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : 'خطای ناشناخته' }, { status: 400 })
++  }
++}
+diff -ruN a/src/app/api/admin/holoo/status/route.ts src/src/app/api/admin/holoo/status/route.ts
+--- a/src/app/api/admin/holoo/status/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ src/src/app/api/admin/holoo/status/route.ts	2026-11-10 09:24:30.000000000 +0000
+@@ -0,0 +1,22 @@
++import { NextResponse } from 'next/server'
++import { isAdmin } from '@/lib/auth'
++import { getHolooConfig, sanitizeHolooConfig } from '@/lib/holoo-config'
++import { holooSyncState } from '@/lib/holoo-sync'
++
++/**
++ * Holoo integration (phase 1) — full sync status (GET).
++ * Sanitized settings + scheduler state + counts + the last 10 sync logs
++ * (with their SAFE error strings). No secrets, ever.
++ */
++export async function GET() {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const cfg = await getHolooConfig()
++  const state = await holooSyncState(cfg)
++  return NextResponse.json({
++    ok: true,
++    settings: sanitizeHolooConfig(cfg),
++    sync: state,
++  })
++}
+diff -ruN a/src/app/api/admin/holoo/sync/route.ts src/src/app/api/admin/holoo/sync/route.ts
+--- a/src/app/api/admin/holoo/sync/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ src/src/app/api/admin/holoo/sync/route.ts	2026-11-10 09:24:30.000000000 +0000
+@@ -0,0 +1,38 @@
++import { NextResponse } from 'next/server'
++import { isAdmin } from '@/lib/auth'
++import { writeAudit } from '@/lib/audit'
++import { getHolooConfig, isConfigured } from '@/lib/holoo-config'
++import { isSyncRunning, runHolooSync } from '@/lib/holoo-sync'
++
++/**
++ * Holoo integration (phase 1) — manual sync trigger (POST).
++ *
++ * Runs EVEN WHEN the scheduler switch is off (first-time setup flow:
++ * test → save → «سینک دستی»), but still requires complete credentials.
++ * The run itself is fire-and-forget: this answers {started:true} and the
++ * panel (and the audit test) follow progress via /api/admin/holoo/status
++ * — a long initial sync must never hold an HTTP request open.
++ */
++export async function POST() {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const cfg = await getHolooConfig()
++  if (!isConfigured(cfg)) {
++    return NextResponse.json(
++      { ok: false, error: 'تنظیمات اتصال هلو کامل نیست — ابتدا آدرس، پایگاه داده، کاربر و رمز را ذخیره کنید' },
++      { status: 400 },
++    )
++  }
++  if (isSyncRunning()) {
++    return NextResponse.json({ ok: false, error: 'یک اجرای سینک هم‌اکنون در جریان است — وضعیت را از همین صفحه دنبال کنید' }, { status: 409 })
++  }
++  await writeAudit({
++    action: 'holoo.sync.manual',
++    targetType: 'holoo',
++    detail: 'سینک دستی هلو آغاز شد',
++  })
++  // fire-and-forget: the promise resolves into the HolooSyncLog row
++  void runHolooSync('manual').catch(() => {})
++  return NextResponse.json({ ok: true, started: true })
++}
+diff -ruN a/src/app/api/admin/holoo/test/route.ts src/src/app/api/admin/holoo/test/route.ts
+--- a/src/app/api/admin/holoo/test/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ src/src/app/api/admin/holoo/test/route.ts	2026-11-10 09:24:30.000000000 +0000
+@@ -0,0 +1,61 @@
++import { NextResponse } from 'next/server'
++import { isAdmin } from '@/lib/auth'
++import { writeAudit } from '@/lib/audit'
++import { getHolooConfig, isConfigured, clearHolooToken } from '@/lib/holoo-config'
++import { HolooClient, holooSafeError } from '@/lib/holoo'
++
++/**
++ * Holoo integration (phase 1) — REAL connection test (POST).
++ *
++ * 1. performs an actual Login against the configured service (never a
++ *    cached token — a fresh login proves the CURRENT credentials work);
++ * 2. on success, explores the READ-ONLY endpoints the sync needs
++ *    (Customer / Product / Invoice / Invoice/Invoice / Report/GetCustPay)
++ *    with short timeouts and reports each one's status + response shape +
++ *    sample field names — the owner's §14 mandate to OBSERVE uncertain
++ *    endpoints before trusting them (e.g. whether invoice LINE ITEMS are
++ *    available anywhere);
++ * 3. answers honestly: ok=false + the classified error when anything fails.
++ *
++ * NEVER returns or logs credentials/tokens. No write endpoint is touched.
++ */
++export async function POST() {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const cfg = await getHolooConfig()
++  if (!isConfigured(cfg)) {
++    return NextResponse.json(
++      { ok: false, error: 'تنظیمات اتصال هلو کامل نیست — ابتدا آدرس، پایگاه داده، کاربر و رمز را ذخیره کنید' },
++      { status: 400 },
++    )
++  }
++  // force a FRESH login (drop the cache first)
++  await clearHolooToken()
++  const client = new HolooClient(cfg, { timeoutMs: 15_000 })
++  try {
++    await client.login()
++  } catch (e) {
++    await writeAudit({
++      action: 'holoo.test',
++      outcome: 'failure',
++      targetType: 'holoo',
++      detail: `تست اتصال ناموفق: ${holooSafeError(e)}`,
++    })
++    return NextResponse.json({ ok: false, error: holooSafeError(e), login: { ok: false }, endpoints: [] })
++  }
++  // read-only exploration (each probe has its own short timeout + never throws)
++  const probes = await Promise.all([
++    client.probe('Customer'),
++    client.probe('Product'),
++    client.probe('Invoice'),
++    client.probe('Invoice/Invoice'),
++    client.probe('Report/GetCustPay'),
++  ])
++  await writeAudit({
++    action: 'holoo.test',
++    targetType: 'holoo',
++    detail: `تست اتصال موفق؛ کاوش فقط-خواندنی: ${probes.map((p) => `${p.path}=${p.ok ? 'OK' : 'ناموفق'}`).join('، ')}`,
++  })
++  return NextResponse.json({ ok: true, login: { ok: true }, endpoints: probes })
++}
+diff -ruN a/src/app/api/app/customers/[id]/profile/route.ts src/src/app/api/app/customers/[id]/profile/route.ts
+--- a/src/app/api/app/customers/[id]/profile/route.ts	2026-11-10 09:35:46.366183453 +0000
++++ src/src/app/api/app/customers/[id]/profile/route.ts	2026-11-10 09:25:41.000000000 +0000
+@@ -2,6 +2,7 @@
+ import { db } from '@/lib/db'
+ import { appEmployee } from '@/lib/auth'
+ import { purchaseSummary } from '@/lib/customer360'
++import { erpBlocksFor } from '@/lib/holoo-sync'
+ 
+ /**
+  * Customer 360 (phase 1) — the REP's customer profile (app side).
+@@ -54,7 +55,7 @@
+     select: { id: true, name: true, type: true, city: true, phone: true, active: true },
+   }
+ 
+-  const [linksAsClinic, linksAsPhysician, summary, purchases, visits] = await Promise.all([
++  const [linksAsClinic, linksAsPhysician, summary, purchases, visits, erpBlocks] = await Promise.all([
+     db.customerLink.findMany({
+       where: { clinicId: id, active: true },
+       include: { physician: counterpartSelect },
+@@ -95,6 +96,11 @@
+       orderBy: { startAt: 'desc' },
+       take: 50,
+     }),
++    // ── Holoo integration (phase 1): the accounting blocks (balance,
++    // credit, payments) — offline-friendly through the existing profile
++    // cache. Null when the customer is not linked to Holoo (explicit
++    // empty state in the UI, never fabricated numbers).
++    erpBlocksFor(customer.erpCode),
+   ])
+ 
+   return NextResponse.json({
+@@ -113,7 +119,10 @@
+     purchaseSummary: summary,
+     purchases,
+     visits,
++    // ── Holoo integration (phase 1): accounting mirror for this customer
++    erpAccount: erpBlocks.erpAccount,
++    erpPayments: erpBlocks.erpPayments,
+     serverTime: new Date().toISOString(),
+-    purchaseSourceNote: 'اطلاعات خرید پس از اتصال به سامانهٔ هلو نمایش داده می‌شود',
++    purchaseSourceNote: 'خریدهای «هلو» به‌صورت خودکار از سامانهٔ هلو همگام می‌شوند',
+   })
+ }
+diff -ruN a/src/app/api/app/customers/route.ts src/src/app/api/app/customers/route.ts
+--- a/src/app/api/app/customers/route.ts	2026-11-10 09:35:46.366183453 +0000
++++ src/src/app/api/app/customers/route.ts	2026-11-10 09:30:42.000000000 +0000
+@@ -41,19 +41,57 @@
+   if (since) {
+     const sinceDate = new Date(since)
+     if (!Number.isNaN(sinceDate.getTime())) {
+-      where.OR = [
++      const orClauses: Record<string, unknown>[] = [
+         { updatedAt: { gt: sinceDate } },
+         // owner fix — a fresh ASSIGNMENT of an (old) customer is a change
+         // for THIS employee even when the customer row itself is untouched
+         { assignments: { some: { employeeId: emp.id, createdAt: { gt: sinceDate } } } },
+       ]
++      // ── Holoo integration (phase 1): changed ERP accounting data is a
++      // change TOO — a customer whose Holoo-side mirror (ErpCustomer)
++      // was refreshed after `since` re-syncs to the device so the rep
++      // sees the new balance/credit offline. Customer.updatedAt is NOT
++      // touched by the Holoo sync (operational ownership stays MedPad's).
++      const erpRefreshed = await db.erpCustomer.findMany({
++        where: { lastSyncedAt: { gt: sinceDate } },
++        select: { erpCode: true },
++      })
++      if (erpRefreshed.length > 0) {
++        orClauses.push({ erpCode: { in: erpRefreshed.map((e) => e.erpCode) } })
++      }
++      where.OR = orClauses
+     }
+   }
+ 
+   const customers = await db.customer.findMany({ where })
++
++  // ── Holoo integration (phase 1): attach the (read-only) accounting
++  // mirror for linked customers — mandeh/credit for the list + profile
++  // summary views. Unlinked customers get erp:null (old app versions
++  // ignore the whole block — the field is additive).
++  const erpCodes = customers.map((c) => c.erpCode).filter((v): v is string => !!v)
++  const erpByCode = new Map<string, { erpCode: string; name: string; code: string | null; mandeh: number; credit: number; active: boolean; syncedAt: string }>()
++  if (erpCodes.length > 0) {
++    const erpRows = await db.erpCustomer.findMany({ where: { erpCode: { in: erpCodes } } })
++    for (const e of erpRows) {
++      erpByCode.set(e.erpCode, {
++        erpCode: e.erpCode,
++        name: e.name,
++        code: e.code,
++        mandeh: e.mandeh,
++        credit: e.credit,
++        active: e.active,
++        syncedAt: e.lastSyncedAt.toISOString(),
++      })
++    }
++  }
++  const customersWithErp = customers.map((c) => ({
++    ...c,
++    erp: c.erpCode ? (erpByCode.get(c.erpCode) ?? null) : null,
++  }))
+   return NextResponse.json({
+     ok: true,
+-    customers,
++    customers: customersWithErp,
+     assignedIds,
+     serverTime: serverNow.toISOString(),
+   })
+diff -ruN a/src/app/api/customers/[id]/profile/route.ts src/src/app/api/customers/[id]/profile/route.ts
+--- a/src/app/api/customers/[id]/profile/route.ts	2026-11-10 09:35:46.367183457 +0000
++++ src/src/app/api/customers/[id]/profile/route.ts	2026-11-10 09:25:56.000000000 +0000
+@@ -2,6 +2,7 @@
+ import { db } from '@/lib/db'
+ import { isAdmin } from '@/lib/auth'
+ import { purchaseSummary } from '@/lib/customer360'
++import { erpBlocksFor } from '@/lib/holoo-sync'
+ 
+ /**
+  * Customer 360 (phase 1) — the admin's complete customer profile.
+@@ -41,7 +42,7 @@
+     },
+   }
+ 
+-  const [linksAsClinic, linksAsPhysician, summary, purchases, visits] = await Promise.all([
++  const [linksAsClinic, linksAsPhysician, summary, purchases, visits, erpBlocks] = await Promise.all([
+     db.customerLink.findMany({
+       where: { clinicId: id },
+       include: { physician: counterpart },
+@@ -83,6 +84,9 @@
+       orderBy: { startAt: 'desc' },
+       take: 100,
+     }),
++    // ── Holoo integration (phase 1): accounting mirror (balance/credit/
++    // payments) — null when the customer is not linked to Holoo.
++    erpBlocksFor(customer.erpCode),
+   ])
+ 
+   return NextResponse.json({
+@@ -103,8 +107,11 @@
+     purchaseSummary: summary,
+     purchases,
+     visits,
++    // ── Holoo integration (phase 1): accounting blocks for the profile UI
++    erpAccount: erpBlocks.erpAccount,
++    erpPayments: erpBlocks.erpPayments,
+     // explicit provenance banner for the purchase tab (mission §4.3: the
+-    // source of every record is visible; no real Holoo sync exists yet)
+-    purchaseSourceNote: 'اتصال به سامانهٔ هلو در فاز بعدی برقرار می‌شود — هیچ دادهٔ فروش واقعی هم‌اکنون وارد نمی‌شود',
++    // source of every record is visible; Holoo rows arrive via the sync)
++    purchaseSourceNote: 'خریدهای «هلو» به‌صورت خودکار از سامانهٔ هلو همگام می‌شوند',
+   })
+ }
+diff -ruN a/src/components/panel/CustomerProfile.tsx src/src/components/panel/CustomerProfile.tsx
+--- a/src/components/panel/CustomerProfile.tsx	2026-11-10 09:35:46.369183465 +0000
++++ src/src/components/panel/CustomerProfile.tsx	2026-11-10 09:28:32.000000000 +0000
+@@ -65,7 +65,7 @@
+   customer: Customer & {
+     lastName?: string | null; title?: string | null; specialty?: string | null
+     managerName?: string | null; phone2?: string | null; district?: string | null
+-    postalCode?: string | null; notes?: string | null; active?: boolean
++    postalCode?: string | null; notes?: string | null; active?: boolean; erpCode?: string | null
+     _count?: { checkins: number; visits: number; plannedVisits: number; purchases: number }
+   }
+   links: { physicians: LinkRow[]; clinics: LinkRow[] }
+@@ -76,6 +76,14 @@
+   purchases: Purchase[]
+   visits: VisitRow[]
+   purchaseSourceNote: string
++  // ── Holoo integration (phase 1): the accounting mirror (null when the
++  // customer is not linked — explicit empty state, never fabricated)
++  erpAccount?: {
++    erpCode: string; code: string | null; name: string
++    mandeh: number; credit: number; active: boolean
++    city: string | null; ostan: string | null; syncedAt: string
++  } | null
++  erpPayments?: Array<{ code: string | null; name: string | null; price: number; date: string; mandeh: number | null }>
+ }
+ 
+ const fa = (n: number) => n.toLocaleString('fa-IR')
+@@ -407,6 +415,52 @@
+             </Card>
+           </div>
+ 
++          {/* ── Holoo integration (phase 1): the accounting mirror — balance,
++              credit and the latest payments from the synced Holoo data.
++              Explicit empty state when the customer is not linked. ── */}
++          {data.erpAccount ? (
++            <Card className="border/60">
++              <CardContent className="space-y-2 p-4">
++                <div className="flex flex-wrap items-center gap-2">
++                  <span className="text-sm font-bold">اطلاعات مالی هلو</span>
++                  <Badge variant="outline">کد هلو: <span className="num" dir="ltr">{data.erpAccount.code ?? data.erpAccount.erpCode}</span></Badge>
++                  {!data.erpAccount.active && <Badge variant="secondary">غیرفعال در هلو</Badge>}
++                  <span className="mr-auto text-[11px] text-muted-foreground">همگام‌سازی: {faDateTime(data.erpAccount.syncedAt)}</span>
++                </div>
++                <div className="grid grid-cols-2 gap-2">
++                  <div className="rounded-lg border p-2.5">
++                    <p className={`num text-base font-extrabold ${data.erpAccount.mandeh > 0 ? 'text-destructive' : 'text-success'}`}>
++                      {fa(Math.round(data.erpAccount.mandeh))}
++                    </p>
++                    <p className="text-[11px] text-muted-foreground">مانده حساب (هلو)</p>
++                  </div>
++                  <div className="rounded-lg border p-2.5">
++                    <p className="num text-base font-extrabold">{fa(Math.round(data.erpAccount.credit))}</p>
++                    <p className="text-[11px] text-muted-foreground">اعتبار (هلو)</p>
++                  </div>
++                </div>
++                {(data.erpPayments?.length ?? 0) > 0 && (
++                  <div className="space-y-1">
++                    <p className="text-xs font-medium text-muted-foreground">آخرین پرداخت‌ها (از هلو):</p>
++                    <div className="max-h-40 space-y-1 overflow-y-auto">
++                      {data.erpPayments!.slice(0, 10).map((p, i) => (
++                        <div key={`${p.code ?? i}-${i}`} className="flex items-center gap-2 rounded-md bg-muted/50 px-2 py-1 text-xs">
++                          <span>{faDate(p.date)}</span>
++                          {p.name && <span className="text-muted-foreground">{p.name}</span>}
++                          <span className="num mr-auto font-bold">{fa(Math.round(p.price))}</span>
++                        </div>
++                      ))}
++                    </div>
++                  </div>
++                )}
++              </CardContent>
++            </Card>
++          ) : (
++            <p className="rounded-lg border border-dashed p-2.5 text-center text-xs text-muted-foreground">
++              این مشتری هنوز به هلو متصل نشده است — پس از فعال‌سازی سینک هلو، اطلاعات مالی اینجا نمایش داده می‌شود.
++            </p>
++          )}
++
+           <div className="flex flex-wrap items-center gap-1.5">
+             {([['all', 'همه'], ['365', 'یک سال'], ['90', '۹۰ روز'], ['30', '۳۰ روز']] as const).map(([k, label]) => (
+               <button
+diff -ruN a/src/components/panel/Dashboard.tsx src/src/components/panel/Dashboard.tsx
+--- a/src/components/panel/Dashboard.tsx	2026-11-10 09:35:46.370183468 +0000
++++ src/src/components/panel/Dashboard.tsx	2026-11-10 09:27:54.000000000 +0000
+@@ -5,6 +5,7 @@
+ import { Button } from '@/components/ui/button'
+ import { useToast } from '@/hooks/use-toast'
+ import {
++  Calculator,
+   ClipboardList,
+   CalendarCheck,
+   CalendarClock,
+@@ -26,6 +27,8 @@
+ import EventsTab from './EventsTab'
+ // phase 4 — the UNIFIED settings section (11 categories)
+ import SettingsTab from './SettingsTab'
++// Holoo integration (phase 1) — the Holoo ERP sync tab
++import HolooTab from './HolooTab'
+ // package 5 / phase 5-C — the panel's notification center (persisted bell)
+ import NotificationsBell from './NotificationsBell'
+ // UI/UX redesign — theme switcher (Light / Dark / System, persisted)
+@@ -37,7 +40,7 @@
+   useRealtimeSocket,
+ } from '@/lib/realtime'
+ 
+-type TabKey = 'overview' | 'plans' | 'checkins' | 'customers' | 'employees' | 'tracking' | 'events' | 'settings'
++type TabKey = 'overview' | 'plans' | 'checkins' | 'customers' | 'employees' | 'tracking' | 'events' | 'holoo' | 'settings'
+ 
+ const TABS: { key: TabKey; label: string; short: string; icon: React.ComponentType<{ className?: string }> }[] = [
+   { key: 'overview', label: 'نمای کلی', short: 'نمای کلی', icon: RadioTower },
+@@ -49,7 +52,9 @@
+   // phase 3 — background location + live panel status
+   { key: 'tracking', label: 'وضعیت زنده', short: 'وضعیت زنده', icon: Navigation },
+   { key: 'events', label: 'گزارش رویدادها', short: 'رویدادها', icon: ClipboardList },
+-  // phase 4 — the UNIFIED settings section (11 categories) replaces the
++  // Holoo integration (phase 1) — ERP accounting sync (admin only)
++  { key: 'holoo', label: 'هلو (حسابداری)', short: 'هلو', icon: Calculator },
++  // phase 4 — the UNIFIED settings section (comprehensive phase 4) replaces the
+   // old security dialog: every server policy lives in ONE place now
+   { key: 'settings', label: 'تنظیمات', short: 'تنظیمات', icon: Settings },
+ ]
+@@ -272,6 +277,7 @@
+             {tab === 'employees' && <EmployeesTab refreshKey={refreshKey} />}
+             {tab === 'tracking' && <TrackingTab refreshKey={refreshKey} />}
+             {tab === 'events' && <EventsTab refreshKey={refreshKey} />}
++            {tab === 'holoo' && <HolooTab />}
+             {tab === 'settings' && <SettingsTab cfg={cfg} />}
+           </div>
+         </main>
+diff -ruN a/src/components/panel/HolooTab.tsx src/src/components/panel/HolooTab.tsx
+--- a/src/components/panel/HolooTab.tsx	1970-01-01 00:00:00.000000000 +0000
++++ src/src/components/panel/HolooTab.tsx	2026-11-10 09:27:35.000000000 +0000
+@@ -0,0 +1,488 @@
++'use client'
++
++/**
++ * Holoo integration (phase 1) — the panel's «هلو» tab.
++ *
++ * Everything the owner's §8 mandated surface: enable/disable switch,
++ * connection settings (password write-only + masked), REAL connection
++ * test with the read-only endpoint probe results, manual sync trigger,
++ * counts, per-run logs with SAFE error strings, and the synced product
++ * list. The tab polls /api/admin/holoo/status so a running sync's
++ * progress appears live.
++ */
++
++import { useCallback, useEffect, useRef, useState } from 'react'
++import { Badge } from '@/components/ui/badge'
++import { Button } from '@/components/ui/button'
++import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
++import { Input } from '@/components/ui/input'
++import { Label } from '@/components/ui/label'
++import { Switch } from '@/components/ui/switch'
++import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
++import { useToast } from '@/hooks/use-toast'
++import { faDateTime } from '@/lib/realtime'
++import { AlertTriangle, Database, Loader2, Plug, RefreshCw, Save, Search } from 'lucide-react'
++
++interface HolooSettingsPublic {
++  enabled: boolean
++  baseUrl: string
++  dbname: string
++  username: string
++  syncIntervalMin: number
++  hasPassword: boolean
++  configured: boolean
++  isHttp: boolean
++}
++
++interface SyncLogView {
++  id: string
++  kind: string
++  status: string
++  startedAt: string
++  finishedAt: string | null
++  checked: number
++  created: number
++  updated: number
++  unchanged: number
++  deactivated: number
++  errors: string[]
++}
++
++interface SyncState {
++  running: boolean
++  lastRun: SyncLogView | null
++  recentLogs: SyncLogView[]
++  counts: {
++    erpCustomers: number
++    erpProducts: number
++    erpPayments: number
++    holooPurchases: number
++    linkedCustomers: number
++  }
++  nextRunInSec: number | null
++}
++
++interface EndpointProbe {
++  path: string
++  ok: boolean
++  status: number
++  shape: string
++  count?: number
++  sampleKeys?: string[]
++  error?: string
++}
++
++interface ProductRow {
++  erpCode: string
++  code: string | null
++  name: string
++  few: string | null
++  buyPrice: number | null
++  sellPrice: number | null
++  group: string | null
++  active: boolean
++  lastSyncedAt: string
++}
++
++const KIND_FA: Record<string, string> = { initial: 'اولیه', incremental: 'افزایشی', manual: 'دستی' }
++
++function faNum(n: number | null | undefined): string {
++  if (n === null || n === undefined) return '—'
++  return new Intl.NumberFormat('fa-IR').format(n)
++}
++
++export default function HolooTab() {
++  const { toast } = useToast()
++  const [settings, setSettings] = useState<HolooSettingsPublic | null>(null)
++  const [sync, setSync] = useState<SyncState | null>(null)
++  const [form, setForm] = useState({ baseUrl: '', dbname: '', username: '', password: '', syncIntervalMin: 3, enabled: false })
++  const [saving, setSaving] = useState(false)
++  const [testing, setTesting] = useState(false)
++  const [syncing, setSyncing] = useState(false)
++  const [probes, setProbes] = useState<EndpointProbe[] | null>(null)
++  const [testError, setTestError] = useState<string | null>(null)
++  const [products, setProducts] = useState<ProductRow[] | null>(null)
++  const [productQuery, setProductQuery] = useState('')
++  const [productsLoading, setProductsLoading] = useState(false)
++  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
++
++  const loadStatus = useCallback(async () => {
++    try {
++      const r = await fetch('/api/admin/holoo/status')
++      if (!r.ok) return
++      const j = await r.json()
++      if (j.ok) {
++        setSettings(j.settings)
++        setSync(j.sync)
++        setForm((f) =>
++          f.baseUrl === '' && f.dbname === '' && f.username === '' && f.password === ''
++            ? {
++                baseUrl: j.settings.baseUrl,
++                dbname: j.settings.dbname,
++                username: j.settings.username,
++                password: '',
++                syncIntervalMin: j.settings.syncIntervalMin,
++                enabled: j.settings.enabled,
++              }
++            : f,
++        )
++      }
++    } catch {
++      /* polling must never crash the tab */
++    }
++  }, [])
++
++  useEffect(() => {
++    void loadStatus()
++    pollRef.current = setInterval(() => void loadStatus(), 10_000)
++    return () => {
++      if (pollRef.current) clearInterval(pollRef.current)
++    }
++  }, [loadStatus])
++
++  const save = async () => {
++    setSaving(true)
++    try {
++      const body: Record<string, unknown> = {
++        enabled: form.enabled,
++        baseUrl: form.baseUrl,
++        dbname: form.dbname,
++        username: form.username,
++        syncIntervalMin: form.syncIntervalMin,
++      }
++      if (form.password) body.password = form.password
++      const r = await fetch('/api/admin/holoo/settings', {
++        method: 'PUT',
++        headers: { 'Content-Type': 'application/json' },
++        body: JSON.stringify(body),
++      })
++      const j = await r.json()
++      if (!r.ok || !j.ok) throw new Error(j.error || 'ذخیره ناموفق بود')
++      toast({ title: 'تنظیمات هلو ذخیره شد' })
++      setForm((f) => ({ ...f, password: '' }))
++      await loadStatus()
++    } catch (e) {
++      toast({ title: 'خطا در ذخیرهٔ تنظیمات', description: e instanceof Error ? e.message : String(e), variant: 'destructive' })
++    } finally {
++      setSaving(false)
++    }
++  }
++
++  const test = async () => {
++    setTesting(true)
++    setProbes(null)
++    setTestError(null)
++    try {
++      const r = await fetch('/api/admin/holoo/test', { method: 'POST' })
++      const j = await r.json()
++      if (!r.ok || !j.ok) {
++        setTestError(j.error || 'تست اتصال ناموفق بود')
++        toast({ title: 'اتصال به هلو برقرار نشد', description: j.error || '', variant: 'destructive' })
++        return
++      }
++      setProbes(j.endpoints || [])
++      toast({ title: 'اتصال به هلو برقرار شد', description: 'نتیجهٔ کاوش Endpointها را ببینید' })
++    } catch (e) {
++      setTestError(e instanceof Error ? e.message : String(e))
++    } finally {
++      setTesting(false)
++    }
++  }
++
++  const runSync = async () => {
++    setSyncing(true)
++    try {
++      const r = await fetch('/api/admin/holoo/sync', { method: 'POST' })
++      const j = await r.json()
++      if (!r.ok || !j.ok) {
++        toast({ title: 'شروع سینک ممکن نشد', description: j.error || '', variant: 'destructive' })
++        return
++      }
++      toast({ title: 'سینک دستی آغاز شد', description: 'پیشرفت را از همین صفحه دنبال کنید' })
++      setTimeout(() => void loadStatus(), 1000)
++    } finally {
++      setSyncing(false)
++    }
++  }
++
++  const loadProducts = async () => {
++    if (products !== null) {
++      setProducts(null)
++      return
++    }
++    setProductsLoading(true)
++    try {
++      const r = await fetch(`/api/admin/holoo/products?q=${encodeURIComponent(productQuery)}`)
++      const j = await r.json()
++      if (j.ok) setProducts(j.items)
++      else setProducts([])
++    } catch {
++      setProducts([])
++    } finally {
++      setProductsLoading(false)
++    }
++  }
++
++  if (!settings) {
++    return (
++      <div className="flex items-center justify-center py-20 text-muted-foreground">
++        <Loader2 className="ml-2 h-4 w-4 animate-spin" /> در حال بارگذاری وضعیت هلو…
++      </div>
++    )
++  }
++
++  return (
++    <div className="space-y-4">
++      {/* ── connection settings ─────────────────────────────────────── */}
++      <Card>
++        <CardHeader className="pb-3">
++          <CardTitle className="flex items-center gap-2 text-base">
++            <Database className="h-4 w-4" /> اتصال به هلو
++            <Badge variant={settings.configured ? 'default' : 'secondary'}>
++              {settings.configured ? 'تنظیمات کامل است' : 'تنظیمات ناقص'}
++            </Badge>
++            {settings.enabled && <Badge>سینک خودکار روشن</Badge>}
++          </CardTitle>
++        </CardHeader>
++        <CardContent className="space-y-3">
++          {settings.isHttp && (
++            <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
++              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
++              <span>
++                آدرس فعلی HTTP (بدون رمزنگاری TLS) است — طبق دستور یکپارچه‌سازی، سرویس هلو باید فقط در شبکهٔ داخلی در دسترس باشد و
++                این آدرس هرگز از بیرون فاش/منتشر نشود.
++              </span>
++            </div>
++          )}
++          <div className="grid gap-3 sm:grid-cols-2">
++            <div className="space-y-1.5">
++              <Label htmlFor="holoo-baseurl">آدرس سرویس (مثال: http://192.168.1.10:8080/TncHoloo/api)</Label>
++              <Input
++                id="holoo-baseurl"
++                dir="ltr"
++                value={form.baseUrl}
++                onChange={(e) => setForm((f) => ({ ...f, baseUrl: e.target.value }))}
++                placeholder="http://IP:8080/TncHoloo/api"
++              />
++            </div>
++            <div className="space-y-1.5">
++              <Label htmlFor="holoo-dbname">نام پایگاه داده</Label>
++              <Input id="holoo-dbname" dir="ltr" value={form.dbname} onChange={(e) => setForm((f) => ({ ...f, dbname: e.target.value }))} placeholder="Holoo1" />
++            </div>
++            <div className="space-y-1.5">
++              <Label htmlFor="holoo-username">نام کاربری</Label>
++              <Input id="holoo-username" dir="ltr" value={form.username} onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))} />
++            </div>
++            <div className="space-y-1.5">
++              <Label htmlFor="holoo-password">
++                رمز {settings.hasPassword ? '(ذخیره شده — خالی بگذارید تا بدون تغییر بماند)' : ''}
++              </Label>
++              <Input
++                id="holoo-password"
++                type="password"
++                dir="ltr"
++                value={form.password}
++                onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
++                placeholder={settings.hasPassword ? '••••••••' : 'رمز هلو'}
++              />
++            </div>
++            <div className="space-y-1.5">
++              <Label htmlFor="holoo-interval">بازهٔ سینک خودکار (دقیقه، ۱ تا ۱۴۴۰)</Label>
++              <Input
++                id="holoo-interval"
++                type="number"
++                min={1}
++                max={1440}
++                value={form.syncIntervalMin}
++                onChange={(e) => setForm((f) => ({ ...f, syncIntervalMin: Number(e.target.value) }))}
++              />
++            </div>
++            <div className="flex items-center justify-between rounded-lg border p-3">
++              <div className="space-y-0.5">
++                <Label htmlFor="holoo-enabled">سینک خودکار</Label>
++                <p className="text-xs text-muted-foreground">هر {faNum(form.syncIntervalMin)} دقیقه (پیش‌فرض ۳)</p>
++              </div>
++              <Switch id="holoo-enabled" checked={form.enabled} onCheckedChange={(v) => setForm((f) => ({ ...f, enabled: v }))} />
++            </div>
++          </div>
++          <div className="flex flex-wrap gap-2">
++            <Button onClick={save} disabled={saving}>
++              {saving ? <Loader2 className="ml-2 h-4 w-4 animate-spin" /> : <Save className="ml-2 h-4 w-4" />} ذخیرهٔ تنظیمات
++            </Button>
++            <Button variant="outline" onClick={test} disabled={testing || !settings.configured}>
++              {testing ? <Loader2 className="ml-2 h-4 w-4 animate-spin" /> : <Plug className="ml-2 h-4 w-4" />} تست اتصال واقعی
++            </Button>
++            <Button variant="outline" onClick={runSync} disabled={syncing || !settings.configured || sync?.running}>
++              {sync?.running ? <Loader2 className="ml-2 h-4 w-4 animate-spin" /> : <RefreshCw className="ml-2 h-4 w-4" />} سینک دستی
++            </Button>
++          </div>
++          {testError && (
++            <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-xs text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200" dir="rtl">
++              {testError}
++            </div>
++          )}
++          {probes && (
++            <div className="space-y-1.5">
++              <p className="text-xs font-medium text-muted-foreground">کاوش فقط-خواندنی Endpointها (وضعیت واقعی سرویس شما):</p>
++              <Table>
++                <TableHeader>
++                  <TableRow>
++                    <TableHead>Endpoint</TableHead>
++                    <TableHead>وضعیت</TableHead>
++                    <TableHead>شکل پاسخ</TableHead>
++                    <TableHead>نمونه فیلدها</TableHead>
++                  </TableRow>
++                </TableHeader>
++                <TableBody>
++                  {probes.map((p) => (
++                    <TableRow key={p.path}>
++                      <TableCell dir="ltr" className="font-mono text-xs">{p.path}</TableCell>
++                      <TableCell>
++                        <Badge variant={p.ok ? 'default' : 'destructive'}>{p.ok ? 'OK' : 'ناموفق'}</Badge>
++                      </TableCell>
++                      <TableCell dir="ltr" className="text-xs">{p.ok ? p.shape : p.error}</TableCell>
++                      <TableCell dir="ltr" className="max-w-72 truncate font-mono text-[10px] text-muted-foreground">
++                        {p.sampleKeys?.join(', ') ?? '—'}
++                      </TableCell>
++                    </TableRow>
++                  ))}
++                </TableBody>
++              </Table>
++            </div>
++          )}
++        </CardContent>
++      </Card>
++
++      {/* ── sync status ─────────────────────────────────────────────── */}
++      <Card>
++        <CardHeader className="pb-3">
++          <CardTitle className="flex items-center gap-2 text-base">
++            <RefreshCw className="h-4 w-4" /> وضعیت سینک
++            {sync?.running && (
++              <Badge variant="default" className="animate-pulse">در حال اجرا…</Badge>
++            )}
++          </CardTitle>
++        </CardHeader>
++        <CardContent className="space-y-3">
++          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
++            {[
++              { k: 'مشتریان هلو', v: sync?.counts.erpCustomers },
++              { k: 'کالاهای هلو', v: sync?.counts.erpProducts },
++              { k: 'پرداخت‌ها', v: sync?.counts.erpPayments },
++              { k: 'فاکتورهای هلو', v: sync?.counts.holooPurchases },
++              { k: 'مشتریان متصل', v: sync?.counts.linkedCustomers },
++            ].map((c) => (
++              <div key={c.k} className="rounded-lg border p-3 text-center">
++                <p className="text-lg font-bold">{faNum(c.v ?? 0)}</p>
++                <p className="text-xs text-muted-foreground">{c.k}</p>
++              </div>
++            ))}
++          </div>
++          {sync?.lastRun && (
++            <p className="text-xs text-muted-foreground">
++              آخرین اجرا ({KIND_FA[sync.lastRun.kind] ?? sync.lastRun.kind}): {faDateTime(sync.lastRun.startedAt)} —{' '}
++              <Badge variant={sync.lastRun.status === 'success' ? 'default' : sync.lastRun.status === 'running' ? 'secondary' : 'destructive'}>
++                {sync.lastRun.status === 'success' ? 'موفق' : sync.lastRun.status === 'running' ? 'در جریان' : 'خطا'}
++              </Badge>{' '}
++              · بررسی‌شده {faNum(sync.lastRun.checked)} · جدید {faNum(sync.lastRun.created)} · ویرایش {faNum(sync.lastRun.updated)} · بدون تغییر{' '}
++              {faNum(sync.lastRun.unchanged)}
++              {sync.nextRunInSec !== null && <> · سینک بعدی تا ~{faNum(Math.ceil(sync.nextRunInSec / 60))} دقیقه</>}
++            </p>
++          )}
++          {!sync?.lastRun && <p className="text-xs text-muted-foreground">هنوز سینکی اجرا نشده است.</p>}
++          {sync?.recentLogs && sync.recentLogs.length > 0 && (
++            <Table>
++              <TableHeader>
++                <TableRow>
++                  <TableHead>زمان</TableHead>
++                  <TableHead>نوع</TableHead>
++                  <TableHead>وضعیت</TableHead>
++                  <TableHead>آمار</TableHead>
++                  <TableHead>خطاها</TableHead>
++                </TableRow>
++              </TableHeader>
++              <TableBody>
++                {sync.recentLogs.map((l) => (
++                  <TableRow key={l.id}>
++                    <TableCell className="text-xs">{faDateTime(l.startedAt)}</TableCell>
++                    <TableCell className="text-xs">{KIND_FA[l.kind] ?? l.kind}</TableCell>
++                    <TableCell>
++                      <Badge variant={l.status === 'success' ? 'default' : l.status === 'running' ? 'secondary' : 'destructive'}>
++                        {l.status === 'success' ? 'موفق' : l.status === 'running' ? 'در جریان' : 'خطا'}
++                      </Badge>
++                    </TableCell>
++                    <TableCell className="text-xs">
++                      +{faNum(l.created)} / ~{faNum(l.updated)} / ={faNum(l.unchanged)}
++                    </TableCell>
++                    <TableCell className="max-w-80 text-xs text-muted-foreground">
++                      {l.errors.length ? l.errors.join(' | ').slice(0, 200) : '—'}
++                    </TableCell>
++                  </TableRow>
++                ))}
++              </TableBody>
++            </Table>
++          )}
++        </CardContent>
++      </Card>
++
++      {/* ── products (synced, read-only) ────────────────────────────── */}
++      <Card>
++        <CardHeader className="pb-3">
++          <CardTitle className="text-base">کالاهای همگام‌شده از هلو</CardTitle>
++        </CardHeader>
++        <CardContent className="space-y-3">
++          <div className="flex gap-2">
++            <Input
++              value={productQuery}
++              onChange={(e) => setProductQuery(e.target.value)}
++              placeholder="جستجو بر اساس نام / کد / گروه…"
++              className="max-w-xs"
++            />
++            <Button variant="outline" onClick={loadProducts} disabled={productsLoading}>
++              {productsLoading ? <Loader2 className="ml-2 h-4 w-4 animate-spin" /> : <Search className="ml-2 h-4 w-4" />}
++              {products === null ? 'نمایش' : 'بستن'}
++            </Button>
++          </div>
++          {products !== null && (
++            <Table>
++              <TableHeader>
++                <TableRow>
++                  <TableHead>کد</TableHead>
++                  <TableHead>نام</TableHead>
++                  <TableHead>گروه</TableHead>
++                  <TableHead>واحد</TableHead>
++                  <TableHead>قیمت فروش</TableHead>
++                  <TableHead>وضعیت</TableHead>
++                </TableRow>
++              </TableHeader>
++              <TableBody>
++                {products.length === 0 && (
++                  <TableRow>
++                    <TableCell colSpan={6} className="py-6 text-center text-xs text-muted-foreground">
++                      چیزی یافت نشد — ابتدا سینک را اجرا کنید.
++                    </TableCell>
++                  </TableRow>
++                )}
++                {products.map((p) => (
++                  <TableRow key={p.erpCode}>
++                    <TableCell dir="ltr" className="font-mono text-xs">{p.code ?? '—'}</TableCell>
++                    <TableCell className="text-xs">{p.name}</TableCell>
++                    <TableCell className="text-xs">{p.group ?? '—'}</TableCell>
++                    <TableCell className="text-xs">{p.few ?? '—'}</TableCell>
++                    <TableCell dir="ltr" className="text-xs">{p.sellPrice !== null ? faNum(p.sellPrice) : '—'}</TableCell>
++                    <TableCell>
++                      <Badge variant={p.active ? 'default' : 'secondary'}>{p.active ? 'فعال' : 'غیرفعال'}</Badge>
++                    </TableCell>
++                  </TableRow>
++                ))}
++              </TableBody>
++            </Table>
++          )}
++          <p className="text-xs text-muted-foreground">
++            دادهٔ کالاها متعلق به هلو است و فقط از طریق سینک به‌روز می‌شود؛ در MedPad قابل ویرایش نیست.
++          </p>
++        </CardContent>
++      </Card>
++    </div>
++  )
++}
+diff -ruN a/src/instrumentation.ts src/src/instrumentation.ts
+--- a/src/instrumentation.ts	2026-11-10 09:35:46.373183480 +0000
++++ src/src/instrumentation.ts	2026-11-10 09:38:32.000000000 +0000
+@@ -379,6 +379,101 @@
+     CONSTRAINT "PushSubscription_endpoint_key" UNIQUE ("endpoint")
+ )`
+ 
++// ── Holoo integration (phase 1, Nov 2026) ─────────────────────────────
++// 1) Customer.erpCode — the SINGLE bridge to Holoo (nullable; unique index
++//    allows multiple NULLs in SQLite). Purchase.holooJson — raw invoice
++//    header provenance. Both additive ALTERs, safe on every legacy row.
++const HOLOO_CUSTOMER_DDL = [
++  'ALTER TABLE "Customer" ADD COLUMN "erpCode" TEXT',
++  'ALTER TABLE "Purchase" ADD COLUMN "holooJson" TEXT',
++]
++const HOLOO_CUSTOMER_ERPCODE_INDEX_DDL =
++  'CREATE UNIQUE INDEX IF NOT EXISTS "Customer_erpCode_key" ON "Customer"("erpCode")'
++// 2) The four Holoo tables (layout = prisma db push output for the phase-9
++//    schema; ownership & no-delete policy documented in schema.prisma).
++const ERP_CUSTOMER_DDL = `CREATE TABLE IF NOT EXISTS "ErpCustomer" (
++    "id" TEXT NOT NULL PRIMARY KEY,
++    "erpCode" TEXT NOT NULL,
++    "code" TEXT,
++    "name" TEXT NOT NULL,
++    "mandeh" REAL NOT NULL DEFAULT 0,
++    "credit" REAL NOT NULL DEFAULT 0,
++    "nationalId" TEXT,
++    "economicId" TEXT,
++    "tel" TEXT,
++    "mobile" TEXT,
++    "city" TEXT,
++    "ostan" TEXT,
++    "mantagheh" TEXT,
++    "zipCode" TEXT,
++    "address" TEXT,
++    "job" TEXT,
++    "email" TEXT,
++    "active" BOOLEAN NOT NULL DEFAULT true,
++    "contentHash" TEXT NOT NULL,
++    "lastSyncedAt" DATETIME NOT NULL,
++    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
++)`
++const ERP_CUSTOMER_UNIQUE_DDL =
++  'CREATE UNIQUE INDEX IF NOT EXISTS "ErpCustomer_erpCode_key" ON "ErpCustomer"("erpCode")'
++const ERP_CUSTOMER_ACTIVE_INDEX_DDL =
++  'CREATE INDEX IF NOT EXISTS "ErpCustomer_active_idx" ON "ErpCustomer"("active")'
++const ERP_PRODUCT_DDL = `CREATE TABLE IF NOT EXISTS "ErpProduct" (
++    "id" TEXT NOT NULL PRIMARY KEY,
++    "erpCode" TEXT NOT NULL,
++    "code" TEXT,
++    "name" TEXT NOT NULL,
++    "few" TEXT,
++    "buyPrice" REAL,
++    "sellPrice" REAL,
++    "group" TEXT,
++    "active" BOOLEAN NOT NULL DEFAULT true,
++    "contentHash" TEXT NOT NULL,
++    "lastSyncedAt" DATETIME NOT NULL,
++    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
++)`
++const ERP_PRODUCT_UNIQUE_DDL =
++  'CREATE UNIQUE INDEX IF NOT EXISTS "ErpProduct_erpCode_key" ON "ErpProduct"("erpCode")'
++const ERP_PAYMENT_DDL = `CREATE TABLE IF NOT EXISTS "ErpPayment" (
++    "id" TEXT NOT NULL PRIMARY KEY,
++    "customerErpCode" TEXT NOT NULL,
++    "code" TEXT,
++    "name" TEXT,
++    "price" REAL NOT NULL DEFAULT 0,
++    "date" DATETIME NOT NULL,
++    "mandeh" REAL,
++    "contentHash" TEXT NOT NULL,
++    "lastSyncedAt" DATETIME NOT NULL,
++    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
++)`
++const ERP_PAYMENT_UNIQUE_DDL =
++  'CREATE UNIQUE INDEX IF NOT EXISTS "ErpPayment_customerErpCode_code_key" ON "ErpPayment"("customerErpCode", "code")'
++const ERP_PAYMENT_CUSTOMER_INDEX_DDL =
++  'CREATE INDEX IF NOT EXISTS "ErpPayment_customerErpCode_idx" ON "ErpPayment"("customerErpCode")'
++const HOLOO_SYNC_LOG_DDL = `CREATE TABLE IF NOT EXISTS "HolooSyncLog" (
++    "id" TEXT NOT NULL PRIMARY KEY,
++    "kind" TEXT NOT NULL,
++    "status" TEXT NOT NULL,
++    "startedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
++    "finishedAt" DATETIME,
++    "checked" INTEGER NOT NULL DEFAULT 0,
++    "created" INTEGER NOT NULL DEFAULT 0,
++    "updated" INTEGER NOT NULL DEFAULT 0,
++    "unchanged" INTEGER NOT NULL DEFAULT 0,
++    "deactivated" INTEGER NOT NULL DEFAULT 0,
++    "errors" TEXT,
++    "checkpoint" TEXT
++)`
++const HOLOO_SYNC_LOG_TIME_INDEX_DDL =
++  'CREATE INDEX IF NOT EXISTS "HolooSyncLog_startedAt_idx" ON "HolooSyncLog"("startedAt")'
++// 3) One-time cleanup: a "running" row left behind by a crash/server stop
++//    (older than 30 min) is marked error so the status view never shows a
++//    phantom in-flight sync. Idempotent by construction (status filter).
++const HOLOO_SYNC_LOG_STALE_DDL =
++  'UPDATE "HolooSyncLog" SET "status" = \'error\', "finishedAt" = CURRENT_TIMESTAMP, ' +
++  '"errors" = COALESCE("errors", \'[]\') WHERE "status" = \'running\' AND ' +
++  '"startedAt" < datetime(\'now\', \'-30 minutes\')'
++
+ export async function register() {
+   if (process.env.NEXT_RUNTIME !== 'nodejs') return
+   const { PrismaClient } = await import('@prisma/client')
+@@ -388,7 +483,7 @@
+   // index is created (a violating legacy row would otherwise fail the
+   // index creation loudly); both are idempotent, so every boot just
+   // re-applies them as no-ops.
+-  for (const sql of [...MIGRATIONS, AUDIT_TABLE_DDL, PLANNED_VISIT_DDL, PLANNED_VISIT_INDEX_DDL, NOTIF_EVENTKEY_DDL, NOTIF_EVENTKEY_INDEX_DDL, PANEL_NOTIFICATION_DDL, PANEL_NOTIFICATION_INDEX_DDL, ASSIGNMENT_REQUEST_DDL, ASSIGNMENT_REQUEST_PENDING_INDEX_DDL, ...CUSTOMER_CITY_DDL, CHECKIN_NOTE_VERSION_DDL, CHECKIN_NOTE_VERSION_INDEX_DDL, LOCATION_PING_DDL, LOCATION_PING_LOCALID_INDEX_DDL, LOCATION_PING_ROUTE_INDEX_DDL, TRACK_STATUS_DDL, VISIT_ONE_OPEN_RECONCILE_DDL, VISIT_ONE_OPEN_INDEX_DDL, OP_EVENT_DDL, OP_EVENT_EMP_IDX_DDL, OP_EVENT_TYPE_IDX_DDL, OP_EVENT_TIME_IDX_DDL, OP_EVENT_REQUEST_ID_INDEX_DDL, VOICE_FILE_DDL, VOICE_FILE_PATH_INDEX_DDL, VOICE_FILE_CHECKIN_INDEX_DDL, VOICE_FILE_BACKFILL_SQL, ...CUSTOMER_360_DDL, CUSTOMER_APPLOCALID_INDEX_DDL, CUSTOMER_LINK_DDL, CUSTOMER_LINK_UNIQUE_DDL, CUSTOMER_LINK_PHYSICIAN_INDEX_DDL, PURCHASE_DDL, PURCHASE_CUSTOMER_DATE_INDEX_DDL, PURCHASE_EXTERNALID_INDEX_DDL, PURCHASE_EXTERNALID_UNIQUE_DDL, PURCHASE_ITEM_DDL, PURCHASE_ITEM_INDEX_DDL, ...TRACK_STATUS_ACK_DDL, PUSH_SUBSCRIPTION_DDL]) {
++  for (const sql of [...MIGRATIONS, AUDIT_TABLE_DDL, PLANNED_VISIT_DDL, PLANNED_VISIT_INDEX_DDL, NOTIF_EVENTKEY_DDL, NOTIF_EVENTKEY_INDEX_DDL, PANEL_NOTIFICATION_DDL, PANEL_NOTIFICATION_INDEX_DDL, ASSIGNMENT_REQUEST_DDL, ASSIGNMENT_REQUEST_PENDING_INDEX_DDL, ...CUSTOMER_CITY_DDL, CHECKIN_NOTE_VERSION_DDL, CHECKIN_NOTE_VERSION_INDEX_DDL, LOCATION_PING_DDL, LOCATION_PING_LOCALID_INDEX_DDL, LOCATION_PING_ROUTE_INDEX_DDL, TRACK_STATUS_DDL, VISIT_ONE_OPEN_RECONCILE_DDL, VISIT_ONE_OPEN_INDEX_DDL, OP_EVENT_DDL, OP_EVENT_EMP_IDX_DDL, OP_EVENT_TYPE_IDX_DDL, OP_EVENT_TIME_IDX_DDL, OP_EVENT_REQUEST_ID_INDEX_DDL, VOICE_FILE_DDL, VOICE_FILE_PATH_INDEX_DDL, VOICE_FILE_CHECKIN_INDEX_DDL, VOICE_FILE_BACKFILL_SQL, ...CUSTOMER_360_DDL, CUSTOMER_APPLOCALID_INDEX_DDL, CUSTOMER_LINK_DDL, CUSTOMER_LINK_UNIQUE_DDL, CUSTOMER_LINK_PHYSICIAN_INDEX_DDL, PURCHASE_DDL, PURCHASE_CUSTOMER_DATE_INDEX_DDL, PURCHASE_EXTERNALID_INDEX_DDL, PURCHASE_EXTERNALID_UNIQUE_DDL, PURCHASE_ITEM_DDL, PURCHASE_ITEM_INDEX_DDL, ...TRACK_STATUS_ACK_DDL, PUSH_SUBSCRIPTION_DDL, ...HOLOO_CUSTOMER_DDL, HOLOO_CUSTOMER_ERPCODE_INDEX_DDL, ERP_CUSTOMER_DDL, ERP_CUSTOMER_UNIQUE_DDL, ERP_CUSTOMER_ACTIVE_INDEX_DDL, ERP_PRODUCT_DDL, ERP_PRODUCT_UNIQUE_DDL, ERP_PAYMENT_DDL, ERP_PAYMENT_UNIQUE_DDL, ERP_PAYMENT_CUSTOMER_INDEX_DDL, HOLOO_SYNC_LOG_DDL, HOLOO_SYNC_LOG_TIME_INDEX_DDL, HOLOO_SYNC_LOG_STALE_DDL]) {
+     try {
+       await db.$executeRawUnsafe(sql)
+       applied++
+@@ -458,4 +553,17 @@
+   }
+   await db.$disconnect()
+   if (applied > 0) console.log(`[medpad][migrate] applied ${applied} migration statement(s)`)
++  // ── Holoo integration (phase 1): the periodic sync scheduler. NO new
++  // infrastructure — a single timer inside the existing Next.js server
++  // process, started at every boot and re-reading its config from the
++  // Config KV on every tick (interval changes apply without a restart).
++  // The tick only FIRES the sync when enabled + interval elapsed + no run
++  // in progress; all real work lives in lib/holoo-sync.ts.
++  try {
++    const { startHolooScheduler } = await import('./lib/holoo-sync')
++    startHolooScheduler()
++  } catch (e) {
++    // the panel must ALWAYS boot, with or without the Holoo integration
++    console.error('[medpad][holoo] scheduler failed to start:', e instanceof Error ? e.message : e)
++  }
+ }
+diff -ruN a/src/lib/holoo-config.ts src/src/lib/holoo-config.ts
+--- a/src/lib/holoo-config.ts	1970-01-01 00:00:00.000000000 +0000
++++ src/src/lib/holoo-config.ts	2026-11-10 09:18:27.000000000 +0000
+@@ -0,0 +1,221 @@
++import { db } from '@/lib/db'
++
++/**
++ * Holoo integration (phase 1) — connection settings.
++ *
++ * Storage: the EXISTING Config KV table (the project's single server-side
++ * settings store — no new infrastructure). All values live server-side
++ * only; the password NEVER crosses to the browser/APK (the API returns
++ * `hasPassword` instead — see sanitizeHolooConfig).
++ *
++ * Security notes (per the owner's integration instruction):
++ *  * the Holoo web service speaks plain HTTP (`http://{IPSystem}:8080/...`)
++ *    → the panel warns that the service MUST stay on the internal network;
++ *  * the Holoo password must be RECOVERABLE (unlike the admin's bcrypt) to
++ *    be replayed on every login — it is stored BASE64-encoded in Config,
++ *    which is OBFUSCATION, not encryption (documented openly). The SQLite
++ *    file carries the OS-level perms of the panel's db directory; the value
++ *    is never logged, never returned by any API and never shipped to the
++ *    client bundle;
++ *  * the login token is cached in Config (`holoo.token`) and invalidated
++ *    whenever ANY credential field changes.
++ */
++
++const KEYS = {
++  enabled: 'holoo.enabled',
++  baseUrl: 'holoo.baseUrl',
++  dbname: 'holoo.dbname',
++  username: 'holoo.username',
++  password: 'holoo.password', // base64 of the plain password (server-only)
++  intervalMin: 'holoo.syncIntervalMin',
++  token: 'holoo.token',
++  tokenAt: 'holoo.tokenAt',
++} as const
++
++export const HOLOO_INTERVAL_MIN = 1
++export const HOLOO_INTERVAL_MAX = 1440
++export const HOLOO_INTERVAL_DEFAULT = 3
++
++/** Full server-side config (includes the recoverable password). */
++export interface HolooConfig {
++  enabled: boolean
++  baseUrl: string // normalized — no trailing slash
++  dbname: string
++  username: string
++  passwordB64: string
++  syncIntervalMin: number
++  /** informational: the configured URL is plain HTTP (no TLS) */
++  isHttp: boolean
++}
++
++/** What an API may return — secrets stripped, booleans summarized. */
++export interface HolooConfigPublic {
++  enabled: boolean
++  baseUrl: string
++  dbname: string
++  username: string
++  syncIntervalMin: number
++  hasPassword: boolean
++  configured: boolean
++  isHttp: boolean
++}
++
++async function readKey(key: string): Promise<string> {
++  const row = await db.config.findUnique({ where: { key } })
++  return row?.value ?? ''
++}
++
++async function writeKey(key: string, value: string): Promise<void> {
++  await db.config.upsert({ where: { key }, update: { value }, create: { key, value } })
++}
++
++/** Normalize + validate a base URL. Throws a Persian error when invalid. */
++export function normalizeBaseUrl(input: unknown): string {
++  if (typeof input !== 'string') throw new Error('آدرس سرویس هلو نامعتبر است')
++  let s = input.trim()
++  if (!s) throw new Error('آدرس سرویس هلو لازم است')
++  if (s.length > 300) throw new Error('آدرس سرویس هلو بیش از حد طولانی است')
++  if (!/^https?:\/\//i.test(s)) {
++    throw new Error('آدرس باید با http:// یا https:// شروع شود (مثال: http://192.168.1.10:8080/TncHoloo/api)')
++  }
++  try {
++    // will throw on nonsense like http://...
++    new URL(s)
++  } catch {
++    throw new Error('آدرس سرویس هلو قابل تجزیه نیست — آن را بررسی کنید')
++  }
++  while (s.endsWith('/')) s = s.slice(0, -1)
++  return s
++}
++
++function toBase64(plain: string): string {
++  return Buffer.from(plain, 'utf8').toString('base64')
++}
++
++/** Read the full config (safe defaults for missing/corrupt rows). */
++export async function getHolooConfig(): Promise<HolooConfig> {
++  const [enabled, baseUrl, dbname, username, passwordB64, intervalMin] = await Promise.all([
++    readKey(KEYS.enabled),
++    readKey(KEYS.baseUrl),
++    readKey(KEYS.dbname),
++    readKey(KEYS.username),
++    readKey(KEYS.password),
++    readKey(KEYS.intervalMin),
++  ])
++  const rawInterval = Number(intervalMin)
++  const syncIntervalMin =
++    Number.isFinite(rawInterval) && rawInterval >= HOLOO_INTERVAL_MIN && rawInterval <= HOLOO_INTERVAL_MAX
++      ? Math.trunc(rawInterval)
++      : HOLOO_INTERVAL_DEFAULT
++  const normalizedBase = baseUrl.trim().replace(/\/+$/, '')
++  return {
++    enabled: enabled === '1',
++    baseUrl: normalizedBase,
++    dbname: dbname.trim(),
++    username: username.trim(),
++    passwordB64,
++    syncIntervalMin,
++    isHttp: /^http:\/\//i.test(normalizedBase),
++  }
++}
++
++/** true when every credential field is present (a login attempt is possible). */
++export function isConfigured(c: HolooConfig): boolean {
++  return !!(c.baseUrl && c.dbname && c.username && c.passwordB64)
++}
++
++/** Strip secrets for API responses. */
++export function sanitizeHolooConfig(c: HolooConfig): HolooConfigPublic {
++  return {
++    enabled: c.enabled,
++    baseUrl: c.baseUrl,
++    dbname: c.dbname,
++    username: c.username,
++    syncIntervalMin: c.syncIntervalMin,
++    hasPassword: !!c.passwordB64,
++    configured: isConfigured(c),
++    isHttp: c.isHttp,
++  }
++}
++
++export interface HolooConfigPatch {
++  enabled?: unknown
++  baseUrl?: unknown
++  dbname?: unknown
++  username?: unknown
++  /** PLAIN password from the admin (write-only). Empty/undefined = keep current. */
++  password?: unknown
++  syncIntervalMin?: unknown
++}
++
++/** Validate + persist a settings patch. Throws Persian errors; returns the
++ *  NEW full config. Changing any credential field drops the cached token. */
++export async function saveHolooConfig(patch: HolooConfigPatch): Promise<HolooConfig> {
++  const current = await getHolooConfig()
++  let next: HolooConfig = { ...current }
++  let credentialsChanged = false
++
++  if (patch.enabled !== undefined) {
++    const v = patch.enabled === true || patch.enabled === 1 || patch.enabled === '1' || patch.enabled === 'true'
++    next.enabled = v
++  }
++  if (patch.baseUrl !== undefined) {
++    const url = normalizeBaseUrl(patch.baseUrl)
++    if (url !== current.baseUrl) credentialsChanged = true
++    next.baseUrl = url
++    next.isHttp = /^http:\/\//i.test(url)
++  }
++  if (patch.dbname !== undefined) {
++    if (typeof patch.dbname !== 'string' || !patch.dbname.trim()) throw new Error('نام پایگاه دادهٔ هلو لازم است')
++    const v = patch.dbname.trim().slice(0, 200)
++    if (v !== current.dbname) credentialsChanged = true
++    next.dbname = v
++  }
++  if (patch.username !== undefined) {
++    if (typeof patch.username !== 'string' || !patch.username.trim()) throw new Error('نام کاربری هلو لازم است')
++    const v = patch.username.trim().slice(0, 100)
++    if (v !== current.username) credentialsChanged = true
++    next.username = v
++  }
++  if (patch.password !== undefined && patch.password !== null && patch.password !== '') {
++    if (typeof patch.password !== 'string') throw new Error('رمز هلو نامعتبر است')
++    if (patch.password.length > 200) throw new Error('رمز هلو بیش از حد طولانی است')
++    next.passwordB64 = toBase64(patch.password)
++    credentialsChanged = true
++  }
++  if (patch.syncIntervalMin !== undefined) {
++    const n = typeof patch.syncIntervalMin === 'string' ? Number(patch.syncIntervalMin.trim()) : Number(patch.syncIntervalMin)
++    if (!Number.isFinite(n) || Math.trunc(n) !== n || n < HOLOO_INTERVAL_MIN || n > HOLOO_INTERVAL_MAX) {
++      throw new Error(`بازهٔ سینک باید عددی صحیح بین ${HOLOO_INTERVAL_MIN} و ${HOLOO_INTERVAL_MAX} دقیقه باشد`)
++    }
++    next.syncIntervalMin = n
++  }
++
++  await writeKey(KEYS.enabled, next.enabled ? '1' : '0')
++  await writeKey(KEYS.baseUrl, next.baseUrl)
++  await writeKey(KEYS.dbname, next.dbname)
++  await writeKey(KEYS.username, next.username)
++  await writeKey(KEYS.password, next.passwordB64)
++  await writeKey(KEYS.intervalMin, String(next.syncIntervalMin))
++  if (credentialsChanged) await clearHolooToken()
++  return next
++}
++
++// ── token cache (Config KV; never logged, never returned by any API) ──
++
++export async function getHolooToken(): Promise<{ token: string; at: number } | null> {
++  const [token, at] = await Promise.all([readKey(KEYS.token), readKey(KEYS.tokenAt)])
++  if (!token) return null
++  const ts = Number(at)
++  return { token, at: Number.isFinite(ts) ? ts : 0 }
++}
++
++export async function setHolooToken(token: string): Promise<void> {
++  await writeKey(KEYS.token, token)
++  await writeKey(KEYS.tokenAt, String(Date.now()))
++}
++
++export async function clearHolooToken(): Promise<void> {
++  await writeKey(KEYS.token, '')
++  await writeKey(KEYS.tokenAt, '')
++}
+diff -ruN a/src/lib/holoo-sync.ts src/src/lib/holoo-sync.ts
+--- a/src/lib/holoo-sync.ts	1970-01-01 00:00:00.000000000 +0000
++++ src/src/lib/holoo-sync.ts	2026-11-10 09:30:31.000000000 +0000
+@@ -0,0 +1,791 @@
++import { db } from '@/lib/db'
++import { IRAN_CITIES, normalizeFa } from './iran-cities'
++import { toGregorian } from './jalali'
++import {
++  type HolooConfig,
++  getHolooConfig,
++  isConfigured,
++} from './holoo-config'
++import {
++  HolooClient,
++  HolooError,
++  extractItems,
++  fStr,
++  fNum,
++  fBool,
++  holooContentHash,
++  holooSafeError,
++} from './holoo'
++
++/**
++ * Holoo integration (phase 1) — the sync orchestrator + scheduler.
++ *
++ * MODE (per the phase-0 risk decision, sanctioned by the owner's
++ * instruction): PERIODIC FULL COMPARISON with contentHash. Every run pulls
++ * the complete Customer / Product / Invoice lists and upserts idempotently
++ * by the stable external key (ErpCode). The API's date.from/date.to
++ * filters are NOT trusted for change detection (they may filter by
++ * document date, not last-modified) — they stay unused until their
++ * semantics are verified against the real service (the /test probe
++ * reports what the service actually returns).
++ *
++ * OWNERSHIP: only the Erp* tables (Holoo-owned accounting data) and the
++ * bridging fields (Customer.erpCode on link/create, Purchase/PurchaseItem
++ * rows with source='holoo') are ever written. No operational MedPad field
++ * (assignments, visits, notes, active, …) is touched by the sync.
++ *
++ * NO-DELETE: absence from a response is NEVER a delete. `active=false` is
++ * only recorded when the API explicitly reports an inactive/blacklist flag.
++ *
++ * CONCURRENCY: a single in-process guard (globalThis) — one run at a time,
++ * shared by the scheduler AND the manual trigger. Crashed runs leave a
++ * 'running' row that boot-migration marks as error after 30 minutes.
++ */
++
++// ── tolerant field-name candidates (documented ASSUMPTIONs; the /test
++//    probe's sampleKeys shows what the REAL service returns) ──────────
++const K_ERP = ['ErpCode', 'erpCode', 'Erpcode', 'ERPCODE', 'erp_code']
++const K_CODE = ['Code', 'code', 'c_Code', 'C_Code', 'fac_Code']
++const K_NAME = ['Name', 'name', 'c_Name', 'C_Name', 'FullName', 'fullName']
++const K_MANDEH = ['Mandeh', 'mandeh', 'Mande', 'Balance', 'balance']
++const K_CREDIT = ['Credit', 'credit', 'Credite', 'credite']
++const K_NATIONAL = ['NationalId', 'nationalid', 'NationalID', 'nationalId', 'NationalCode', 'nationalCode']
++const K_ECONOMIC = ['EconomicId', 'economicId', 'economic_Code', 'EconomicCode', 'economiccode']
++const K_TEL = ['Tel', 'tel', 'c_Tel', 'C_Tel', 'Phone', 'phone']
++const K_MOBILE = ['Mobile', 'mobile', 'c_Mobile', 'C_Mobile', 'Mob', 'mob']
++const K_CITY = ['City', 'city', 'CityName', 'cityName']
++const K_OSTAN = ['Ostan', 'ostan', 'State', 'Province', 'province']
++const K_MANTAGHEH = ['Mantagheh', 'mantagheh', 'Region', 'Area', 'region']
++const K_ZIP = ['ZipCode', 'zipCode', 'Zip', 'PostalCode', 'postalCode']
++const K_ADDRESS = ['Address', 'address', 'c_Address', 'C_Address', 'cBillingAddress']
++const K_JOB = ['Job', 'job', 'JobName', 'jobName']
++const K_EMAIL = ['Email', 'email', 'EMail', 'eMail']
++const K_ACTIVE = ['IsActive', 'isActive', 'Active', 'active']
++const K_BLACKLIST = ['IsBlackList', 'isblacklist', 'IsBlacklist', 'BlackList']
++
++const P_ERP = ['ErpCode', 'erpCode', 'Erpcode']
++const P_CODE = ['Code', 'code', 'a_Code']
++const P_NAME = ['Name', 'name', 'a_Name', 'ProductName']
++const P_FEW = ['Few', 'few', 'Unit', 'unit', 'uniterpcode']
++const P_BUY = ['BuyPrice', 'buyprice', 'buyPrice']
++const P_SELL = ['SellPrice', 'sellprice', 'sellPrice', 'sel_Price', 'SelPrice']
++const P_GROUP = ['m_groupname', 'MainGroupName', 'mainGroupName', 'GroupName', 'groupName', 's_groupname']
++
++const I_ERP = ['ErpCode', 'erpCode', 'Erpcode']
++const I_CODE = ['Code', 'code', 'fac_Code', 'InvoiceNo', 'invoiceNo']
++const I_CUST_ERP = ['CustomerErpCode', 'customerErpCode', 'C_ErpCode', 'ErpCode_C', 'CustErpCode', 'custErpCode']
++const I_DATE = ['Date', 'date', 'FacDate', 'InvDate', 'invDate']
++const I_TOTAL = ['SumPrice', 'sumPrice', 'Sum', 'Total', 'total', 'Price']
++const I_DISCOUNT = ['SumDiscount', 'sumDiscount', 'Scot', 'scot', 'Discount', 'discount']
++const I_TYPE = ['Type', 'type', 'fac_Type']
++
++const PAY_CODE = ['Code', 'code', 'SanadCode', 'sanadCode', 'DocCode']
++const PAY_NAME = ['Name', 'name', 'Comment', 'comment', 'Description']
++const PAY_PRICE = ['Price', 'price', 'Amount', 'amount']
++const PAY_DATE = ['Date', 'date', 'DocDate', 'docDate']
++const PAY_MANDEH = ['Mandeh', 'mandeh', 'Mande', 'Balance']
++
++/** Payment requests are PER-CUSTOMER — be polite between them. */
++const PAYMENT_DELAY_MS = 200
++/** Hard cap of per-customer payment fetches in ONE run (initial sync of a
++ *  very large book must not hammer the service for hours). */
++const PAYMENT_MAX_CUSTOMERS = 5000
++
++// ── Jalali/Gregorian/epoch tolerant date parsing ─────────────────────
++export function parseHolooDate(v: unknown, fallback: Date): Date {
++  if (v === null || v === undefined) return fallback
++  if (typeof v === 'number' && Number.isFinite(v)) {
++    return new Date(v > 1e12 ? v : v * 1000) // ms vs s
++  }
++  const s = String(v).trim()
++  if (!s) return fallback
++  const m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/)
++  if (m) {
++    const y = Number(m[1])
++    const mo = Number(m[2])
++    const d = Number(m[3])
++    if (y > 1500) {
++      const t = Date.parse(s.includes('T') ? s : s.replace(' ', 'T') + 'Z')
++      return Number.isNaN(t) ? new Date(Date.UTC(y, mo - 1, d)) : new Date(t)
++    }
++    if (y >= 1200 && y <= 1500) {
++      // Jalali string like 1403/08/15 → Gregorian (existing lib/jalali)
++      try {
++        const [gy, gm, gd] = toGregorian(y, mo, d)
++        return new Date(Date.UTC(gy, gm - 1, gd))
++      } catch {
++        return fallback
++      }
++    }
++  }
++  const t = Date.parse(s)
++  return Number.isNaN(t) ? fallback : new Date(t)
++}
++
++/** Persian-aware name normalization for the one-time link heuristic. */
++function normalizeName(s: string): string {
++  return s
++    .trim()
++    .replace(/\s+/g, ' ')
++    .replace(/ي/g, 'ی')
++    .replace(/ك/g, 'ک')
++    .replace(/أ/g, 'ا')
++    .replace(/إ/g, 'ا')
++    .replace(/آ/g, 'ا')
++    .replace(/ة/g, 'ه')
++    .toLowerCase()
++}
++
++// ── run state (single process — the Next.js standalone server) ───────
++interface HolooRunGuard {
++  __medpadHolooRunning?: boolean
++  __medpadHolooTimer?: ReturnType<typeof setInterval>
++}
++const guard = globalThis as unknown as HolooRunGuard
++
++export function isSyncRunning(): boolean {
++  return guard.__medpadHolooRunning === true
++}
++
++export interface HolooSyncSummary {
++  ok: boolean
++  skipped?: 'busy' | 'not-configured' | 'disabled'
++  logId?: string
++  checked?: number
++  created?: number
++  updated?: number
++  unchanged?: number
++  deactivated?: number
++  errors?: string[]
++  detail?: Record<string, { checked: number; created: number; updated: number; unchanged: number; deactivated: number; skipped: number }>
++}
++
++/** The sync itself. Never throws — failures land in the HolooSyncLog row. */
++export async function runHolooSync(kind: 'initial' | 'incremental' | 'manual'): Promise<HolooSyncSummary> {
++  if (isSyncRunning()) return { ok: false, skipped: 'busy' }
++  const cfg = await getHolooConfig()
++  // manual runs work even when the scheduler switch is OFF (first-time
++  // setup: test → save → «سینک دستی» without enabling the timer);
++  // scheduled runs require enabled=1 — enforced by the caller (tick).
++  if (!isConfigured(cfg)) return { ok: false, skipped: 'not-configured' }
++
++  guard.__medpadHolooRunning = true
++  const errors: string[] = []
++  const addError = (e: unknown) => {
++    if (errors.length < 20) errors.push(holooSafeError(e))
++  }
++  const log = await db.holooSyncLog.create({
++    data: { kind, status: 'running', startedAt: new Date() },
++  })
++  const detail: Record<string, { checked: number; created: number; updated: number; unchanged: number; deactivated: number; skipped: number }> = {
++    customers: z(), products: z(), invoices: z(), payments: z(),
++  }
++  const startedAt = Date.now()
++
++  try {
++    await doSync(cfg, kind, detail, addError)
++    const checked = sum(detail, 'checked')
++    const created = sum(detail, 'created')
++    const updated = sum(detail, 'updated')
++    const unchanged = sum(detail, 'unchanged')
++    const deactivated = sum(detail, 'deactivated')
++    await db.holooSyncLog.update({
++      where: { id: log.id },
++      data: {
++        status: 'success',
++        finishedAt: new Date(),
++        checked, created, updated, unchanged, deactivated,
++        errors: errors.length ? JSON.stringify(errors) : null,
++        checkpoint: JSON.stringify({
++          lastSuccessAt: new Date().toISOString(),
++          durationMs: Date.now() - startedAt,
++          detail,
++        }),
++      },
++    })
++    return { ok: true, logId: log.id, checked, created, updated, unchanged, deactivated, errors, detail }
++  } catch (e) {
++    addError(e)
++    await db.holooSyncLog
++      .update({
++        where: { id: log.id },
++        data: {
++          status: 'error',
++          finishedAt: new Date(),
++          checked: sum(detail, 'checked'),
++          created: sum(detail, 'created'),
++          updated: sum(detail, 'updated'),
++          unchanged: sum(detail, 'unchanged'),
++          deactivated: sum(detail, 'deactivated'),
++          errors: JSON.stringify(errors.length ? errors : [holooSafeError(e)]),
++          checkpoint: JSON.stringify({ failedAt: new Date().toISOString(), detail }),
++        },
++      })
++      .catch(() => {})
++    return { ok: false, logId: log.id, errors, detail }
++  } finally {
++    guard.__medpadHolooRunning = false
++  }
++}
++
++function z() {
++  return { checked: 0, created: 0, updated: 0, unchanged: 0, deactivated: 0, skipped: 0 }
++}
++function sum(detail: Record<string, ReturnType<typeof z>>, k: 'checked' | 'created' | 'updated' | 'unchanged' | 'deactivated'): number {
++  return Object.values(detail).reduce((a, v) => a + v[k], 0)
++}
++
++// ── the actual work ───────────────────────────────────────────────────
++
++async function doSync(
++  cfg: HolooConfig,
++  kind: 'initial' | 'incremental' | 'manual',
++  detail: Record<string, ReturnType<typeof z>>,
++  addError: (e: unknown) => void,
++): Promise<void> {
++  const client = new HolooClient(cfg)
++
++  // 1) CUSTOMERS (طرف‌حساب) — full pull, idempotent upsert by ErpCode.
++  //    Sets of erpCodes whose MedPad Customer must be (re)examined for
++  //    linking feed steps 3-4.
++  const customersRaw = await client.get('Customer')
++  const unlinkedMedpad = await db.customer.findMany({
++    where: { erpCode: null },
++    select: { id: true, name: true },
++  })
++  const byNormName = new Map<string, string[]>()
++  for (const c of unlinkedMedpad) {
++    const n = normalizeName(c.name)
++    const arr = byNormName.get(n) ?? []
++    arr.push(c.id)
++    byNormName.set(n, arr)
++  }
++  const customerErpToMedpadId = new Map<string, string>()
++  for (const rec of customersRaw.items) {
++    try {
++      const erpCode = fStr(rec, K_ERP)
++      if (!erpCode) {
++        detail.customers.skipped++
++        continue
++      }
++      detail.customers.checked++
++      const hash = holooContentHash(rec)
++      const existing = await db.erpCustomer.findUnique({ where: { erpCode } })
++      const now = new Date()
++      // explicit inactivity only (no-delete policy)
++      const reportedActive = (() => {
++        const act = fBool(rec, K_ACTIVE, true)
++        const black = fBool(rec, K_BLACKLIST, false)
++        return act && !black
++      })()
++      const mandeh = fNum(rec, K_MANDEH) ?? 0
++      const credit = fNum(rec, K_CREDIT) ?? 0
++      const data = {
++        erpCode,
++        code: fStr(rec, K_CODE),
++        name: fStr(rec, K_NAME) ?? erpCode,
++        mandeh,
++        credit,
++        nationalId: fStr(rec, K_NATIONAL),
++        economicId: fStr(rec, K_ECONOMIC),
++        tel: fStr(rec, K_TEL),
++        mobile: fStr(rec, K_MOBILE),
++        city: fStr(rec, K_CITY),
++        ostan: fStr(rec, K_OSTAN),
++        mantagheh: fStr(rec, K_MANTAGHEH),
++        zipCode: fStr(rec, K_ZIP),
++        address: fStr(rec, K_ADDRESS),
++        job: fStr(rec, K_JOB),
++        email: fStr(rec, K_EMAIL),
++        active: reportedActive,
++        contentHash: hash,
++        lastSyncedAt: now,
++      }
++      if (!existing) {
++        await db.erpCustomer.create({ data })
++        detail.customers.created++
++      } else if (existing.contentHash !== hash) {
++        await db.erpCustomer.update({ where: { erpCode }, data })
++        detail.customers.updated++
++        if (existing.active && !reportedActive) detail.customers.deactivated++
++      } else {
++        // touch lastSyncedAt only (cheap, keeps the app-sync trigger honest)
++        await db.erpCustomer.update({ where: { erpCode }, data: { lastSyncedAt: now } })
++        detail.customers.unchanged++
++      }
++
++      // ── MedPad bridge: link by erpCode, else by UNIQUE normalized name,
++      //    else create an UNASSIGNED MedPad customer (no auto-assignment).
++      let medpadId = customerErpToMedpadId.get(erpCode) ?? null
++      if (!medpadId) {
++        const linked = await db.customer.findFirst({ where: { erpCode }, select: { id: true } })
++        if (linked) {
++          medpadId = linked.id
++        } else if (existing === null || existing.contentHash !== hash || kind !== 'incremental') {
++          // name-match only for NEW records / non-incremental runs (stable,
++          // cheap; avoids re-matching the whole book every 3 minutes)
++          const norm = normalizeName(data.name)
++          const candidates = byNormName.get(norm)
++          if (candidates && candidates.length === 1) {
++            await db.customer.update({ where: { id: candidates[0] }, data: { erpCode } })
++            medpadId = candidates[0]
++          } else {
++            const created = await createMedpadCustomerFromErp(erpCode, data)
++            medpadId = created
++          }
++        }
++      }
++      if (medpadId) customerErpToMedpadId.set(erpCode, medpadId)
++    } catch (e) {
++      addError(e)
++      detail.customers.skipped++
++    }
++  }
++
++  // 2) PRODUCTS (کالا) — full pull, idempotent upsert by ErpCode.
++  try {
++    const productsRaw = await client.get('Product')
++    for (const rec of productsRaw.items) {
++      try {
++        const erpCode = fStr(rec, P_ERP)
++        if (!erpCode) {
++          detail.products.skipped++
++          continue
++        }
++        detail.products.checked++
++        const hash = holooContentHash(rec)
++        const existing = await db.erpProduct.findUnique({ where: { erpCode } })
++        const reportedActive = fBool(rec, K_ACTIVE, true) && !fBool(rec, K_BLACKLIST, false)
++        const data = {
++          erpCode,
++          code: fStr(rec, P_CODE),
++          name: fStr(rec, P_NAME) ?? erpCode,
++          few: fStr(rec, P_FEW),
++          buyPrice: fNum(rec, P_BUY),
++          sellPrice: fNum(rec, P_SELL),
++          group: fStr(rec, P_GROUP),
++          active: reportedActive,
++          contentHash: hash,
++          lastSyncedAt: new Date(),
++        }
++        if (!existing) {
++          await db.erpProduct.create({ data })
++          detail.products.created++
++        } else if (existing.contentHash !== hash) {
++          await db.erpProduct.update({ where: { erpCode }, data })
++          detail.products.updated++
++          if (existing.active && !reportedActive) detail.products.deactivated++
++        } else {
++          await db.erpProduct.update({ where: { erpCode }, data: { lastSyncedAt: new Date() } })
++          detail.products.unchanged++
++        }
++      } catch (e) {
++        addError(e)
++        detail.products.skipped++
++      }
++    }
++  } catch (e) {
++    addError(e)
++  }
++
++  // 3) INVOICES (فاکتور) → Purchase(source='holoo') + one total line in
++  //    PurchaseItem + holooJson provenance (the documented Customer-360
++  //    adapter contract). Line items are NOT claimed until a per-item
++  //    endpoint is proven on the real service (see /test probe).
++  const customersWithInvoiceChange = new Set<string>()
++  try {
++    let invoicesRaw
++    try {
++      invoicesRaw = await client.get('Invoice')
++    } catch (e) {
++      if (e instanceof HolooError && e.kind === 'http' && e.status === 404) {
++        invoicesRaw = await client.get('Invoice/Invoice') // documented fallback path
++      } else {
++        throw e
++      }
++    }
++    const fallbackDate = new Date()
++    for (const rec of invoicesRaw.items) {
++      try {
++        const erpCode = fStr(rec, I_ERP)
++        const invoiceNo = fStr(rec, I_CODE)
++        if (!erpCode && !invoiceNo) {
++          detail.invoices.skipped++
++          continue
++        }
++        const externalId = erpCode ?? `holoo-no-${invoiceNo}`
++        const custErp = fStr(rec, I_CUST_ERP)
++        const medpadId = custErp ? customerErpToMedpadId.get(custErp) : null
++        if (!medpadId) {
++          detail.invoices.skipped++
++          addError(`فاکتور ${invoiceNo ?? externalId} مشتری مرتبط در MedPad ندارد — نادیده گرفته شد`)
++          continue
++        }
++        detail.invoices.checked++
++        const holooJson = JSON.stringify(rec)
++        const date = parseHolooDate(fStr(rec, I_DATE) ?? rec['Date'], fallbackDate)
++        const discount = fNum(rec, I_DISCOUNT)
++        const total = fNum(rec, I_TOTAL) ?? 0
++        const existing = await db.purchase.findUnique({ where: { externalId } })
++        if (
++          existing &&
++          existing.source === 'holoo' &&
++          existing.holooJson === holooJson &&
++          existing.invoiceNo === (invoiceNo ?? null) &&
++          existing.discount === discount
++        ) {
++          await db.purchase.update({ where: { id: existing.id }, data: { syncedAt: new Date() } })
++          detail.invoices.unchanged++
++          continue
++        }
++        const upsert = {
++          customerId: medpadId,
++          source: 'holoo' as const,
++          externalId,
++          invoiceNo,
++          date,
++          paymentStatus: null, // unknown until Holoo provides a derivable status — never fabricated
++          discount,
++          notes: null,
++          syncedAt: new Date(),
++          holooJson,
++        }
++        let purchaseId: string
++        if (existing) {
++          await db.purchase.update({ where: { id: existing.id }, data: upsert })
++          purchaseId = existing.id
++          detail.invoices.updated++
++        } else {
++          const created = await db.purchase.create({ data: upsert })
++          purchaseId = created.id
++          detail.invoices.created++
++        }
++        // one TOTAL line (per the documented adapter contract)
++        const items = await db.purchaseItem.findMany({ where: { purchaseId } })
++        const totalItem = {
++          purchaseId,
++          productId: null,
++          productName: 'جمع کل فاکتور هلو',
++          productCode: null,
++          brand: null,
++          qty: 1,
++          unitPrice: total,
++          total,
++          discount: null,
++        }
++        if (items.length === 1) {
++          await db.purchaseItem.update({ where: { id: items[0].id }, data: totalItem })
++        } else if (items.length === 0) {
++          await db.purchaseItem.create({ data: totalItem })
++        } else {
++          // legacy manual items on a holoo-source row should not exist;
++          // replace with the single total line (source='holoo' rows are
++          // fully owned by the adapter)
++          await db.purchaseItem.deleteMany({ where: { purchaseId } })
++          await db.purchaseItem.create({ data: totalItem })
++        }
++        if (custErp) customersWithInvoiceChange.add(custErp)
++      } catch (e) {
++        addError(e)
++        detail.invoices.skipped++
++      }
++    }
++  } catch (e) {
++    addError(e)
++  }
++
++  // 4) PAYMENTS (Report/GetCustPay — PER-CUSTOMER requests) + balance
++  //    refresh. Initial/manual: every customer (polite pacing, capped).
++  //    Incremental: only customers whose invoices changed in THIS run.
++  try {
++    let targets: string[]
++    if (kind === 'incremental') {
++      targets = [...customersWithInvoiceChange]
++    } else {
++      const all = await db.erpCustomer.findMany({
++        select: { erpCode: true },
++        orderBy: { createdAt: 'asc' },
++        take: PAYMENT_MAX_CUSTOMERS,
++      })
++      targets = all.map((a) => a.erpCode)
++    }
++    for (const erpCode of targets) {
++      try {
++        const pay = await client.get('Report/GetCustPay', { customerErpCode: erpCode })
++        const fallbackDate = new Date()
++        let latestMandeh: number | null = null
++        for (const rec of pay.items) {
++          const code =
++            fStr(rec, PAY_CODE) ??
++            `pay-${holooContentHash({ c: erpCode, r: rec }).slice(0, 16)}`
++          detail.payments.checked++
++          const hash = holooContentHash(rec)
++          const price = fNum(rec, PAY_PRICE) ?? 0
++          const date = parseHolooDate(fStr(rec, PAY_DATE) ?? rec['Date'], fallbackDate)
++          const mandeh = fNum(rec, PAY_MANDEH)
++          if (mandeh !== null) latestMandeh = mandeh
++          const data = {
++            customerErpCode: erpCode,
++            code,
++            name: fStr(rec, PAY_NAME),
++            price,
++            date,
++            mandeh,
++            contentHash: hash,
++            lastSyncedAt: new Date(),
++          }
++          const existing = await db.erpPayment.findUnique({
++            where: { customerErpCode_code: { customerErpCode: erpCode, code } },
++          })
++          if (!existing) {
++            await db.erpPayment.create({ data })
++            detail.payments.created++
++          } else if (existing.contentHash !== hash) {
++            await db.erpPayment.update({ where: { id: existing.id }, data })
++            detail.payments.updated++
++          } else {
++            await db.erpPayment.update({ where: { id: existing.id }, data: { lastSyncedAt: new Date() } })
++            detail.payments.unchanged++
++          }
++        }
++        // refresh the customer's balance from the report (authoritative)
++        if (latestMandeh !== null) {
++          await db.erpCustomer.update({
++            where: { erpCode },
++            data: { mandeh: latestMandeh, lastSyncedAt: new Date() },
++          })
++        }
++      } catch (e) {
++        addError(e)
++        detail.payments.skipped++
++      }
++      await new Promise((r) => setTimeout(r, PAYMENT_DELAY_MS))
++    }
++  } catch (e) {
++    addError(e)
++  }
++}
++
++/** City lookup for Holoo-imported customers: the (province, city) pair
++ *  is the dataset's unique key, but Holoo's province may be absent — fall
++ *  back to a UNIQUE city-name match (several names repeat across provinces
++ *  by design; an ambiguous name matches NOTHING, the fields stay null). */
++function matchIranCity(
++  city: string | null,
++  ostan: string | null,
++): { province: string; city: string; lat: number; lng: number } | null {
++  if (!city) return null
++  if (ostan) {
++    const pair = IRAN_CITIES.find(
++      (c) => normalizeFa(c.province) === normalizeFa(ostan) && normalizeFa(c.city) === normalizeFa(city),
++    )
++    if (pair) return pair
++  }
++  const byName = IRAN_CITIES.filter((c) => normalizeFa(c.city) === normalizeFa(city))
++  return byName.length === 1 ? byName[0] : null
++}
++
++/** Create an UNASSIGNED MedPad customer bridged to a Holoo record.
++ *  Only bridging/identity fields are pre-filled; city is set ONLY when it
++ *  matches the offline Iran dataset (same validation as every other
++ *  customer write); coordinates default to the matched city center or
++ *  0/0 (the schema requires values — 0/0 means «unknown», rendered as
++ *  such everywhere). Operational fields stay untouched for the admin. */
++async function createMedpadCustomerFromErp(
++  erpCode: string,
++  data: { name: string; mobile: string | null; tel: string | null; city: string | null; ostan: string | null },
++): Promise<string> {
++  const hit = matchIranCity(data.city, data.ostan)
++  const created = await db.customer.create({
++    data: {
++      name: data.name,
++      type: 'other', // honest default — the admin re-classifies (doctor/pharmacy/clinic)
++      phone: data.mobile ?? data.tel,
++      province: hit?.province ?? null,
++      city: hit?.city ?? null,
++      lat: hit?.lat ?? 0,
++      lng: hit?.lng ?? 0,
++      erpCode,
++    },
++    select: { id: true },
++  })
++  return created.id
++}
++
++// ── the scheduler (no new infrastructure — a timer in this process) ──
++
++export function startHolooScheduler(): void {
++  if (guard.__medpadHolooTimer) return
++  const timer = setInterval(() => {
++    void tick().catch(() => {})
++  }, 30_000)
++  if (typeof timer.unref === 'function') timer.unref()
++  guard.__medpadHolooTimer = timer
++  console.log('[medpad][holoo] scheduler armed (30s tick, config re-read every tick)')
++}
++
++async function tick(): Promise<void> {
++  try {
++    const cfg = await getHolooConfig()
++    if (!cfg.enabled || !isConfigured(cfg)) return
++    if (isSyncRunning()) return
++    const last = await db.holooSyncLog.findFirst({
++      where: { status: { not: 'running' } },
++      orderBy: { startedAt: 'desc' },
++      select: { startedAt: true },
++    })
++    if (last) {
++      const elapsed = Date.now() - last.startedAt.getTime()
++      if (elapsed < cfg.syncIntervalMin * 60_000) return
++    }
++    await runHolooSync('incremental')
++  } catch (e) {
++    console.error('[medpad][holoo] scheduler tick failed:', holooSafeError(e))
++  }
++}
++
++// ── status aggregation (for /api/admin/holoo/status) ─────────────────
++
++export interface HolooSyncStatusView {
++  running: boolean
++  lastRun: {
++    id: string
++    kind: string
++    status: string
++    startedAt: string
++    finishedAt: string | null
++    checked: number
++    created: number
++    updated: number
++    unchanged: number
++    deactivated: number
++    errors: string[]
++  } | null
++  recentLogs: Array<{
++    id: string
++    kind: string
++    status: string
++    startedAt: string
++    finishedAt: string | null
++    checked: number
++    created: number
++    updated: number
++    unchanged: number
++    deactivated: number
++    errors: string[]
++  }>
++  counts: {
++    erpCustomers: number
++    erpProducts: number
++    erpPayments: number
++    holooPurchases: number
++    linkedCustomers: number
++  }
++  nextRunInSec: number | null
++}
++
++export async function holooSyncState(cfg: HolooConfig): Promise<HolooSyncStatusView> {
++  const [lastRow, recent, erpCustomers, erpProducts, erpPayments, holooPurchases, linkedCustomers] = await Promise.all([
++    db.holooSyncLog.findFirst({ orderBy: { startedAt: 'desc' } }),
++    db.holooSyncLog.findMany({ orderBy: { startedAt: 'desc' }, take: 10 }),
++    db.erpCustomer.count(),
++    db.erpProduct.count(),
++    db.erpPayment.count(),
++    db.purchase.count({ where: { source: 'holoo' } }),
++    db.customer.count({ where: { NOT: { erpCode: null } } }),
++  ])
++  let nextRunInSec: number | null = null
++  if (cfg.enabled && isConfigured(cfg) && !isSyncRunning() && lastRow) {
++    const elapsedSec = Math.floor((Date.now() - lastRow.startedAt.getTime()) / 1000)
++    nextRunInSec = Math.max(0, cfg.syncIntervalMin * 60 - elapsedSec)
++  }
++  const view = (r: NonNullable<typeof lastRow>) => ({
++    id: r.id,
++    kind: r.kind,
++    status: r.status,
++    startedAt: r.startedAt.toISOString(),
++    finishedAt: r.finishedAt ? r.finishedAt.toISOString() : null,
++    checked: r.checked,
++    created: r.created,
++    updated: r.updated,
++    unchanged: r.unchanged,
++    deactivated: r.deactivated,
++    errors: safeParseErrors(r.errors),
++  })
++  return {
++    running: isSyncRunning(),
++    lastRun: lastRow ? view(lastRow) : null,
++    recentLogs: recent.map(view),
++    counts: { erpCustomers, erpProducts, erpPayments, holooPurchases, linkedCustomers },
++    nextRunInSec,
++  }
++}
++
++function safeParseErrors(s: string | null): string[] {
++  if (!s) return []
++  try {
++    const v = JSON.parse(s)
++    return Array.isArray(v) ? v.map((x) => String(x).slice(0, 200)).slice(0, 20) : []
++  } catch {
++    return []
++  }
++}
++
++// ── read-side blocks shared by the panel + app profile routes ─────────
++
++export interface HolooErpAccount {
++  erpCode: string
++  code: string | null
++  name: string
++  mandeh: number
++  credit: number
++  active: boolean
++  city: string | null
++  ostan: string | null
++  syncedAt: string
++}
++
++export interface HolooErpPaymentView {
++  code: string | null
++  name: string | null
++  price: number
++  date: string
++  mandeh: number | null
++}
++
++/** The Holoo accounting blocks for a MedPad customer's 360 profile:
++ *  erpAccount (the ErpCustomer mirror) + the latest ErpPayment rows.
++ *  Null/empty when the customer is not linked — the UI renders an explicit
++ *  «اتصال هلو برقرار نیست» state, never fabricated numbers. */
++export async function erpBlocksFor(
++  erpCode: string | null,
++): Promise<{ erpAccount: HolooErpAccount | null; erpPayments: HolooErpPaymentView[] }> {
++  if (!erpCode) return { erpAccount: null, erpPayments: [] }
++  const account = await db.erpCustomer.findUnique({ where: { erpCode } })
++  if (!account) return { erpAccount: null, erpPayments: [] }
++  const payments = await db.erpPayment.findMany({
++    where: { customerErpCode: erpCode },
++    orderBy: { date: 'desc' },
++    take: 50,
++  })
++  return {
++    erpAccount: {
++      erpCode: account.erpCode,
++      code: account.code,
++      name: account.name,
++      mandeh: account.mandeh,
++      credit: account.credit,
++      active: account.active,
++      city: account.city,
++      ostan: account.ostan,
++      syncedAt: account.lastSyncedAt.toISOString(),
++    },
++    erpPayments: payments.map((p) => ({
++      code: p.code,
++      name: p.name,
++      price: p.price,
++      date: p.date.toISOString(),
++      mandeh: p.mandeh,
++    })),
++  }
++}
+diff -ruN a/src/lib/holoo.ts src/src/lib/holoo.ts
+--- a/src/lib/holoo.ts	1970-01-01 00:00:00.000000000 +0000
++++ src/src/lib/holoo.ts	2026-11-10 09:19:31.000000000 +0000
+@@ -0,0 +1,325 @@
++import { createHash } from 'crypto'
++import {
++  type HolooConfig,
++  isConfigured,
++  getHolooToken,
++  setHolooToken,
++  clearHolooToken,
++} from './holoo-config'
++
++/**
++ * Holoo integration (phase 1) — the HTTP client for the Holoo web service.
++ *
++ * Wire format (per the owner's integration instruction, cross-checked with
++ * the public TncHoloo docs; every uncertain point is marked ASSUMPTION and
++ * is verified by the read-only /api/admin/holoo/test probe):
++ *   base:      http://{IPSystem}:8080/TncHoloo/api        (config value)
++ *   login:     POST {base}/Login  body {"userinfo":{"username","userpass","dbname"}}
++ *              — userpass is the BASE64 of the plain password (Base64 is
++ *              transport encoding, NOT encryption; documented openly).
++ *   response:  {"Login":{"State":"True","Token":"Bearer …","ErrorCode":0,"Error":""}}
++ *              — parsed tolerantly (token may or may not carry the Bearer
++ *              prefix; State may be string/bool).
++ *   requests:  GET {base}/{path}  with header  Authorization: <token>
++ *   401/audit: exactly ONE automatic re-login + retry per request.
++ *
++ * ZERO new dependencies — Node 24's global fetch + AbortController.
++ * Credentials and tokens are NEVER included in errors or logs.
++ */
++
++export type HolooErrorKind =
++  | 'not-configured'
++  | 'network'
++  | 'timeout'
++  | 'auth'
++  | 'http'
++  | 'invalid-response'
++  | 'unknown'
++
++export class HolooError extends Error {
++  kind: HolooErrorKind
++  status?: number
++  constructor(kind: HolooErrorKind, message: string, status?: number) {
++    super(message)
++    this.name = 'HolooError'
++    this.kind = kind
++    this.status = status
++  }
++}
++
++/** Safe message for logs/audit — guaranteed free of credential material. */
++export function holooSafeError(e: unknown): string {
++  if (e instanceof HolooError) return `[${e.kind}] ${e.message}`
++  if (e instanceof Error) return `[unknown] ${e.message.slice(0, 200)}`
++  return '[unknown] خطای ناشناخته'
++}
++
++const DEFAULT_TIMEOUT_MS = 30_000
++const PROBE_TIMEOUT_MS = 10_000
++
++/** Authorization header value: exactly what Holoo's login returned. Some
++ *  deployments return the bare token, others the prefixed "Bearer <tok>" —
++ *  normalize so the header is always exactly one "Bearer " + token. */
++function authHeaderValue(token: string): string {
++  return /^bearer\s+/i.test(token) ? token : `Bearer ${token}`
++}
++
++function pick(obj: Record<string, unknown>, keys: string[]): unknown {
++  for (const k of keys) {
++    if (obj[k] !== undefined && obj[k] !== null && obj[k] !== '') return obj[k]
++  }
++  return undefined
++}
++
++/** Login response tolerance: the documented shape is {"Login":{...}} but a
++ *  flat {"Token":...} is accepted too (ASSUMPTION — verified by /test). */
++function extractLogin(body: unknown): { ok: boolean; token?: string; error?: string } {
++  if (typeof body === 'string') {
++    const s = body.trim()
++    // a raw token string body — accept it (ASSUMPTION)
++    if (s && !s.startsWith('{') && !s.startsWith('<')) return { ok: true, token: s }
++    return { ok: false, error: 'پاسخ لاگین قابل تجزیه نیست' }
++  }
++  if (!body || typeof body !== 'object') return { ok: false, error: 'پاسخ لاگین قابل تجزیه نیست' }
++  const o = body as Record<string, unknown>
++  const inner = (o.Login ?? o.login ?? o.result ?? o.Result) as Record<string, unknown> | undefined
++  const src = inner && typeof inner === 'object' ? inner : o
++  const token = pick(src, ['Token', 'token', 'access_token', 'accessToken', 'Token1'])
++  const state = pick(src, ['State', 'state', 'Success', 'success', 'Ok', 'ok'])
++  const errCode = pick(src, ['ErrorCode', 'errorCode', 'Code', 'code'])
++  const errMsg = pick(src, ['Error', 'error', 'Message', 'message'])
++  const stateOk =
++    state === undefined ? true : state === true || state === 1 || String(state).toLowerCase() === 'true' || String(state).toLowerCase() === 'ok'
++  if (typeof token === 'string' && token.trim() && stateOk) return { ok: true, token: token.trim() }
++  if (errMsg) return { ok: false, error: `ورود به هلو ناموفق بود: ${String(errMsg).slice(0, 150)}` }
++  if (errCode !== undefined && Number(errCode) !== 0) return { ok: false, error: `ورود به هلو ناموفق بود (کد ${Number(errCode)})` }
++  return { ok: false, error: 'پاسخ لاگین هلو فاقد توکن است' }
++}
++
++export interface HolooListResult {
++  /** the parsed JSON body as-is (for holooJson provenance) */
++  raw: unknown
++  /** extracted record list (arrays, {data:[...]}, single objects, …) */
++  items: Record<string, unknown>[]
++}
++
++export interface HolooEndpointProbe {
++  path: string
++  ok: boolean
++  status: number
++  shape: string
++  count?: number
++  sampleKeys?: string[]
++  error?: string
++}
++
++export class HolooClient {
++  private cfg: HolooConfig
++  private timeoutMs: number
++
++  constructor(cfg: HolooConfig, opts?: { timeoutMs?: number }) {
++    this.cfg = cfg
++    this.timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS
++  }
++
++  private assertConfigured(): void {
++    if (!isConfigured(this.cfg)) {
++      throw new HolooError('not-configured', 'تنظیمات اتصال هلو کامل نیست (آدرس، پایگاه داده، کاربر یا رمز)')
++    }
++  }
++
++  private url(path: string, params?: Record<string, string | number | undefined>): string {
++    const u = new URL(`${this.cfg.baseUrl}/${path.replace(/^\/+/, '')}`)
++    if (params) {
++      for (const [k, v] of Object.entries(params)) {
++        if (v !== undefined && v !== null && v !== '') u.searchParams.set(k, String(v))
++      }
++    }
++    return u.toString()
++  }
++
++  private async fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
++    const ac = new AbortController()
++    const t = setTimeout(() => ac.abort(), this.timeoutMs)
++    try {
++      return await fetch(url, { ...init, signal: ac.signal })
++    } catch (e) {
++      if (e instanceof Error && (e.name === 'AbortError' || e.message.includes('aborted'))) {
++        throw new HolooError('timeout', 'مهلت پاسخ سرویس هلو به پایان رسید')
++      }
++      throw new HolooError('network', 'ارتباط با سرویس هلو برقرار نشد')
++    } finally {
++      clearTimeout(t)
++    }
++  }
++
++  /** POST {base}/Login — returns the Authorization header value. */
++  async login(): Promise<string> {
++    this.assertConfigured()
++    let res: Response
++    try {
++      res = await this.fetchWithTimeout(`${this.cfg.baseUrl}/Login`, {
++        method: 'POST',
++        headers: { 'Content-Type': 'application/json' },
++        body: JSON.stringify({
++          userinfo: {
++            username: this.cfg.username,
++            // stored base64 is exactly what the wire expects (spec §3)
++            userpass: this.cfg.passwordB64,
++            dbname: this.cfg.dbname,
++          },
++        }),
++      })
++    } catch (e) {
++      if (e instanceof HolooError) throw e
++      throw new HolooError('network', 'ارتباط با سرویس هلو برقرار نشد')
++    }
++    if (res.status === 401 || res.status === 403) {
++      throw new HolooError('auth', 'هلو اعتبارنامه را نپذیرفت (کاربر/رمز/پایگاه داده)', res.status)
++    }
++    if (!res.ok) {
++      throw new HolooError('http', `خطای HTTP ${res.status} در ورود به هلو`, res.status)
++    }
++    const text = await res.text()
++    let body: unknown = text
++    try {
++      body = JSON.parse(text)
++    } catch {
++      /* keep raw text — extractLogin tolerates it */
++    }
++    const parsed = extractLogin(body)
++    if (!parsed.ok || !parsed.token) {
++      await clearHolooToken()
++      throw new HolooError('auth', parsed.error ?? 'ورود به هلو ناموفق بود')
++    }
++    const header = authHeaderValue(parsed.token)
++    await setHolooToken(header)
++    return header
++  }
++
++  /** Cached token or a fresh login. `force` skips the cache. */
++  private async ensureAuth(force = false): Promise<string> {
++    if (!force) {
++      const cached = await getHolooToken()
++      if (cached?.token) return cached.token
++    }
++    return this.login()
++  }
++
++  /** GET a JSON endpoint with ONE automatic re-login+retry on 401. */
++  async get(path: string, params?: Record<string, string | number | undefined>): Promise<HolooListResult> {
++    this.assertConfigured()
++    const attempt = async (auth: string): Promise<Response> =>
++      this.fetchWithTimeout(this.url(path, params), {
++        method: 'GET',
++        headers: { Authorization: auth, Accept: 'application/json' },
++      })
++    let res = await attempt(await this.ensureAuth())
++    if (res.status === 401 || res.status === 403) {
++      // exactly ONE re-login (spec: token freshness without loops)
++      const fresh = await this.login()
++      res = await attempt(fresh)
++    }
++    if (!res.ok) {
++      throw new HolooError('http', `خطای HTTP ${res.status} از هلو برای ${path}`, res.status)
++    }
++    const text = await res.text()
++    try {
++      const raw = JSON.parse(text)
++      return { raw, items: extractItems(raw) }
++    } catch {
++      throw new HolooError('invalid-response', `پاسخ غیر JSON از هلو برای ${path}`)
++    }
++  }
++
++  /** Read-only probe for the connection-test endpoint (never throws). */
++  async probe(path: string, params?: Record<string, string | number | undefined>): Promise<HolooEndpointProbe> {
++    const shortClient = new HolooClient(this.cfg, { timeoutMs: PROBE_TIMEOUT_MS })
++    try {
++      const { raw, items } = await shortClient.get(path, params)
++      let shape = 'object'
++      let count: number | undefined
++      let sampleKeys: string[] | undefined
++      if (Array.isArray(raw)) {
++        shape = `array(${raw.length})`
++        count = raw.length
++      } else if (typeof raw === 'number') {
++        shape = 'number'
++      } else if (raw && typeof raw === 'object') {
++        const keys = Object.keys(raw as Record<string, unknown>)
++        shape = `object(${keys.length} keys)`
++        const first = items[0]
++        if (first) sampleKeys = Object.keys(first).slice(0, 12)
++      }
++      return { path, ok: true, status: 200, shape, count, sampleKeys }
++    } catch (e) {
++      const he = e instanceof HolooError ? e : null
++      return {
++        path,
++        ok: false,
++        status: he?.status ?? 0,
++        shape: '-',
++        error: holooSafeError(e),
++      }
++    }
++  }
++}
++
++/** Tolerant record-list extraction: direct arrays, wrapped lists
++ *  ({data:[…]} / {List:[…]} / …) or a single record object. */
++export function extractItems(raw: unknown): Record<string, unknown>[] {
++  if (Array.isArray(raw)) return raw.filter((r): r is Record<string, unknown> => !!r && typeof r === 'object')
++  if (raw && typeof raw === 'object') {
++    const o = raw as Record<string, unknown>
++    for (const k of ['data', 'Data', 'list', 'List', 'items', 'Items', 'records', 'Records', 'Result', 'result']) {
++      const v = o[k]
++      if (Array.isArray(v)) return v.filter((r): r is Record<string, unknown> => !!r && typeof r === 'object')
++    }
++    // a single record (e.g. get-by-code style endpoints)
++    return [o]
++  }
++  return []
++}
++
++// ── tolerant field mappers (multi-casing; every candidate documented) ──
++
++export function fStr(rec: Record<string, unknown>, keys: string[]): string | null {
++  const v = pick(rec, keys)
++  if (v === undefined) return null
++  const s = String(v).trim()
++  return s === '' ? null : s
++}
++
++export function fNum(rec: Record<string, unknown>, keys: string[]): number | null {
++  const v = pick(rec, keys)
++  if (v === undefined || v === null || v === '') return null
++  const n = typeof v === 'number' ? v : Number(String(v).replace(/,/g, ''))
++  return Number.isFinite(n) ? n : null
++}
++
++export function fBool(rec: Record<string, unknown>, keys: string[], def: boolean): boolean {
++  const v = pick(rec, keys)
++  if (v === undefined || v === null || v === '') return def
++  if (typeof v === 'boolean') return v
++  const s = String(v).toLowerCase()
++  if (s === 'true' || s === '1' || s === 'yes') return true
++  if (s === 'false' || s === '0' || s === 'no') return false
++  return def
++}
++
++/** Stable content hash of a Holoo record — the change-detection key.
++ *  Canonical JSON (recursively sorted keys) → sha256. */
++export function holooContentHash(rec: Record<string, unknown>): string {
++  const canonical = (v: unknown): unknown => {
++    if (Array.isArray(v)) return v.map(canonical)
++    if (v && typeof v === 'object') {
++      const o: Record<string, unknown> = {}
++      for (const k of Object.keys(v as Record<string, unknown>).sort()) {
++        o[k] = canonical((v as Record<string, unknown>)[k])
++      }
++      return o
++    }
++    return v
++  }
++  return createHash('sha256').update(JSON.stringify(canonical(rec))).digest('hex')
++}

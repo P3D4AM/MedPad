@@ -329,12 +329,24 @@ if curl -s -o /dev/null --max-time 8 https://fcm.googleapis.com/ && [ -n "${KEYS
   EID=$(curl -s -b $W/cj $BASE/api/employees | py "import json,sys;print(json.load(sys.stdin)['employees'][0]['id'])")
   curl -s -b $W/cj -X POST $BASE/api/assignments -H 'content-type: application/json' \
     -d "{\"customerId\":\"$CID\",\"employeeId\":\"$EID\"}" -o /dev/null
+  # owner fix batch (phase 8): the ASSIGNMENT no longer creates a
+  # PanelNotification (the admin is the ACTOR — they must not be notified
+  # «به شما اختصاص داده شد»). The rep-facing AppNotification IS created.
+  # The live-push proof therefore fires a CHECK-IN — a real app event that
+  # still surfaces to the manager via notifyAdmin.
+  sleep 4
+  ATOK=$(curl -s -X POST $BASE/api/app/login -H 'content-type: application/json' \
+    -d '{"username":"sc_rep1","password":"RepPass123!"}' | py 'import json,sys;print(json.load(sys.stdin)["token"])')
+  curl -s -X POST $BASE/api/app/checkin -H "x-medpad-token: $ATOK" \
+    -F "customerId=$CID" -F "localId=sc9-checkin-1" -F "note=تست" -o /dev/null
   sleep 4
   curl -s -b $W/cj $BASE/api/admin/settings -o $W/s5.json
   chk "SC9 push sent; dead 404 subscription pruned" \
     "py \"import json;d=json.load(open('$W/s5.json'));exit(0 if d['push']['subscriptions']==0 else 1)\""
-  chk "SC9 the notification itself persisted (center still works)" \
+  chk "SC9 the check-in notification persisted (center still works)" \
     "py \"import sqlite3;c=sqlite3.connect('$DB');exit(0 if c.execute('SELECT COUNT(*) FROM PanelNotification').fetchone()[0]>=1 else 1)\""
+  chk "SC9 assignment itself creates NO admin notification (owner fix, phase 8)" \
+    "py \"import sqlite3;c=sqlite3.connect('$DB');exit(0 if c.execute(\\\"SELECT COUNT(*) FROM PanelNotification WHERE body LIKE '%اختصاص%'\\\").fetchone()[0]==0 else 1)\""
 else
   s "SC9 live push wiring (FCM or node crypto unavailable)"
 fi

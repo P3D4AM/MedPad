@@ -1,0 +1,12 @@
+var R=require("../../../../../chunks/[turbopack]_runtime.js")("server/app/api/admin/holoo/status/route.js")
+R.c("server/chunks/[externals]__0m2tvz3vlcl6b._.js")
+R.c("server/chunks/src_lib_holoo-config_ts_1egu8t31qrh_q._.js")
+R.c("server/chunks/src_lib_holoo_ts_0d1rig_719i12._.js")
+R.c("server/chunks/src_lib_holoo-sync_ts_0go6ppwg-j73j._.js")
+R.c("server/chunks/[root-of-the-server]__1v1-l-83czzsr._.js")
+R.c("server/chunks/[root-of-the-server]__0v3n36cech4i9._.js")
+R.c("server/chunks/_0c8j9qz4qf46z._.js")
+R.c("server/chunks/src_lib_iran-cities_ts_1oooijdptramy._.js")
+R.c("server/chunks/_next-internal_server_app_api_admin_holoo_status_route_actions_15be1wzo0m5lh.js")
+R.m(946)
+module.exports=R.m(946).exports
