@@ -1756,3 +1756,21 @@ Stage Summary (Task 63 — انتشار):
 - **Release prerelease id 437494845 با ۴ asset** (APK · ZIP · SHA1SUMS · SHA256SUMS) → **دانلود-برگشتی از GitHub: هر دو فایل بایت‌به‌بایت یکسان + SHA-256/SHA-1 مطابق + unzip -t سالم.** https://github.com/P3D4AM/MedPad/releases/tag/v1.9.15-dev.1 — ۱۳ ریلیز زنده.
 - کپی keystore دیباگ به مالک: `download/medpad-debug-keystore-v1.9.15-dev.1.keystore`.
 - وضعیت: **DONE_VERIFIED**. قدم بعدی: بازخورد مالک روی ۱۷ مورد (به‌ویژه پخش iOS، همگام‌سازی مشتریان پس از تعویض کاربر، و اعلان‌ها)؛ سپس فاز ۵ (جغرافیای مشهد) طبق نقشهٔ §۸.
+
+---
+
+Task ID: 64
+Agent: main (Z.ai — Holoo integration session)
+Task: فاز صفر پروژه یکپارچه‌سازی Holoo API — بررسی کامل و طراحی (دستور جامع مالک Nov 10)
+Date: Nov 10, 2026
+
+Work Log:
+- کلون تازه develop @ `1051aa2` (همگام ریموت)؛ `main` دست‌نخورده (`8db3319`)؛ آخرین ریلیز v1.9.15-dev.1. بازسازی سورس پنل با زنجیرهٔ ۱۸-وصله‌ای در /home/z/panel-work (بدون تخریب چیزی در ریپو).
+- بررسی: اسکیمای Prisma + instrumentation (الگوی DDL idempotent) + auth + settings + customer360 + مسیرهای API + Dashboard + اپ اندروید (Room v14، CheckinSync LWW، CustomerProfileActivity با تب خریدهای source-aware) + الگوی تست‌های audit-tests.
+- یافتهٔ کلیدی: طرح آداپتور هلو در CUSTOMER360-PHASE1 از قبل مستند است (Purchase.source='holoo' + externalId یکتا) — این پروژه همان طرح را عملی می‌کند؛ ErpCustomer/ErpProduct/ErpPayment/HolooSyncLog جدید + Customer.erpCode + Purchase.holooJson؛ کلاینت هلو بدون وابستگی جدید (fetch سراسری Node 24)؛ زمان‌بند در instrumentation (بدون زیرساخت موازی).
+- ریسک‌ها و برخورد: ریز اقلام فاکتور اثبات‌نشده (کاوش فقط-خواندنی + مستندسازی)، فیلترهای تاریخ نامعلوم (پیش‌فرض مقایسهٔ کامل با contentHash)، تاریخ شمسی (toGregorian موجود)، رمز قابل‌بازیافت (Config سمت سرور + ماسک دائمی در API)، بدون سرویس واقعی (Mock صریح).
+- گزارش فنی کامل: HOLOO-PHASE0-REPORT-fa.md.
+
+Stage Summary (Task 64 — فاز صفر):
+- خروجی: نقشهٔ تغییرات + جدول ریسک + گزارش فنی. هیچ کدی تغییر نکرد (فارغ از مستندات).
+- وضعیت: DONE. گام بعدی: Phase 1 (زیرساخت اتصال) طبق همین نقشه.
