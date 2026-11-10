@@ -17,8 +17,9 @@ import android.database.sqlite.SQLiteDatabase
  */
 object MigrationTestFixtures {
 
-    /** the doctors DDL fragments Room generates for the v14 columns
-     *  (NOTE: `active` carries NO DEFAULT clause in Room's output — the
+    /** the doctors DDL fragments Room generates for the post-v13 columns
+     *  (Customer-360 v14 additions + the Holoo-integration v15 additions;
+     *  NOTE: `active` carries NO DEFAULT clause in Room's output — the
      *  Kotlin default lives in the entity, not the DDL) */
     private val CUSTOMER_360_DOCTOR_COLUMNS = listOf(
         ", `lastName` TEXT",
@@ -31,6 +32,9 @@ object MigrationTestFixtures {
         ", `notes` TEXT",
         ", `active` INTEGER NOT NULL",
         ", `pendingLocalId` TEXT",
+        ", `erpCode` TEXT",
+        ", `erpMandeh` REAL",
+        ", `erpCredit` REAL",
     )
 
     /** rebuild `doctors` without the Customer-360 columns; keeps data. */

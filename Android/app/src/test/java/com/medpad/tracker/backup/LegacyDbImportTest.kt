@@ -301,7 +301,10 @@ class LegacyDbImportTest {
     @Test
     fun `future schema is rejected honestly`() = runBlocking {
         val future = buildV6()
-        SQLiteDatabase.openDatabase(future.path, null, SQLiteDatabase.OPEN_READWRITE).use { it.version = 15 }
+        // one version ABOVE whatever the app currently runs — a v6-shaped
+        // file claiming to BE the current schema would instead fail Room's
+        // open-time validation (a different, misleading error code)
+        SQLiteDatabase.openDatabase(future.path, null, SQLiteDatabase.OPEN_READWRITE).use { it.version = BackupManager.CURRENT_SCHEMA_VERSION + 1 }
         val target = newDb("legacy-target-future.db")
         try {
             BackupManager.importLegacyDb(app, target, future, "test")

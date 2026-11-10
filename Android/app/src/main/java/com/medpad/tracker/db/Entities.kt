@@ -51,6 +51,13 @@ data class Doctor(
     val active: Boolean = true,
     /** non-null only on rows created offline (pending queue); null otherwise */
     val pendingLocalId: String? = null,
+    // ── Holoo integration (phase 1) — additive, nullable, default-null.
+    // erpCode is the bridge to the Holoo mirror; mandeh/credit are the
+    // READ-ONLY accounting values synced from the server's ErpCustomer
+    // (never edited on the device — ownership stays Holoo-side).
+    val erpCode: String? = null,
+    val erpMandeh: Double? = null,
+    val erpCredit: Double? = null,
 ) {
     /** Display name — given + family name when the split exists. */
     val fullName: String get() = if (lastName.isNullOrBlank()) name else "$name $lastName"

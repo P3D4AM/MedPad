@@ -56,6 +56,9 @@ class Migration13to14Test {
                 ", `managerName` TEXT", ", `phone2` TEXT", ", `district` TEXT",
                 ", `postalCode` TEXT", ", `notes` TEXT",
                 ", `active` INTEGER NOT NULL", ", `pendingLocalId` TEXT",
+                // Holoo integration (phase 1) v15 columns — also absent on a
+                // real v13 install, so the 14→15 step re-runs for real too
+                ", `erpCode` TEXT", ", `erpMandeh` REAL", ", `erpCredit` REAL",
             ).forEach { col -> v13 = v13.replace(col, "") }
             assertTrue("downgrade DDL must differ (profile columns removed)", v13 != sql)
             raw.execSQL("DROP TABLE IF EXISTS doctors_v13")

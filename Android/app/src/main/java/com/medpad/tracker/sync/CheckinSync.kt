@@ -352,6 +352,20 @@ object CheckinSync {
 
     // ── doctors LWW sync ────────────────────────────────────
 
+    /** Holoo integration (phase 1) — the ERP accounting mirror parsed from
+     *  one /api/app/customers row: erpCode comes from the customer row
+     *  itself; mandeh/credit from the additive `erp` block. Absent block
+     *  (old servers / unlinked customers) → nulls. PURE function — unit
+     *  tested in ErpMirrorParseTest. */
+    fun parseErpMirror(o: org.json.JSONObject): Triple<String?, Double?, Double?> {
+        val erp = o.optJSONObject("erp")
+        fun d(key: String): Double? = erp?.let {
+            if (it.isNull(key)) null else it.optDouble(key, Double.NaN).takeIf { v -> !v.isNaN() }
+        }
+        val code = o.optString("erpCode", null)?.takeIf { it.isNotEmpty() && it != "null" }
+        return Triple(code, d("mandeh"), d("credit"))
+    }
+
     /** owner fix (customers not syncing between devices/users): the sync
      *  watermark + the employee it belongs to, persisted in their own prefs
      *  file. The OLD watermark was the local MAX(updatedAt) of the doctor
@@ -400,6 +414,7 @@ object CheckinSync {
                 // LWW guard: skip older versions (panel edit racing with sync)
                 val existing = db.doctorDao().byId(o.optString("id"))
                 if (existing != null && existing.updatedAt > updatedMs) continue
+                val erpMirror = parseErpMirror(o)
                 list.add(
                     Doctor(
                         id = o.getString("id"),
@@ -430,6 +445,11 @@ object CheckinSync {
                         notes = o.optString("notes", null),
                         active = o.optBoolean("active", true),
                         pendingLocalId = existing?.pendingLocalId,
+                        // ── Holoo integration (phase 1): the read-only ERP
+                        // accounting mirror (see parseErpMirror).
+                        erpCode = erpMirror.first,
+                        erpMandeh = erpMirror.second,
+                        erpCredit = erpMirror.third,
                     )
                 )
             }

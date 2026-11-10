@@ -435,6 +435,14 @@
     <string name="purchases_empty">اطلاعات خریدی ثبت نشده — پس از اتصال به سامانهٔ هلو نمایش داده می‌شود</string>
     <string name="purchase_invoice">فاکتور</string>
     <string name="purchase_source_holoo">هلو</string>
+    <!-- Holoo integration (phase 1) — the read-only accounting mirror -->
+    <string name="holoo_financial_title">اطلاعات مالی هلو</string>
+    <string name="holoo_mandeh">مانده حساب</string>
+    <string name="holoo_credit">اعتبار</string>
+    <string name="holoo_code">کد هلو</string>
+    <string name="holoo_recent_payments">آخرین پرداخت‌ها:</string>
+    <string name="holoo_inactive">این طرف‌حساب در هلو غیرفعال است</string>
+    <string name="holoo_not_linked">این مشتری هنوز به هلو متصل نشده است — پس از فعال‌سازی سینک هلو، اطلاعات مالی اینجا نمایش داده می‌شود</string>
     <string name="purchase_source_manual">دستی</string>
     <string name="purchase_total">مبلغ</string>
     <string name="visits_empty">هنوز ویزیتی برای این مشتری ثبت نشده است</string>

@@ -87,6 +87,10 @@ class Migration9to10Test {
                     .replace(", `notes` TEXT", "")
                     .replace(", `active` INTEGER NOT NULL", "")
                     .replace(", `pendingLocalId` TEXT", "")
+                    // Holoo integration (phase 1) — the v15 columns neither
+                    .replace(", `erpCode` TEXT", "")
+                    .replace(", `erpMandeh` REAL", "")
+                    .replace(", `erpCredit` REAL", "")
                 assertTrue("downgrade DDL must differ (columns removed)", v9Ddl != sql)
                 raw.execSQL(v9Ddl.replace("CREATE TABLE `doctors`", "CREATE TABLE `doctors_v9`"))
                 raw.execSQL(

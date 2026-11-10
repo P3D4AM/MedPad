@@ -313,6 +313,34 @@ class CustomerProfileActivity : AppCompatActivity() {
             boxContent.addView(noteBox(it))
         }
 
+        // ── Holoo integration (phase 1): the accounting mirror — balance,
+        // credit and the latest payments, straight from the cached profile
+        // (offline-friendly). Explicit empty state when not linked. ──
+        val erp = p.optJSONObject("erpAccount")
+        if (erp != null) {
+            val sub = mutableListOf(
+                "${getString(R.string.holoo_mandeh)}: ${fa(erp.optDouble("mandeh", 0.0))}",
+                "${getString(R.string.holoo_credit)}: ${fa(erp.optDouble("credit", 0.0))}",
+            )
+            erp.optString("code", null)?.takeIf { it.isNotEmpty() && it != "null" }?.let {
+                sub.add("${getString(R.string.holoo_code)}: $it")
+            }
+            val pays = p.optJSONArray("erpPayments")
+            if (pays != null && pays.length() > 0) {
+                val shown = minOf(pays.length(), 5)
+                sub.add(getString(R.string.holoo_recent_payments))
+                for (i in 0 until shown) {
+                    val pay = pays.optJSONObject(i) ?: continue
+                    val d = parseIsoJalali(pay.optString("date"))?.let { JalaliDate.formatFa(it) } ?: ""
+                    sub.add("  · $d — ${fa(pay.optDouble("price", 0.0))}")
+                }
+            }
+            if (!erp.optBoolean("active", true)) sub.add(getString(R.string.holoo_inactive))
+            boxContent.addView(cardRow(getString(R.string.holoo_financial_title), sub.joinToString("\n")))
+        } else {
+            boxContent.addView(noteBox(getString(R.string.holoo_not_linked)))
+        }
+
         if (count == 0) {
             boxContent.addView(emptyState(getString(R.string.purchases_empty)))
             return

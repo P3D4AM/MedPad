@@ -69,9 +69,9 @@ object BackupManager {
     const val FORMAT_VERSION = 1
     const val APP_NAME = "MedPad"
 
-    /** MUST match @Database(version = 14) in AppDatabase — asserted by the
+    /** MUST match @Database(version = 15) in AppDatabase — asserted by the
      *  unit tests so a future bump cannot silently diverge. */
-    const val CURRENT_SCHEMA_VERSION = 14
+    const val CURRENT_SCHEMA_VERSION = 15
 
     /** the minimum legacy schema the Room migration chain can upgrade */
     const val MIN_LEGACY_SCHEMA_VERSION = 4
