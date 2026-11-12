@@ -1098,6 +1098,17 @@ async function main() {
   mkdirSync(path.join(panelDir, 'uploads', 'voice'), { recursive: true })
   await lockDown(path.join(panelDir, 'db'), 'dir', 'panel/db') // v1.9.12
   try { const dbp = path.join(panelDir, 'db', 'custom.db'); if (existsSync(dbp)) await lockDown(dbp, 'file', 'panel/db/custom.db') } catch { /* fresh install - no db yet */ }
+  // v1.9.15-dev.2 (Task 67): the per-install Holoo AES-256-GCM master key
+  // lives at panel/db/holoo.key — created LAZILY by the panel at first use,
+  // OUTSIDE SQLite. The installer must NEVER create, replace or delete it
+  // (the encrypted credentials would become unrecoverable). It travels with
+  // the db/ folder through the upgrade backup/restore path, and only its
+  // PERMISSIONS are (re-)applied here. Windows: the key inherits the
+  // user-only inheritable ACL the installer puts on panel/db.
+  try {
+    const holooKey = path.join(panelDir, 'db', 'holoo.key')
+    if (existsSync(holooKey)) await lockDown(holooKey, 'file', 'panel/db/holoo.key')
+  } catch { /* no key yet — nothing to lock down */ }
   // v1.9.12 (phase 0): fresh-clone safety net. The empty SQLite template
   // ships as app/panel/db/template.db (db/custom.db is git-ignored so real
   // user data can never enter git). When the staged install has NO database

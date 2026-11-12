@@ -36,7 +36,16 @@
 #           GetCustPay sends BOTH documented parameter spellings `code` +
 #           `customerErpCode`, the spec-§9 «partial» (ناقص) sync status,
 #           lastSuccess in the status view, and a REAL sample code on the
-#           GetCustPay connection-test probe — last)
+#           GetCustPay connection-test probe) →
+#           phase11-holoo-secret-encryption (Task 67, Nov 2026: Holoo
+#           credentials at rest move from Base64 to AES-256-GCM envelopes
+#           (enc1:) keyed by a per-install master key file OUTSIDE SQLite
+#           (panel/db/holoo.key — atomic creation, chmod 600 Linux /
+#           user-only inherited ACL Windows); lazy ATOMIC migration of the
+#           legacy Base64 value; explicit passwordError surfaced to the
+#           admin on a missing/wrong/corrupt key WITHOUT ever wiping the
+#           stored settings; the cached token is encrypted too and simply
+#           discarded (one re-login) when it cannot be recovered — last)
 #
 # This script performs the WHOLE reproducible pipeline and verifies it:
 #   1. fresh extraction of the base source (git archive)
@@ -72,7 +81,7 @@ set -euo pipefail
 REPO_ROOT="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
 WORK="${2:-$REPO_ROOT/panel-build}"
 BASE_REF="bd9c80b:medpad-full-1.9/inst-stage/panel-src"
-CHAIN="phase1-task1 phase2-remediation phase2-task1 phase2-task2 phase2-dev2-fixes phase2-package4 phase2-madrep phase2-package6 phase2-package7 phase2-package9 phase2-package5 phase2-package13 phase3-package14 phase4-package15 phase5-package16 phase6-customer360 phase7-central-settings phase8-owner-fixes phase9-holoo phase10-holoo-hardening"
+CHAIN="phase1-task1 phase2-remediation phase2-task1 phase2-task2 phase2-dev2-fixes phase2-package4 phase2-madrep phase2-package6 phase2-package7 phase2-package9 phase2-package5 phase2-package13 phase3-package14 phase4-package15 phase5-package16 phase6-customer360 phase7-central-settings phase8-owner-fixes phase9-holoo phase10-holoo-hardening phase11-holoo-secret-encryption"
 
 # RESUME mode (sandbox convenience): with MEDPAD_BUILD_RESUME=1 an existing
 # $WORK/src with node_modules (from an interrupted run — e.g. a sandbox that
@@ -101,7 +110,7 @@ fi
 if [ "$RESUME" = "1" ]; then
   say "2/9 RESUME — patch chain already applied (verified by the marker below)"
 else
-  say "2/9 applying 20-patch chain"
+  say "2/9 applying 21-patch chain"
   cd "$WORK/src"
   for p in $CHAIN; do
     patchfile="$REPO_ROOT/patches/panel-src-$p.patch"
@@ -135,6 +144,16 @@ grep -q "errors.length ? 'partial' : 'success'" "$WORK/src/src/lib/holoo-sync.ts
   || die "phase10 missing: partial sync status"
 grep -q "lastSuccess" "$WORK/src/src/components/panel/HolooTab.tsx" \
   || die "phase10 missing: lastSuccess in the tab"
+# phase 11 markers (Task 67 — AES-256-GCM secret encryption)
+[ -f "$WORK/src/src/lib/holoo-secret.ts" ] || die "patch chain did not produce src/lib/holoo-secret.ts"
+grep -q "aes-256-gcm" "$WORK/src/src/lib/holoo-secret.ts" \
+  || die "phase11 missing: aes-256-gcm in holoo-secret.ts"
+grep -q "passwordError" "$WORK/src/src/lib/holoo-config.ts" \
+  || die "phase11 missing: passwordError in holoo-config.ts"
+grep -q "passwordWire" "$WORK/src/src/lib/holoo.ts" \
+  || die "phase11 missing: passwordWire in the client"
+grep -q "passwordError" "$WORK/src/src/components/panel/HolooTab.tsx" \
+  || die "phase11 missing: passwordError banner in the tab"
 cd "$WORK/src"
 
 # ── 3. npm install ──────────────────────────────────────────────────────────
@@ -237,7 +256,15 @@ chk "holoo tab UI chunks"           "grep -rq 'اطلاعات مالی هلو' -
 chk "holoo GetCustPay dual param"   "grep -rq 'customerErpCode:' .next/server --include='*.js' && grep -rq 'GetCustPay' .next/server --include='*.js'"
 chk "holoo partial status in server" "grep -rq '\"partial\"' .next/server --include='*.js' || grep -rq 'partial' .next/server/app/api/admin/holoo --include='*.js'"
 chk "holoo tab: ناقص badge + lastSuccess" "grep -rq 'ناقص' --include='*.js' . && grep -rq 'آخرین همگام‌سازی موفق' --include='*.js' ."
-echo "   hardening: PASS=$P FAIL=$F / 44"
+# phase 11 (Task 67 — secret encryption): the crypto module + envelope
+# format + error surfacing must ship in the built server, the UI banner in
+# the client chunks, and NO key file may ever ship in the bundle
+chk "holoo-secret module in server"   "grep -rq 'aes-256-gcm' .next/server --include='*.js'"
+chk "holoo enc1 envelope in server"   "grep -rq 'enc1:' .next/server --include='*.js'"
+chk "holoo passwordError surfaced"    "grep -rq 'passwordError' .next/server --include='*.js'"
+chk "holoo tab error banner chunks"   "grep -rq 'رمز ذخیره‌شده حذف نشده است' --include='*.js' ."
+chk "no holoo.key file in bundle"     "[ -z "$(find . -name 'holoo.key' -print -quit)" ]"
+echo "   hardening: PASS=$P FAIL=$F / 49"
 LAST_HARDENING="$P/$F PASS"
 [ "$F" -eq 0 ] || die "hardening checks failed"
 

@@ -24,6 +24,10 @@ Android/keystore/medpad-release.properties
 tunnel-creds/
 *.pem
 *.key
+# … includes panel/db/holoo.key — the per-install Holoo AES-256-GCM master
+# key (Task 67). It is runtime state OUTSIDE SQLite, must never enter git,
+# the release ZIP or any report.
+holoo.key
 
 # Stray build outputs & local junk (NOT the tracked vendored ones)
 # The repo IS the offline bundle: the prebuilt .next/ at app/panel/.next
