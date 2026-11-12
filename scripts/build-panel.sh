@@ -31,7 +31,12 @@
 #           lib/holoo{,-config,-sync} client/settings/orchestrator with the
 #           boot-started periodic scheduler, 5 admin /api/admin/holoo/*
 #           routes, erp blocks on the app customers/profile APIs, the
-#           «هلو» dashboard tab + the 360 profile financial block — last)
+#           «هلو» dashboard tab + the 360 profile financial block) →
+#           phase10-holoo-hardening (Nov 2026 spec-compliance fixes:
+#           GetCustPay sends BOTH documented parameter spellings `code` +
+#           `customerErpCode`, the spec-§9 «partial» (ناقص) sync status,
+#           lastSuccess in the status view, and a REAL sample code on the
+#           GetCustPay connection-test probe — last)
 #
 # This script performs the WHOLE reproducible pipeline and verifies it:
 #   1. fresh extraction of the base source (git archive)
@@ -67,7 +72,7 @@ set -euo pipefail
 REPO_ROOT="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
 WORK="${2:-$REPO_ROOT/panel-build}"
 BASE_REF="bd9c80b:medpad-full-1.9/inst-stage/panel-src"
-CHAIN="phase1-task1 phase2-remediation phase2-task1 phase2-task2 phase2-dev2-fixes phase2-package4 phase2-madrep phase2-package6 phase2-package7 phase2-package9 phase2-package5 phase2-package13 phase3-package14 phase4-package15 phase5-package16 phase6-customer360 phase7-central-settings phase8-owner-fixes phase9-holoo"
+CHAIN="phase1-task1 phase2-remediation phase2-task1 phase2-task2 phase2-dev2-fixes phase2-package4 phase2-madrep phase2-package6 phase2-package7 phase2-package9 phase2-package5 phase2-package13 phase3-package14 phase4-package15 phase5-package16 phase6-customer360 phase7-central-settings phase8-owner-fixes phase9-holoo phase10-holoo-hardening"
 
 # RESUME mode (sandbox convenience): with MEDPAD_BUILD_RESUME=1 an existing
 # $WORK/src with node_modules (from an interrupted run — e.g. a sandbox that
@@ -96,7 +101,7 @@ fi
 if [ "$RESUME" = "1" ]; then
   say "2/9 RESUME — patch chain already applied (verified by the marker below)"
 else
-  say "2/9 applying 13-patch chain"
+  say "2/9 applying 20-patch chain"
   cd "$WORK/src"
   for p in $CHAIN; do
     patchfile="$REPO_ROOT/patches/panel-src-$p.patch"
@@ -123,6 +128,13 @@ fi
 [ -f "$WORK/src/src/lib/holoo.ts" ] || die "patch chain did not produce src/lib/holoo.ts"
 [ -f "$WORK/src/src/lib/holoo-sync.ts" ] || die "patch chain did not produce src/lib/holoo-sync.ts"
 [ -f "$WORK/src/src/components/panel/HolooTab.tsx" ] || die "patch chain did not produce HolooTab.tsx"
+# phase 10 markers (Holoo hardening — dual GetCustPay param + partial status)
+grep -q "customerErpCode: erpCode, code: erpCode" "$WORK/src/src/lib/holoo-sync.ts" \
+  || die "phase10 missing: GetCustPay dual parameter"
+grep -q "errors.length ? 'partial' : 'success'" "$WORK/src/src/lib/holoo-sync.ts" \
+  || die "phase10 missing: partial sync status"
+grep -q "lastSuccess" "$WORK/src/src/components/panel/HolooTab.tsx" \
+  || die "phase10 missing: lastSuccess in the tab"
 cd "$WORK/src"
 
 # ── 3. npm install ──────────────────────────────────────────────────────────
@@ -158,6 +170,9 @@ echo "   compiled (log: $WORK/build.log)"
 
 # ── 6. canonical assembly (cp -rL — NO symlinks, ever) ─────────────────────
 say "6/9 canonical bundle assembly {BUILD_ID, standalone, static}"
+# wipe any previous assembly (RESUME mode reuses $WORK — without this the
+# bundle accumulates STALE <BUILD_ID> manifest dirs from earlier runs)
+rm -rf "$WORK/bundle"
 mkdir -p "$WORK/bundle/.next"
 cp .next/BUILD_ID               "$WORK/bundle/.next/"
 cp -rL .next/static             "$WORK/bundle/.next/"
@@ -217,7 +232,12 @@ chk "api: holoo status"            "[ -f .next/server/app/api/admin/holoo/status
 chk "api: holoo products"          "[ -f .next/server/app/api/admin/holoo/products/route.js ]"
 chk "holoo client in server"        "grep -rq 'userinfo' .next/server --include='*.js'"
 chk "holoo tab UI chunks"           "grep -rq 'اطلاعات مالی هلو' --include='*.js' ."
-echo "   hardening: PASS=$P FAIL=$F / 41"
+# phase 10 (Holoo hardening): dual GetCustPay param + partial status +
+# lastSuccess must ship in the built server/client chunks
+chk "holoo GetCustPay dual param"   "grep -rq 'customerErpCode:' .next/server --include='*.js' && grep -rq 'GetCustPay' .next/server --include='*.js'"
+chk "holoo partial status in server" "grep -rq '\"partial\"' .next/server --include='*.js' || grep -rq 'partial' .next/server/app/api/admin/holoo --include='*.js'"
+chk "holoo tab: ناقص badge + lastSuccess" "grep -rq 'ناقص' --include='*.js' . && grep -rq 'آخرین همگام‌سازی موفق' --include='*.js' ."
+echo "   hardening: PASS=$P FAIL=$F / 44"
 LAST_HARDENING="$P/$F PASS"
 [ "$F" -eq 0 ] || die "hardening checks failed"
 

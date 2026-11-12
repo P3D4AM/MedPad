@@ -10,7 +10,12 @@
 //   POST {base}/Login  body {"userinfo":{"username","userpass(base64)","dbname"}}
 //        → {"Login":{"State":"True","Token":"Bearer <tok>","ErrorCode":0,"Error":""}}
 //   GET  {base}/Customer | /Product | /Invoice          (Authorization: Bearer <tok>)
-//   GET  {base}/Report/GetCustPay?customerErpCode=…     (per-customer payments)
+//   GET  {base}/Report/GetCustPay?customerErpCode=…&code=… (per-customer
+//        payments — BOTH documented parameter spellings are accepted; the
+//        owner spec §4 names `code`, public TncHoloo clients send
+//        `customerErpCode`; same value either way)
+//   state.failPay=true → 500 on GetCustPay (exercises the spec-§9 PARTIAL
+//        run: healthy sections keep their data, the run is labeled ناقص)
 //   401 (JSON) when the Authorization header is missing/unknown — exercising
 //   the client's ONE auto re-login.
 //
@@ -105,7 +110,8 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && path.endsWith('/Product')) return json(200, state.products)
   if (req.method === 'GET' && path.endsWith('/Invoice')) return json(200, state.invoices)
   if (req.method === 'GET' && path.endsWith('/Report/GetCustPay')) {
-    const code = url.searchParams.get('customerErpCode') ?? ''
+    if (state.failPay) return json(500, { error: 'simulated GetCustPay outage (MOCK)' })
+    const code = url.searchParams.get('customerErpCode') ?? url.searchParams.get('code') ?? ''
     const all = state.payments[code] ?? []
     return json(200, all)
   }

@@ -12,8 +12,11 @@
 #       bad base URL / out-of-range interval; PUT persists; the password
 #       NEVER comes back (hasPassword only); audit row written
 #   H2  connection test: 400 while unconfigured; with credentials a REAL
-#       login against the mock + the 5 read-only endpoint probes; the mock
-#       log proves the password traveled BASE64 (never in plain)
+#       login against the mock + the 5 read-only endpoint probes (the
+#       GetCustPay probe carries a REAL sample code + BOTH documented
+#       parameter spellings — spec §4 `code` and the public-client
+#       `customerErpCode`); the mock log proves the password traveled
+#       BASE64 (never in plain)
 #   H3  manual sync: ErpCustomer/ErpProduct/ErpPayment upserts, Purchase
 #       (source='holoo') + the single total line + holooJson, Jalali AND
 #       Gregorian invoice dates, explicit blacklist → active=false while
@@ -26,6 +29,10 @@
 #       vanishes, another changes, an invoice total changes) → re-sync →
 #       the vanished row SURVIVES (absence is never a delete), the changed
 #       rows update, the log counts are honest
+#   H5b PARTIAL sync (spec §9 vocabulary موفق/ناقص/ناموفق): GetCustPay
+#       fails for every customer (mock failPay → 500) → the run is honestly
+#       «partial», the error is recorded, and the healthy sections' data
+#       (customers/products/invoices + prior balances) SURVIVES intact
 #   H6  the boot scheduler: enable (interval=1 min) → an INCREMENTAL run
 #       appears with NO manual trigger (slow — up to ~2 minutes)
 #   H7  security sweep: the plain password / tokens appear in NO API
@@ -167,6 +174,10 @@ chk "H2 Customer probe reports array(3) shape" \
   "py \"import json;d=json.load(open('$W/h_test_ok.json'));e=[x for x in d['endpoints'] if x['path']=='Customer'][0];exit(0 if e['shape']=='array(3)' else 1)\""
 chk "H2 Invoice/Invoice probe honestly 404 (fallback documented)" \
   "py \"import json;d=json.load(open('$W/h_test_ok.json'));e=[x for x in d['endpoints'] if x['path']=='Invoice/Invoice'][0];exit(0 if not e['ok'] and '404' in (e.get('error') or '') else 1)\""
+chk "H2 GetCustPay probe used a REAL sample code (array(2) shape)" \
+  "py \"import json;d=json.load(open('$W/h_test_ok.json'));e=[x for x in d['endpoints'] if x['path']=='Report/GetCustPay'][0];exit(0 if e['ok'] and e['shape']=='array(2)' else 1)\""
+chk "H2 probe wire carried BOTH parameter spellings (code + customerErpCode)" \
+  "grep -q 'Report/GetCustPay?customerErpCode=bBAPcust0001%3D&code=bBAPcust0001%3D' $MOCK_LOG"
 HOLOO_PASS_B64=$(python3 -c "import base64;print(base64.b64encode('$HOLOO_PASS'.encode()).decode())")
 chk "H2 mock saw the password as BASE64 (never plain)" "grep -q 'pass=$HOLOO_PASS_B64' $MOCK_LOG"
 chk "H2 mock log has NO plain password" "! grep -q '$HOLOO_PASS' $MOCK_LOG"
@@ -220,6 +231,8 @@ chk "H3 MedPad Customer.active stays TRUE for the blacklisted one" \
   "py \"import sqlite3;c=sqlite3.connect('$DB');exit(0 if c.execute(\\\"SELECT c.active FROM Customer c JOIN ErpCustomer e ON c.erpCode=e.erpCode WHERE e.erpCode='bBAPcust0003='\\\").fetchone()[0]==1 else 1)\""
 chk "H3 every MedPad customer is now Holoo-linked (3 total, 0 unlinked)" \
   "py \"import sqlite3;c=sqlite3.connect('$DB');total=c.execute('SELECT COUNT(*) FROM Customer').fetchone()[0];nulls=c.execute('SELECT COUNT(*) FROM Customer WHERE erpCode IS NULL').fetchone()[0];exit(0 if total==3 and nulls==0 else 1)\""
+chk "H3 every sync GetCustPay fetch carried BOTH parameter spellings" \
+  "TOTAL=\$(grep -c 'Report/GetCustPay?customerErpCode=' $MOCK_LOG); SINGLE=\$(grep -c 'Report/GetCustPay?customerErpCode=[^&]* auth' $MOCK_LOG); [ \"\$TOTAL\" -ge 4 ] && [ \"\$SINGLE\" -eq 0 ]"
 
 # ── H4: app APIs carry the erp blocks ────────────────────────────────
 echo "== H4: app APIs =="
@@ -294,6 +307,45 @@ chk "H5 changed invoice total line updated (1500000 → 1800000)" \
   "py \"import sqlite3;c=sqlite3.connect('$DB');exit(0 if c.execute(\\\"SELECT pi.total FROM PurchaseItem pi JOIN Purchase p ON pi.purchaseId=p.id WHERE p.externalId='bBAPinv0002='\\\").fetchone()[0]==1800000 else 1)\""
 chk "H5 log counts honest (updated ≥ 2)" \
   "py \"import json;d=json.load(open('$W/h_status2.json'))['sync']['lastRun'];exit(0 if d['updated']>=2 else 1)\""
+chk "H5 run stays SUCCESS — the vanished customer's invoice found its durable link" \
+  "py \"import json;d=json.load(open('$W/h_status2.json'))['sync']['lastRun'];exit(0 if d['status']=='success' and len(d['errors'])==0 else 1)\""
+
+# ── H5b: PARTIAL sync (spec §9 — a failing section never destroys ─────
+#    healthy data; the run is honestly labeled ناقص)
+echo "== H5b: partial sync (GetCustPay outage) =="
+python3 - "$MOCK_STATE" << 'PYEOF'
+import json, sys
+p = sys.argv[1]
+st = json.load(open(p))
+st['failPay'] = True  # GetCustPay → 500 for EVERY customer (MOCK outage)
+json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
+PYEOF
+curl -s -b $W/cj -X POST $BASE/api/admin/holoo/sync -o /dev/null
+SYNC3=1
+for i in $(seq 1 60); do
+  curl -s -b $W/cj $BASE/api/admin/holoo/status -o $W/h_status4.json
+  if py "import json;d=json.load(open('$W/h_status4.json'))['sync'];lr=d['lastRun'];exit(0 if lr['kind']=='manual' and lr['status']!='running' and len(d['recentLogs'])>=3 else 1)"; then SYNC3=0; break; fi
+  sleep 1
+done
+chk "H5b partial sync finished" "[ '$SYNC3' = '0' ]"
+chk "H5b run status=partial (ناقص — spec §9 vocabulary)" \
+  "py \"import json;d=json.load(open('$W/h_status4.json'))['sync']['lastRun'];exit(0 if d['status']=='partial' else 1)\""
+chk "H5b the GetCustPay failure is recorded as a safe classified error" \
+  "py \"import json;d=json.load(open('$W/h_status4.json'))['sync']['lastRun'];exit(0 if len(d['errors'])>=1 and any('GetCustPay' in e for e in d['errors']) else 1)\""
+chk "H5b healthy sections' data SURVIVES (3 customers, 2 products)" \
+  "py \"import sqlite3;c=sqlite3.connect('$DB');exit(0 if c.execute('SELECT COUNT(*) FROM ErpCustomer').fetchone()[0]==3 and c.execute('SELECT COUNT(*) FROM ErpProduct').fetchone()[0]==2 else 1)\""
+chk "H5b prior balances untouched by the failed payment section" \
+  "py \"import sqlite3;c=sqlite3.connect('$DB');exit(0 if c.execute(\\\"SELECT mandeh FROM ErpCustomer WHERE erpCode='bBAPcust0001='\\\").fetchone()[0]==1250000.5 else 1)\""
+chk "H5b lastSuccess still points at the last CLEAN run" \
+  "py \"import json;d=json.load(open('$W/h_status4.json'))['sync'];exit(0 if d['lastSuccess'] and d['lastSuccess']['checked']>0 else 1)\""
+# restore the mock for the scheduler phase
+python3 - "$MOCK_STATE" << 'PYEOF'
+import json, sys
+p = sys.argv[1]
+st = json.load(open(p))
+st.pop('failPay', None)
+json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
+PYEOF
 
 # ── H6: the boot scheduler (slow — real incremental run, no trigger) ──
 echo "== H6: scheduler =="

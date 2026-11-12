@@ -1,0 +1,254 @@
+# panel-src phase 10 — Holoo integration hardening (Nov 2026, post-Task-65
+# spec-compliance audit against the owner's integration specification)
+#
+# Five targeted fixes, all server-side, NO schema/DDL/API-contract change:
+#  * src/lib/holoo.ts — holooSafeError now passes plain-string errors
+#    through (they are OUR internal safe messages, e.g. the invoice-
+#    without-linked-customer notice) instead of collapsing them into an
+#    uninformative [unknown] in the sync log (spec §9 error reporting).
+#  * src/lib/holoo-sync.ts — GetCustPay now sends BOTH documented parameter
+#    spellings (`code` per owner spec §4 AND `customerErpCode` per the public
+#    TncHoloo clients) with the SAME value, so whichever the real service
+#    recognizes yields payments + the authoritative balance refresh. Sync
+#    status vocabulary now matches spec §9: a run that COMPLETED with
+#    per-section/per-record errors is honestly «partial» (ناقص) instead of
+#    «success» — healthy sections keep their data, errors stay listed.
+#    holooSyncState() also reports lastSuccess (spec §8: زمان آخرین
+#    همگام‌سازی موفق) for the status API + tab. Invoices whose customer
+#    left Holoo's active list now resolve their MedPad row via the DURABLE
+#    Customer.erpCode link (the no-delete policy keeps both sides) instead
+#    of erroring as «no linked customer».
+#  * src/app/api/admin/holoo/test/route.ts — the read-only GetCustPay probe
+#    now carries a REAL sample code (first ErpCode from the Customer list)
+#    plus both parameter spellings, so the owner sees the true response
+#    shape with a meaningful parameter on the real service (spec §4).
+#  * src/components/panel/HolooTab.tsx — «ناقص» badge for partial runs +
+#    the «آخرین همگام‌سازی موفق» line.
+diff -ruN a/src/app/api/admin/holoo/test/route.ts b/src/app/api/admin/holoo/test/route.ts
+--- a/src/app/api/admin/holoo/test/route.ts	2026-11-12 11:32:30.536408286 +0000
++++ b/src/app/api/admin/holoo/test/route.ts	2026-11-12 11:18:23.613038365 +0000
+@@ -2,7 +2,7 @@
+ import { isAdmin } from '@/lib/auth'
+ import { writeAudit } from '@/lib/audit'
+ import { getHolooConfig, isConfigured, clearHolooToken } from '@/lib/holoo-config'
+-import { HolooClient, holooSafeError } from '@/lib/holoo'
++import { HolooClient, fStr, holooSafeError } from '@/lib/holoo'
+ 
+ /**
+  * Holoo integration (phase 1) — REAL connection test (POST).
+@@ -44,13 +44,29 @@
+     })
+     return NextResponse.json({ ok: false, error: holooSafeError(e), login: { ok: false }, endpoints: [] })
+   }
++  // A REAL sample code makes the per-customer GetCustPay probe meaningful
++  // (a paramless probe can only prove routing, not data). BOTH documented
++  // parameter spellings (`code` per the owner spec, `customerErpCode` per the
++  // public TncHoloo clients) travel with the same value — the probe shows
++  // which shape the REAL service answers.
++  let sampleErp: string | undefined
++  try {
++    const cust = await client.get('Customer')
++    const first = cust.items[0]
++    if (first) {
++      sampleErp =
++        fStr(first, ['ErpCode', 'erpCode', 'Erpcode']) ?? fStr(first, ['Code', 'code']) ?? undefined
++    }
++  } catch {
++    /* the Customer probe below reports that failure honestly */
++  }
+   // read-only exploration (each probe has its own short timeout + never throws)
+   const probes = await Promise.all([
+     client.probe('Customer'),
+     client.probe('Product'),
+     client.probe('Invoice'),
+     client.probe('Invoice/Invoice'),
+-    client.probe('Report/GetCustPay'),
++    client.probe('Report/GetCustPay', sampleErp ? { customerErpCode: sampleErp, code: sampleErp } : undefined),
+   ])
+   await writeAudit({
+     action: 'holoo.test',
+diff -ruN a/src/components/panel/HolooTab.tsx b/src/components/panel/HolooTab.tsx
+--- a/src/components/panel/HolooTab.tsx	2026-11-12 11:32:30.537408287 +0000
++++ b/src/components/panel/HolooTab.tsx	2026-11-12 11:17:57.473037239 +0000
+@@ -51,6 +51,13 @@
+ interface SyncState {
+   running: boolean
+   lastRun: SyncLogView | null
++  lastSuccess: {
++    startedAt: string
++    finishedAt: string | null
++    checked: number
++    created: number
++    updated: number
++  } | null
+   recentLogs: SyncLogView[]
+   counts: {
+     erpCustomers: number
+@@ -85,6 +92,16 @@
+ }
+ 
+ const KIND_FA: Record<string, string> = { initial: 'اولیه', incremental: 'افزایشی', manual: 'دستی' }
++const STATUS_FA: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
++  success: { label: 'موفق', variant: 'default' },
++  partial: { label: 'ناقص', variant: 'outline' },
++  running: { label: 'در جریان', variant: 'secondary' },
++  error: { label: 'خطا', variant: 'destructive' },
++}
++function StatusBadge({ status }: { status: string }) {
++  const s = STATUS_FA[status] ?? { label: status, variant: 'destructive' as const }
++  return <Badge variant={s.variant}>{s.label}</Badge>
++}
+ 
+ function faNum(n: number | null | undefined): string {
+   if (n === null || n === undefined) return '—'
+@@ -381,14 +398,20 @@
+           {sync?.lastRun && (
+             <p className="text-xs text-muted-foreground">
+               آخرین اجرا ({KIND_FA[sync.lastRun.kind] ?? sync.lastRun.kind}): {faDateTime(sync.lastRun.startedAt)} —{' '}
+-              <Badge variant={sync.lastRun.status === 'success' ? 'default' : sync.lastRun.status === 'running' ? 'secondary' : 'destructive'}>
+-                {sync.lastRun.status === 'success' ? 'موفق' : sync.lastRun.status === 'running' ? 'در جریان' : 'خطا'}
+-              </Badge>{' '}
++              <StatusBadge status={sync.lastRun.status} />{' '}
+               · بررسی‌شده {faNum(sync.lastRun.checked)} · جدید {faNum(sync.lastRun.created)} · ویرایش {faNum(sync.lastRun.updated)} · بدون تغییر{' '}
+               {faNum(sync.lastRun.unchanged)}
+               {sync.nextRunInSec !== null && <> · سینک بعدی تا ~{faNum(Math.ceil(sync.nextRunInSec / 60))} دقیقه</>}
+             </p>
+           )}
++          {sync?.lastSuccess ? (
++            <p className="text-xs text-muted-foreground">
++              آخرین همگام‌سازی موفق: {faDateTime(sync.lastSuccess.startedAt)} · بررسی‌شده {faNum(sync.lastSuccess.checked)} · جدید{' '}
++              {faNum(sync.lastSuccess.created)} · ویرایش {faNum(sync.lastSuccess.updated)}
++            </p>
++          ) : (
++            <p className="text-xs text-muted-foreground">هنوز همگام‌سازی موفقی ثبت نشده است.</p>
++          )}
+           {!sync?.lastRun && <p className="text-xs text-muted-foreground">هنوز سینکی اجرا نشده است.</p>}
+           {sync?.recentLogs && sync.recentLogs.length > 0 && (
+             <Table>
+@@ -407,9 +430,7 @@
+                     <TableCell className="text-xs">{faDateTime(l.startedAt)}</TableCell>
+                     <TableCell className="text-xs">{KIND_FA[l.kind] ?? l.kind}</TableCell>
+                     <TableCell>
+-                      <Badge variant={l.status === 'success' ? 'default' : l.status === 'running' ? 'secondary' : 'destructive'}>
+-                        {l.status === 'success' ? 'موفق' : l.status === 'running' ? 'در جریان' : 'خطا'}
+-                      </Badge>
++                      <StatusBadge status={l.status} />
+                     </TableCell>
+                     <TableCell className="text-xs">
+                       +{faNum(l.created)} / ~{faNum(l.updated)} / ={faNum(l.unchanged)}
+diff -ruN a/src/lib/holoo-sync.ts b/src/lib/holoo-sync.ts
+--- a/src/lib/holoo-sync.ts	2026-11-12 11:32:30.537408287 +0000
++++ b/src/lib/holoo-sync.ts	2026-11-12 11:32:00.710391032 +0000
+@@ -192,12 +192,17 @@
+     await db.holooSyncLog.update({
+       where: { id: log.id },
+       data: {
+-        status: 'success',
++        // spec §9 status vocabulary: موفق / ناقص / ناموفق — a run that
++        // COMPLETED but recorded per-section/per-record errors is honestly
++        // «partial» (the healthy sections' data is kept; errors are listed).
++        status: errors.length ? 'partial' : 'success',
+         finishedAt: new Date(),
+         checked, created, updated, unchanged, deactivated,
+         errors: errors.length ? JSON.stringify(errors) : null,
+         checkpoint: JSON.stringify({
+-          lastSuccessAt: new Date().toISOString(),
++          // informational (spec §9 «آخرین نقطه موفق همگام‌سازی») — a partial
++          // run completes but is NOT a clean success; status is the truth
++          completedAt: new Date().toISOString(),
+           durationMs: Date.now() - startedAt,
+           detail,
+         }),
+@@ -415,7 +420,17 @@
+         }
+         const externalId = erpCode ?? `holoo-no-${invoiceNo}`
+         const custErp = fStr(rec, I_CUST_ERP)
+-        const medpadId = custErp ? customerErpToMedpadId.get(custErp) : null
++        let medpadId = custErp ? customerErpToMedpadId.get(custErp) : null
++        if (!medpadId && custErp) {
++          // the link is DURABLE (Customer.erpCode survives the no-delete
++          // policy) — a Holoo customer that left the active list still has
++          // its MedPad row; its invoices must keep attaching to it
++          const linked = await db.customer.findFirst({ where: { erpCode: custErp }, select: { id: true } })
++          if (linked) {
++            medpadId = linked.id
++            customerErpToMedpadId.set(custErp, medpadId)
++          }
++        }
+         if (!medpadId) {
+           detail.invoices.skipped++
+           addError(`فاکتور ${invoiceNo ?? externalId} مشتری مرتبط در MedPad ندارد — نادیده گرفته شد`)
+@@ -511,7 +526,11 @@
+     }
+     for (const erpCode of targets) {
+       try {
+-        const pay = await client.get('Report/GetCustPay', { customerErpCode: erpCode })
++        // BOTH documented parameter spellings travel with the SAME value — the
++        // owner's integration spec §4 names the parameter `code`, the public
++        // TncHoloo clients send `customerErpCode`. Whichever the real service
++        // recognizes yields the same result; the other is ignored.
++        const pay = await client.get('Report/GetCustPay', { customerErpCode: erpCode, code: erpCode })
+         const fallbackDate = new Date()
+         let latestMandeh: number | null = null
+         for (const rec of pay.items) {
+@@ -661,6 +680,14 @@
+     deactivated: number
+     errors: string[]
+   } | null
++  /** spec §8: آخرین همگام‌سازی موفق — the most recent status='success' run */
++  lastSuccess: {
++    startedAt: string
++    finishedAt: string | null
++    checked: number
++    created: number
++    updated: number
++  } | null
+   recentLogs: Array<{
+     id: string
+     kind: string
+@@ -685,9 +712,10 @@
+ }
+ 
+ export async function holooSyncState(cfg: HolooConfig): Promise<HolooSyncStatusView> {
+-  const [lastRow, recent, erpCustomers, erpProducts, erpPayments, holooPurchases, linkedCustomers] = await Promise.all([
++  const [lastRow, recent, lastSuccessRow, erpCustomers, erpProducts, erpPayments, holooPurchases, linkedCustomers] = await Promise.all([
+     db.holooSyncLog.findFirst({ orderBy: { startedAt: 'desc' } }),
+     db.holooSyncLog.findMany({ orderBy: { startedAt: 'desc' }, take: 10 }),
++    db.holooSyncLog.findFirst({ where: { status: 'success' }, orderBy: { startedAt: 'desc' } }),
+     db.erpCustomer.count(),
+     db.erpProduct.count(),
+     db.erpPayment.count(),
+@@ -715,6 +743,15 @@
+   return {
+     running: isSyncRunning(),
+     lastRun: lastRow ? view(lastRow) : null,
++    lastSuccess: lastSuccessRow
++      ? {
++          startedAt: lastSuccessRow.startedAt.toISOString(),
++          finishedAt: lastSuccessRow.finishedAt ? lastSuccessRow.finishedAt.toISOString() : null,
++          checked: lastSuccessRow.checked,
++          created: lastSuccessRow.created,
++          updated: lastSuccessRow.updated,
++        }
++      : null,
+     recentLogs: recent.map(view),
+     counts: { erpCustomers, erpProducts, erpPayments, holooPurchases, linkedCustomers },
+     nextRunInSec,
+diff -ruN a/src/lib/holoo.ts b/src/lib/holoo.ts
+--- a/src/lib/holoo.ts	2026-11-12 11:32:30.538408287 +0000
++++ b/src/lib/holoo.ts	2026-11-12 11:31:54.806387758 +0000
+@@ -47,9 +47,13 @@
+   }
+ }
+ 
+-/** Safe message for logs/audit — guaranteed free of credential material. */
++/** Safe message for logs/audit — guaranteed free of credential material.
++ *  Plain strings pass through (they are OUR OWN internal safe messages,
++ *  e.g. the invoice-without-linked-customer notice) instead of collapsing
++ *  into an uninformative [unknown]. */
+ export function holooSafeError(e: unknown): string {
+   if (e instanceof HolooError) return `[${e.kind}] ${e.message}`
++  if (typeof e === 'string') return e.slice(0, 200)
+   if (e instanceof Error) return `[unknown] ${e.message.slice(0, 200)}`
+   return '[unknown] خطای ناشناخته'
+ }
