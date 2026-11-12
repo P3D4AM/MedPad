@@ -36,7 +36,18 @@
 #   H6  the boot scheduler: enable (interval=1 min) → an INCREMENTAL run
 #       appears with NO manual trigger (slow — up to ~2 minutes)
 #   H7  security sweep: the plain password / tokens appear in NO API
-#       response, NO mock log line, NO HolooSyncLog error text
+#       response, NO mock log line, NO HolooSyncLog error text; the stored
+#       password is an enc1: AES-256-GCM envelope (Task 67) — never plain,
+#       never raw Base64
+#   H9  credential encryption (Task 67): per-install key file created
+#       OUTSIDE SQLite (panel/db/holoo.key, 32 bytes, mode 600); stored
+#       password AND cached token are enc1 envelopes; a WRONG key or a
+#       MISSING key surfaces an explicit Persian passwordError WITHOUT
+#       wiping the stored settings (DB value byte-identical); settings
+#       survive a panel restart; a legacy Base64 value migrates atomically
+#       on first read (and the migrated value still logs in); an UPGRADE
+#       re-run of the installer keeps the key byte-identical; no holoo.key
+#       ever ships inside the bundle
 #   H8  bundle artifacts: the 5 /api/admin/holoo/* routes ship; Holoo tab
 #       + profile financial-block markers in the client chunks
 #
@@ -369,8 +380,85 @@ chk "H7 no token material in API responses" \
   "! grep -rq 'mock-token-' $W/h_set*.json $W/h_test*.json $W/h_status*.json"
 chk "H7 HolooSyncLog error texts carry no credentials" \
   "py \"import sqlite3;c=sqlite3.connect('$DB');rows=[r[0] or '' for r in c.execute('SELECT errors FROM HolooSyncLog')];exit(0 if not any('$HOLOO_PASS' in x or 'mock-token' in x for x in rows) else 1)\""
-chk "H7 stored password is base64 (obfuscation, documented)" \
-  "py \"import sqlite3,base64;c=sqlite3.connect('$DB');v=c.execute(\\\"SELECT value FROM Config WHERE key='holoo.password'\\\").fetchone()[0];exit(0 if v==base64.b64encode('$HOLOO_PASS'.encode()).decode() else 1)\""
+chk "H7 stored password is an enc1: envelope (AES-256-GCM, Task 67)" \
+  "py \"import sqlite3,base64;c=sqlite3.connect('$DB');v=c.execute(\\\"SELECT value FROM Config WHERE key='holoo.password'\\\").fetchone()[0];exit(0 if v.startswith('enc1:') and v.count(':')==3 and v!=base64.b64encode('$HOLOO_PASS'.encode()).decode() else 1)\""
+chk "H7 raw wire Base64 of the password is NOT stored anywhere in Config" \
+  "py \"import sqlite3,base64;c=sqlite3.connect('$DB');b64=base64.b64encode('$HOLOO_PASS'.encode()).decode();rows=[r[0] or '' for r in c.execute('SELECT value FROM Config')];exit(0 if not any(r==b64 for r in rows) else 1)\""
+
+# ── H9: credential encryption (Task 67) ─────────────────────────────
+echo "== H9: AES-256-GCM secret encryption =="
+KEYF="$W/inst/panel/db/holoo.key"
+chk "H9 per-install key file exists OUTSIDE SQLite (panel/db/holoo.key)" "[ -f '$KEYF' ]"
+chk "H9 key is exactly 32 bytes" "[ \"\$(stat -c %s '$KEYF')\" = '32' ]"
+chk "H9 key file mode is owner-only (600)" "[ \"\$(stat -c %a '$KEYF')\" = '600' ]"
+chk "H9 NO holoo.key inside the shipped bundle" "[ -z \"\$(find $W/inst/panel/.next -name 'holoo.key' -print -quit)\" ]"
+chk "H9 cached token is an enc1: envelope too" \
+  "py \"import sqlite3;c=sqlite3.connect('$DB');v=c.execute(\\\"SELECT value FROM Config WHERE key='holoo.token'\\\").fetchone()[0];exit(0 if v.startswith('enc1:') else 1)\""
+
+# wrong key → explicit Persian passwordError, settings NOT wiped
+KEYHASH_BEFORE=$(sha256sum "$KEYF" | cut -d' ' -f1)
+PASSHASH_BEFORE=$(python3 -c "import sqlite3,hashlib;c=sqlite3.connect('$DB');v=c.execute(\"SELECT value FROM Config WHERE key='holoo.password'\").fetchone()[0];print(hashlib.sha256(v.encode()).hexdigest())")
+mv "$KEYF" "$KEYF.orig"
+head -c 32 /dev/urandom > "$KEYF"; chmod 600 "$KEYF"
+curl -s -b $W/cj $BASE/api/admin/holoo/settings -o $W/h_wrongkey.json
+chk "H9 wrong key → passwordError surfaced (Persian)" \
+  "py \"import json;d=json.load(open('$W/h_wrongkey.json'))['settings'];exit(0 if d['hasPassword'] and d.get('passwordError') and 'کلید' in d['passwordError'] and not d['configured'] else 1)\""
+chk "H9 wrong key → stored value byte-identical (NOT wiped)" \
+  "py \"import sqlite3,hashlib;c=sqlite3.connect('$DB');v=c.execute(\\\"SELECT value FROM Config WHERE key='holoo.password'\\\").fetchone()[0];exit(0 if hashlib.sha256(v.encode()).hexdigest()=='$PASSHASH_BEFORE' else 1)\""
+chk "H9 wrong key → passwordError carries NO credential/key material" \
+  "py \"import json,base64;d=json.load(open('$W/h_wrongkey.json'))['settings'];e=d.get('passwordError') or '';exit(0 if '$HOLOO_PASS' not in e and base64.b64encode('$HOLOO_PASS'.encode()).decode() not in e else 1)\""
+# missing key → explicit error, still not wiped
+rm -f "$KEYF"
+curl -s -b $W/cj $BASE/api/admin/holoo/settings -o $W/h_nokey.json
+chk "H9 missing key → explicit Persian passwordError" \
+  "py \"import json;d=json.load(open('$W/h_nokey.json'))['settings'];exit(0 if d.get('passwordError') and 'کلید' in d['passwordError'] and d['hasPassword'] else 1)\""
+chk "H9 missing key → stored value still intact" \
+  "py \"import sqlite3,hashlib;c=sqlite3.connect('$DB');v=c.execute(\\\"SELECT value FROM Config WHERE key='holoo.password'\\\").fetchone()[0];exit(0 if hashlib.sha256(v.encode()).hexdigest()=='$PASSHASH_BEFORE' else 1)\""
+# restore the REAL key → everything works again, no re-entry needed
+mv "$KEYF.orig" "$KEYF"
+curl -s -b $W/cj $BASE/api/admin/holoo/settings -o $W/h_keyback.json
+chk "H9 key restored → configured again, no error" \
+  "py \"import json;d=json.load(open('$W/h_keyback.json'))['settings'];exit(0 if d['configured'] and not d.get('passwordError') and d['hasPassword'] else 1)\""
+
+# restart → settings survive (envelope + key both persist)
+(cd $W/inst && node server-manager.mjs stop --quiet > /dev/null 2>&1)
+(cd $W/inst && node server-manager.mjs start --no-open > $W/boot2.log 2>&1)
+for i in $(seq 1 40); do curl -s -o /dev/null "$BASE/" && break; sleep 1; done
+curl -s -b $W/cj $BASE/api/admin/holoo/settings -o $W/h_restart.json
+chk "H9 settings survive a panel restart (configured, no error)" \
+  "py \"import json;d=json.load(open('$W/h_restart.json'))['settings'];exit(0 if d['configured'] and d['hasPassword'] and not d.get('passwordError') else 1)\""
+curl -s -b $W/cj -X POST $BASE/api/admin/holoo/test -o $W/h_test_restart.json
+chk "H9 login still works after restart (decrypt ok)" \
+  "py \"import json;d=json.load(open('$W/h_test_restart.json'));exit(0 if d['ok'] else 1)\""
+
+# legacy Base64 (≤ v1.9.15-dev.1) → atomic migration on first read
+HOLOO_PASS_B64_H9=$(python3 -c "import base64;print(base64.b64encode('$HOLOO_PASS'.encode()).decode())")
+python3 -c "import sqlite3;c=sqlite3.connect('$DB');c.execute(\"UPDATE Config SET value='$HOLOO_PASS_B64_H9' WHERE key='holoo.password'\");c.commit()"
+curl -s -b $W/cj $BASE/api/admin/holoo/settings -o $W/h_legacy.json
+chk "H9 legacy Base64 migrated to enc1 on first read" \
+  "py \"import sqlite3;c=sqlite3.connect('$DB');v=c.execute(\\\"SELECT value FROM Config WHERE key='holoo.password'\\\").fetchone()[0];exit(0 if v.startswith('enc1:') else 1)\""
+chk "H9 legacy migration keeps the admin view healthy (configured, no error)" \
+  "py \"import json;d=json.load(open('$W/h_legacy.json'))['settings'];exit(0 if d['configured'] and d['hasPassword'] and not d.get('passwordError') else 1)\""
+curl -s -b $W/cj -X POST $BASE/api/admin/holoo/test -o $W/h_test_legacy.json
+chk "H9 migrated value still logs in (wire form preserved)" \
+  "py \"import json;d=json.load(open('$W/h_test_legacy.json'));exit(0 if d['ok'] else 1)\""
+
+# upgrade re-run → the key file is kept byte-identical
+KEYHASH_UP=$(sha256sum "$KEYF" | cut -d' ' -f1)
+(cd "$PKG" && node install.mjs --non-interactive --target local --dir $W/inst \
+   --port $PANEL_PORT --rt-port $RT_PORT \
+   --admin-user admin --admin-pass "$ADMIN_PASS" > $W/upgrade.log 2>&1)
+chk "H9 upgrade install exit 0" "[ -f $W/inst/medpad-config.json ]"
+chk "H9 upgrade keeps the key file byte-identical" "[ '$KEYHASH_UP' = '$(sha256sum "$KEYF" | cut -d' ' -f1)' ]"
+chk "H9 upgrade re-applies owner-only mode (600) on the key" "[ \"\$(stat -c %a '$KEYF')\" = '600' ]"
+chk "H9 upgrade keeps the key inside panel/db (not recreated elsewhere)" "[ -f '$KEYF' ] && [ -z \"\$(find $W/inst -name 'holoo.key' -not -path '$KEYF' -print -quit)\" ]"
+chk "H9 upgrade keeps the encrypted password in the DB" \
+  "py \"import sqlite3;c=sqlite3.connect('$DB');v=c.execute(\\\"SELECT value FROM Config WHERE key='holoo.password'\\\").fetchone()[0];exit(0 if v.startswith('enc1:') else 1)\""
+(cd $W/inst && node server-manager.mjs start --no-open > $W/boot3.log 2>&1)
+for i in $(seq 1 40); do curl -s -o /dev/null "$BASE/" && break; sleep 1; done
+curl -s -b $W/cj $BASE/api/admin/holoo/settings -o $W/h_afterupgrade.json
+chk "H9 after upgrade: settings still configured, no error" \
+  "py \"import json;d=json.load(open('$W/h_afterupgrade.json'))['settings'];exit(0 if d['configured'] and d['hasPassword'] and not d.get('passwordError') else 1)\""
 
 # ── H8: bundle artifacts ─────────────────────────────────────────────
 echo "== H8: bundle artifacts =="
