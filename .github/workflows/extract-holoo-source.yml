@@ -1,0 +1,131 @@
+
+name: Extract Holoo Decompiled Sources
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - phase0-security-review
+    paths:
+      - Holoo-Decompiled.zip
+      - .github/workflows/extract-holoo-source.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: holoo-source-extraction
+  cancel-in-progress: false
+
+jobs:
+  extract:
+    name: Extract Java sources
+    runs-on: ubuntu-latest
+
+    if: github.ref == 'refs/heads/phase0-security-review'
+
+    steps:
+      - name: Checkout target branch
+        uses: actions/checkout@v4
+        with:
+          ref: phase0-security-review
+          fetch-depth: 0
+
+      - name: Verify archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f Holoo-Decompiled.zip
+          unzip -t Holoo-Decompiled.zip
+
+      - name: Extract archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/holoo-extracted"
+          unzip -q Holoo-Decompiled.zip \
+            -d "$RUNNER_TEMP/holoo-extracted"
+
+      - name: Copy required Java sources
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 <<'PY'
+          from pathlib import Path
+          import shutil
+          import sys
+
+          root = Path("/tmp/holoo-source-placeholder")
+          import os
+          root = Path(os.environ["RUNNER_TEMP"]) / "holoo-extracted"
+          destination = Path("Holoo-Decompiled")
+
+          required = [
+              "LoginDao.java",
+              "ConvertStr.java",
+              "TextNormalizer.java",
+              "Login.java",
+              "LoginDto.java",
+          ]
+
+          destination.mkdir(parents=True, exist_ok=True)
+
+          for filename in required:
+              matches = list(root.rglob(filename))
+
+              if len(matches) != 1:
+                  print(
+                      f"Expected exactly one {filename}, "
+                      f"found {len(matches)}"
+                  )
+                  sys.exit(1)
+
+              source = matches[0]
+              relative = source.relative_to(root)
+              target = destination / relative
+
+              target.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(source, target)
+
+              print(f"Extracted: {target}")
+
+          PY
+
+      - name: Check extracted sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          find Holoo-Decompiled -type f -name '*.java' -print
+
+          for file in \
+            LoginDao.java \
+            ConvertStr.java \
+            TextNormalizer.java \
+            Login.java \
+            LoginDto.java
+          do
+            count=$(find Holoo-Decompiled -name "$file" | wc -l)
+            test "$count" -eq 1
+          done
+
+      - name: Commit and push
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -- Holoo-Decompiled/
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git commit -m \
+            "chore: extract Holoo authentication sources"
+
+          git push origin HEAD:phase0-security-review
