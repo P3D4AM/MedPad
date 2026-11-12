@@ -21,8 +21,8 @@ android {
         // snapshots. versionCode strictly increased from 19 so it upgrades
         // an existing same-signature install (this APK is signed with the
         // standard Android DEBUG key).
-        versionCode = 22
-        versionName = "1.9.15-dev.1"
+        versionCode = 23
+        versionName = "1.9.15-dev.2"
     }
 
     // ─── Signing (audit phase 2 hardening) ─────────────────────────────
