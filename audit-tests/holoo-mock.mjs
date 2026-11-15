@@ -19,6 +19,23 @@
 //   401 (JSON) when the Authorization header is missing/unknown — exercising
 //   the client's ONE auto re-login.
 //
+// Task 12 (Nov 2026): by default every list is served inside the EXACT
+// business wrapper the LIVE service was observed using (owner field test):
+//     Customer -> {"Customer": [ ... ]}    Product -> {"product": [ ... ]}
+//     Invoice  -> {"Invoice": [ ... ]}     GetCustPay -> {"report": [ ... ]}
+// (the pre-Task-12 mock returned bare arrays - which is exactly why all
+// mock tests passed while the live sync imported ZERO records.)
+//
+// Per-endpoint "modes" in state.json drive the extraction edge cases
+// (test-holoo.sh H10):
+//   "modes": { "Customer": "real|bare|raw|nonjson", "Product": ...,
+//              "GetCustPay": ... }
+//   real    - the observed wrapped shape (default)
+//   bare    - a direct JSON array (legacy tolerance)
+//   raw     - serve state.rawCustomer / rawProduct / rawGetCustPay AS-IS
+//             (arbitrary envelopes: junk, nested, single-record, empty...)
+//   nonjson - an HTML body (invalid-response classification)
+//
 // The DATA is re-read from <state.json> on EVERY request so the test can
 // mutate the "Holoo side" between syncs (change detection + no-delete).
 // Every request line is appended to <requests.log> (auth presence, the
@@ -106,14 +123,29 @@ const server = http.createServer((req, res) => {
   // exact suffix routing (LONGEST first — '/Invoice/Invoice' must not fall
   // into the '/Invoice' handler just because it shares the suffix)
   if (req.method === 'GET' && path.endsWith('/Invoice/Invoice')) return json(404, { error: 'not found (fallback path)' })
-  if (req.method === 'GET' && path.endsWith('/Customer')) return json(200, state.customers)
-  if (req.method === 'GET' && path.endsWith('/Product')) return json(200, state.products)
-  if (req.method === 'GET' && path.endsWith('/Invoice')) return json(200, state.invoices)
+
+  // Task 12 - per-endpoint envelope modes (default: the OBSERVED live
+  // wrappers; 'bare'/'raw'/'nonjson' drive the H10 extraction edge cases)
+  const serve = (ep, wrappedKey, data) => {
+    const m = (state.modes && state.modes[ep]) || 'real'
+    if (m === 'nonjson') {
+      res.writeHead(200, { 'Content-Type': 'text/html' })
+      res.end('<html><body>not json (MOCK)</body></html>')
+      return
+    }
+    if (m === 'raw') return json(200, state['raw' + ep])
+    if (m === 'bare') return json(200, data)
+    return json(200, { [wrappedKey]: data }) // 'real' - the observed live shape
+  }
+
+  if (req.method === 'GET' && path.endsWith('/Customer')) return serve('Customer', 'Customer', state.customers)
+  if (req.method === 'GET' && path.endsWith('/Product')) return serve('Product', 'product', state.products)
+  if (req.method === 'GET' && path.endsWith('/Invoice')) return serve('Invoice', 'Invoice', state.invoices)
   if (req.method === 'GET' && path.endsWith('/Report/GetCustPay')) {
     if (state.failPay) return json(500, { error: 'simulated GetCustPay outage (MOCK)' })
     const code = url.searchParams.get('customerErpCode') ?? url.searchParams.get('code') ?? ''
     const all = state.payments[code] ?? []
-    return json(200, all)
+    return serve('GetCustPay', 'report', all)
   }
   json(404, { error: `mock has no handler for ${req.method} ${path}` })
 })

@@ -181,12 +181,18 @@ curl -s -b $W/cj -X PUT $BASE/api/admin/holoo/settings -H 'content-type: applica
 curl -s -b $W/cj -X POST $BASE/api/admin/holoo/test -o $W/h_test_ok.json
 chk "H2 login ok + 4 readable endpoints probed (5th honestly 404)" \
   "py \"import json;d=json.load(open('$W/h_test_ok.json'));exit(0 if d['ok'] and len([e for e in d['endpoints'] if e['ok']])==4 and len(d['endpoints'])==5 else 1)\""
-chk "H2 Customer probe reports array(3) shape" \
-  "py \"import json;d=json.load(open('$W/h_test_ok.json'));e=[x for x in d['endpoints'] if x['path']=='Customer'][0];exit(0 if e['shape']=='array(3)' else 1)\""
+chk "H2 Customer probe: wrapped object{Customer:array(3)} + wrapper/count/fields" \
+  "py \"import json;d=json.load(open('$W/h_test_ok.json'));e=[x for x in d['endpoints'] if x['path']=='Customer'][0];exit(0 if e['shape']=='object{Customer:array(3)}' and e['wrapper']=='Customer' and e['count']==3 and e['kind']=='wrapped' and 'ErpCode' in (e.get('firstRecordKeys') or []) else 1)\""
+chk "H2 Product probe: lowercase wrapper 'product' + count 2 (real-service casing)" \
+  "py \"import json;d=json.load(open('$W/h_test_ok.json'));e=[x for x in d['endpoints'] if x['path']=='Product'][0];exit(0 if e['wrapper']=='product' and e['count']==2 and e['kind']=='wrapped' else 1)\""
+chk "H2 Invoice probe: wrapper 'Invoice' + count 3" \
+  "py \"import json;d=json.load(open('$W/h_test_ok.json'));e=[x for x in d['endpoints'] if x['path']=='Invoice'][0];exit(0 if e['wrapper']=='Invoice' and e['count']==3 else 1)\""
 chk "H2 Invoice/Invoice probe honestly 404 (fallback documented)" \
   "py \"import json;d=json.load(open('$W/h_test_ok.json'));e=[x for x in d['endpoints'] if x['path']=='Invoice/Invoice'][0];exit(0 if not e['ok'] and '404' in (e.get('error') or '') else 1)\""
-chk "H2 GetCustPay probe used a REAL sample code (array(2) shape)" \
-  "py \"import json;d=json.load(open('$W/h_test_ok.json'));e=[x for x in d['endpoints'] if x['path']=='Report/GetCustPay'][0];exit(0 if e['ok'] and e['shape']=='array(2)' else 1)\""
+chk "H2 GetCustPay probe: real sample code, wrapped object{report:array(2)}" \
+  "py \"import json;d=json.load(open('$W/h_test_ok.json'));e=[x for x in d['endpoints'] if x['path']=='Report/GetCustPay'][0];exit(0 if e['ok'] and e['shape']=='object{report:array(2)}' and e['wrapper']=='report' and e['count']==2 else 1)\""
+chk "H2 every probe carries elapsedMs + timeoutMs diagnostics (Task 12.2)" \
+  "py \"import json;d=json.load(open('$W/h_test_ok.json'));exit(0 if all(e.get('elapsedMs',-1)>=0 and e.get('timeoutMs',0)>0 for e in d['endpoints']) else 1)\""
 chk "H2 probe wire carried BOTH parameter spellings (code + customerErpCode)" \
   "grep -q 'Report/GetCustPay?customerErpCode=bBAPcust0001%3D&code=bBAPcust0001%3D' $MOCK_LOG"
 HOLOO_PASS_B64=$(python3 -c "import base64;print(base64.b64encode('$HOLOO_PASS'.encode()).decode())")
@@ -459,6 +465,176 @@ for i in $(seq 1 40); do curl -s -o /dev/null "$BASE/" && break; sleep 1; done
 curl -s -b $W/cj $BASE/api/admin/holoo/settings -o $W/h_afterupgrade.json
 chk "H9 after upgrade: settings still configured, no error" \
   "py \"import json;d=json.load(open('$W/h_afterupgrade.json'))['settings'];exit(0 if d['configured'] and d['hasPassword'] and not d.get('passwordError') else 1)\""
+
+# ── H10: extraction edge cases (Task 12.1/12.3 — mock envelope modes) ──
+echo "== H10: extraction edge cases =="
+# stop the scheduler first so no incremental run races the manual ones below
+curl -s -b $W/cj -X PUT $BASE/api/admin/holoo/settings -H 'content-type: application/json' \
+  -d '{"enabled":false}' > /dev/null
+
+holoo_logs_count() { curl -s -b $W/cj $BASE/api/admin/holoo/status | py 'import json,sys;print(len(json.load(sys.stdin)["sync"]["recentLogs"]))'; }
+holoo_sync_and_wait() { # $1 = outfile prefix, $2 = min recentLogs count
+  curl -s -b $W/cj -X POST $BASE/api/admin/holoo/sync -o /dev/null
+  local done=1
+  for i in $(seq 1 90); do
+    curl -s -b $W/cj $BASE/api/admin/holoo/status -o "$1.json"
+    if py "import json;d=json.load(open('$1.json'))['sync'];lr=d['lastRun'];exit(0 if lr['kind']=='manual' and lr['status']!='running' and len(d['recentLogs'])>=$2 else 1)"; then done=0; break; fi
+    sleep 1
+  done
+  [ "$done" = '0' ]
+}
+
+# H10a — a one-key unrelated object is NOT a business record (probe + sync)
+python3 - "$MOCK_STATE" << 'PEOF'
+import json, sys
+p = sys.argv[1]
+st = json.load(open(p))
+st['modes'] = {'Customer': 'raw'}
+st['rawCustomer'] = {'something': 'else'}
+json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
+PEOF
+curl -s -b $W/cj -X POST $BASE/api/admin/holoo/test -o $W/h10a_test.json
+chk "H10a one-key junk → probe kind=unrecognized, count=0, no wrapper" \
+  "py \"import json;d=json.load(open('$W/h10a_test.json'));e=[x for x in d['endpoints'] if x['path']=='Customer'][0];exit(0 if e['ok'] and e['kind']=='unrecognized' and e['count']==0 and not e.get('wrapper') else 1)\""
+LB=$(holoo_logs_count)
+holoo_sync_and_wait "$W/h10a_status" "$LB"
+chk "H10a one-key junk → run PARTIAL with the Persian unrecognized error" \
+  "py \"import json;d=json.load(open('$W/h10a_status.json'))['sync']['lastRun'];exit(0 if d['status']=='partial' and any('ساختار شناسایی‌شده نداشت' in e for e in d['errors']) else 1)\""
+chk "H10a one-key junk → ErpCustomer count UNCHANGED (3, no deletes)" \
+  "py \"import sqlite3;c=sqlite3.connect('$DB');exit(0 if c.execute('SELECT COUNT(*) FROM ErpCustomer').fetchone()[0]==3 else 1)\""
+
+# H10b — nested generic wrapper + case variation (Data → CUSTOMERS)
+python3 - "$MOCK_STATE" << 'PEOF'
+import json, sys
+p = sys.argv[1]
+st = json.load(open(p))
+st['rawCustomer'] = {'Data': {'CUSTOMERS': [
+  {'ErpCode': 'bBAPnest0001=', 'Code': '00011', 'Name': 'داروخانه تو در تو یک', 'Mandeh': 100, 'Credit': 0, 'City': 'مشهد', 'IsActive': True},
+  {'ErpCode': 'bBAPnest0002=', 'Code': '00012', 'Name': 'داروخانه تو در تو دو', 'Mandeh': 200, 'Credit': 0, 'City': 'تهران', 'IsActive': True},
+]}}
+json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
+PEOF
+curl -s -b $W/cj -X POST $BASE/api/admin/holoo/test -o $W/h10b_test.json
+chk "H10b nested Data→CUSTOMERS → probe wrapper='CUSTOMERS', count=2 (case-insensitive)" \
+  "py \"import json;d=json.load(open('$W/h10b_test.json'));e=[x for x in d['endpoints'] if x['path']=='Customer'][0];exit(0 if e['kind']=='wrapped' and e['wrapper']=='CUSTOMERS' and e['count']==2 and e['shape']=='object{Data:{CUSTOMERS:array(2)}}' else 1)\""
+LB=$(holoo_logs_count)
+holoo_sync_and_wait "$W/h10b_status" "$LB"
+chk "H10b nested sync → 2 new ErpCustomers (5 total) + run SUCCESS" \
+  "py \"import sqlite3,json;c=sqlite3.connect('$DB');d=json.load(open('$W/h10b_status.json'))['sync']['lastRun'];n=c.execute('SELECT COUNT(*) FROM ErpCustomer').fetchone()[0];exit(0 if n==5 and d['status']=='success' else 1)\""
+chk "H10b nested import creates NO NEW assignment (exactly the 1 from H4 stays)" \
+  "py \"import sqlite3;c=sqlite3.connect('$DB');exit(0 if c.execute('SELECT COUNT(*) FROM Assignment').fetchone()[0]==1 else 1)\""
+
+# H10c — single record OBJECT under the wrapper
+python3 - "$MOCK_STATE" << 'PEOF'
+import json, sys
+p = sys.argv[1]
+st = json.load(open(p))
+st['rawCustomer'] = {'Customer': {'ErpCode': 'bBAPsingle1=', 'Code': '00013', 'Name': 'داروخانه تک رکورد', 'Mandeh': 10, 'Credit': 5, 'City': 'مشهد', 'IsActive': True}}
+json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
+PEOF
+curl -s -b $W/cj -X POST $BASE/api/admin/holoo/test -o $W/h10c_test.json
+chk "H10c single record under wrapper → probe count=1, kind=wrapped" \
+  "py \"import json;d=json.load(open('$W/h10c_test.json'));e=[x for x in d['endpoints'] if x['path']=='Customer'][0];exit(0 if e['count']==1 and e['kind']=='wrapped' and 'ErpCode' in (e.get('firstRecordKeys') or []) else 1)\""
+LB=$(holoo_logs_count)
+holoo_sync_and_wait "$W/h10c_status" "$LB"
+chk "H10c single-record sync → ErpCustomer 6 total, run SUCCESS" \
+  "py \"import sqlite3,json;c=sqlite3.connect('$DB');d=json.load(open('$W/h10c_status.json'))['sync']['lastRun'];n=c.execute('SELECT COUNT(*) FROM ErpCustomer').fetchone()[0];exit(0 if n==6 and d['status']=='success' else 1)\""
+
+# H10d — VALID EMPTY is not an error: wrapped empty, then bare empty
+python3 - "$MOCK_STATE" << 'PEOF'
+import json, sys
+p = sys.argv[1]
+st = json.load(open(p))
+st['rawCustomer'] = {'Customer': []}
+json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
+PEOF
+LB=$(holoo_logs_count)
+holoo_sync_and_wait "$W/h10d_status" "$LB"
+chk "H10d wrapped EMPTY {\"Customer\":[]} → run SUCCESS (valid empty ≠ error)" \
+  "py \"import json;d=json.load(open('$W/h10d_status.json'))['sync']['lastRun'];exit(0 if d['status']=='success' and len(d['errors'])==0 else 1)\""
+chk "H10d wrapped empty → ErpCustomer count kept (6, no deletes)" \
+  "py \"import sqlite3;c=sqlite3.connect('$DB');exit(0 if c.execute('SELECT COUNT(*) FROM ErpCustomer').fetchone()[0]==6 else 1)\""
+python3 - "$MOCK_STATE" << 'PEOF'
+import json, sys
+p = sys.argv[1]
+st = json.load(open(p))
+st['rawCustomer'] = []
+json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
+PEOF
+curl -s -b $W/cj -X POST $BASE/api/admin/holoo/test -o $W/h10d2_test.json
+chk "H10d bare [] → probe kind=array, count=0" \
+  "py \"import json;d=json.load(open('$W/h10d2_test.json'));e=[x for x in d['endpoints'] if x['path']=='Customer'][0];exit(0 if e['kind']=='array' and e['count']==0 else 1)\""
+LB=$(holoo_logs_count)
+holoo_sync_and_wait "$W/h10d2_status" "$LB"
+chk "H10d bare empty array → run SUCCESS too" \
+  "py \"import json;d=json.load(open('$W/h10d2_status.json'))['sync']['lastRun'];exit(0 if d['status']=='success' and len(d['errors'])==0 else 1)\""
+
+# H10e — status/error envelope is NOT a record
+python3 - "$MOCK_STATE" << 'PEOF'
+import json, sys
+p = sys.argv[1]
+st = json.load(open(p))
+st['rawCustomer'] = {'State': 'False', 'ErrorCode': 5, 'Error': 'x'}
+json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
+PEOF
+curl -s -b $W/cj -X POST $BASE/api/admin/holoo/test -o $W/h10e_test.json
+chk "H10e status envelope {State,ErrorCode,Error} → unrecognized, count=0" \
+  "py \"import json;d=json.load(open('$W/h10e_test.json'));e=[x for x in d['endpoints'] if x['path']=='Customer'][0];exit(0 if e['kind']=='unrecognized' and e['count']==0 else 1)\""
+
+# H10f — non-JSON body → invalid-response classification, section isolated
+python3 - "$MOCK_STATE" << 'PEOF'
+import json, sys
+p = sys.argv[1]
+st = json.load(open(p))
+st['modes'] = {'Customer': 'real', 'Product': 'nonjson'}
+st.pop('rawCustomer', None)
+json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
+PEOF
+LB=$(holoo_logs_count)
+holoo_sync_and_wait "$W/h10f_status" "$LB"
+chk "H10f non-JSON Product → PARTIAL with the invalid-response error" \
+  "py \"import json;d=json.load(open('$W/h10f_status.json'))['sync']['lastRun'];exit(0 if d['status']=='partial' and any('غیر JSON' in e for e in d['errors']) else 1)\""
+chk "H10f non-JSON Product → ErpProduct count kept (2), customers unaffected" \
+  "py \"import sqlite3;c=sqlite3.connect('$DB');exit(0 if c.execute('SELECT COUNT(*) FROM ErpProduct').fetchone()[0]==2 and c.execute('SELECT COUNT(*) FROM ErpCustomer').fetchone()[0]==6 else 1)\""
+
+# H10g — unextractable per-customer payment reports → ONE summary error
+python3 - "$MOCK_STATE" << 'PEOF'
+import json, sys
+p = sys.argv[1]
+st = json.load(open(p))
+st['modes'] = {'Customer': 'real', 'Product': 'real', 'GetCustPay': 'raw'}
+st['rawGetCustPay'] = {'weird': 1}
+json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
+PEOF
+LB=$(holoo_logs_count)
+holoo_sync_and_wait "$W/h10g_status" "$LB"
+chk "H10g junk payment reports → PARTIAL with ONE summary error" \
+  "py \"import json;d=json.load(open('$W/h10g_status.json'))['sync']['lastRun'];exit(0 if d['status']=='partial' and sum('گزارش GetCustPay ساختار شناسایی‌شده نداشت' in e for e in d['errors'])==1 else 1)\""
+chk "H10g junk payment reports → ErpPayment count + balances kept" \
+  "py \"import sqlite3;c=sqlite3.connect('$DB');exit(0 if c.execute('SELECT COUNT(*) FROM ErpPayment').fetchone()[0]==3 and c.execute(\\\"SELECT mandeh FROM ErpCustomer WHERE erpCode='bBAPcust0001='\\\").fetchone()[0]==1250000.5 else 1)\""
+
+# H10h — legacy bare arrays still tolerated
+python3 - "$MOCK_STATE" << 'PEOF'
+import json, sys
+p = sys.argv[1]
+st = json.load(open(p))
+st['modes'] = {'Customer': 'bare'}
+st.pop('rawGetCustPay', None)
+json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
+PEOF
+curl -s -b $W/cj -X POST $BASE/api/admin/holoo/test -o $W/h10h_test.json
+chk "H10h bare array mode → probe kind=array with the live count" \
+  "py \"import json;d=json.load(open('$W/h10h_test.json'));e=[x for x in d['endpoints'] if x['path']=='Customer'][0];exit(0 if e['kind']=='array' and e['count']==2 and e['shape']=='array(2)' else 1)\""
+# restore the default (real wrapped) modes
+python3 - "$MOCK_STATE" << 'PEOF'
+import json, sys
+p = sys.argv[1]
+st = json.load(open(p))
+st.pop('modes', None)
+st.pop('rawCustomer', None)
+st.pop('rawGetCustPay', None)
+json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
+PEOF
 
 # ── H8: bundle artifacts ─────────────────────────────────────────────
 echo "== H8: bundle artifacts =="
