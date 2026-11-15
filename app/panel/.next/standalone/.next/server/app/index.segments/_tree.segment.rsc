@@ -1,4 +1,4 @@
-:HL["/_next/static/chunks/3_jijkhq2vwo-.css","style"]
+:HL["/_next/static/chunks/39l83u1aen-px.css","style"]
 :HL["/fonts/vazirmatn.css","style"]
 1:[["children",{"s":"__PAGE__","h":160}]]
-0:{"b":"iW4uUcKR2e92dyMXtI-y5","t":{"t":{"s":"","h":80,"c":"$Q1"}}}
+0:{"b":"H2Gw3hVFrOylNuhMiJ2c6","t":{"t":{"s":"","h":80,"c":"$Q1"}}}

@@ -106,7 +106,7 @@
         "transform": "lodash/{{member}}"
       }
     },
-    "outputFileTracingRoot": "/home/z/panel-build-t67/src",
+    "outputFileTracingRoot": "/home/z/panel-build-p12/src",
     "enablePrerenderSourceMaps": true,
     "cacheComponents": false,
     "cacheLife": {
@@ -341,9 +341,9 @@
     ],
     "skipTrailingSlashRedirect": true,
     "turbopack": {
-      "root": "/home/z/panel-build-t67/src"
+      "root": "/home/z/panel-build-p12/src"
     },
-    "repoRoot": "/home/z/panel-build-t67/src",
+    "repoRoot": "/home/z/panel-build-p12/src",
     "distDirRoot": ".next",
     "_originalRewrites": {
       "beforeFiles": [],
@@ -364,7 +364,7 @@
       "fallback": []
     }
   },
-  "appDir": "/home/z/panel-build-t67/src",
+  "appDir": "/home/z/panel-build-p12/src",
   "relativeAppDir": "",
   "files": [
     ".next/package.json",

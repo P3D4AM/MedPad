@@ -45,7 +45,18 @@
 #           legacy Base64 value; explicit passwordError surfaced to the
 #           admin on a missing/wrong/corrupt key WITHOUT ever wiping the
 #           stored settings; the cached token is encrypted too and simply
-#           discarded (one re-login) when it cannot be recovered — last)
+#           discarded (one re-login) when it cannot be recovered — last) →
+#           phase12-holoo-extraction (Task 68 / Phase 12, Nov 2026: live-
+#           integration stabilization. The real service wraps lists in
+#           business envelopes — {"Customer":[…]}, {"product":[…]},
+#           {"report":[…]} — which the old extractor did not know, so the
+#           live sync imported ZERO records. New extractHolooItemsDetailed():
+#           bounded case-insensitive unwrapping + single-record support +
+#           explicit diagnostics (kind/wrapper/shape/count/first-record
+#           fields); 'unrecognized' bodies are honest sync errors (partial)
+#           while valid empty lists stay SUCCESS; probes report elapsed/
+#           timeout/wrapper/count and Invoice/Invoice gets its own
+#           diagnostic timeout — last)
 #
 # This script performs the WHOLE reproducible pipeline and verifies it:
 #   1. fresh extraction of the base source (git archive)
@@ -81,7 +92,7 @@ set -euo pipefail
 REPO_ROOT="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
 WORK="${2:-$REPO_ROOT/panel-build}"
 BASE_REF="bd9c80b:medpad-full-1.9/inst-stage/panel-src"
-CHAIN="phase1-task1 phase2-remediation phase2-task1 phase2-task2 phase2-dev2-fixes phase2-package4 phase2-madrep phase2-package6 phase2-package7 phase2-package9 phase2-package5 phase2-package13 phase3-package14 phase4-package15 phase5-package16 phase6-customer360 phase7-central-settings phase8-owner-fixes phase9-holoo phase10-holoo-hardening phase11-holoo-secret-encryption"
+CHAIN="phase1-task1 phase2-remediation phase2-task1 phase2-task2 phase2-dev2-fixes phase2-package4 phase2-madrep phase2-package6 phase2-package7 phase2-package9 phase2-package5 phase2-package13 phase3-package14 phase4-package15 phase5-package16 phase6-customer360 phase7-central-settings phase8-owner-fixes phase9-holoo phase10-holoo-hardening phase11-holoo-secret-encryption phase12-holoo-extraction"
 
 # RESUME mode (sandbox convenience): with MEDPAD_BUILD_RESUME=1 an existing
 # $WORK/src with node_modules (from an interrupted run — e.g. a sandbox that
@@ -110,7 +121,7 @@ fi
 if [ "$RESUME" = "1" ]; then
   say "2/9 RESUME — patch chain already applied (verified by the marker below)"
 else
-  say "2/9 applying 21-patch chain"
+  say "2/9 applying 22-patch chain"
   cd "$WORK/src"
   for p in $CHAIN; do
     patchfile="$REPO_ROOT/patches/panel-src-$p.patch"
@@ -154,6 +165,18 @@ grep -q "passwordWire" "$WORK/src/src/lib/holoo.ts" \
   || die "phase11 missing: passwordWire in the client"
 grep -q "passwordError" "$WORK/src/src/components/panel/HolooTab.tsx" \
   || die "phase11 missing: passwordError banner in the tab"
+# phase 12 markers (Task 68 — robust extraction + probe diagnostics)
+[ -f "$WORK/src/src/lib/holoo.ts" ] || die "source tree missing"
+grep -q "extractHolooItemsDetailed" "$WORK/src/src/lib/holoo.ts" \
+  || die "phase12 missing: extractHolooItemsDetailed in the client"
+grep -q "KNOWN_WRAPPER_KEYS" "$WORK/src/src/lib/holoo.ts" \
+  || die "phase12 missing: KNOWN_WRAPPER_KEYS in the client"
+grep -q "unrecognized" "$WORK/src/src/lib/holoo-sync.ts" \
+  || die "phase12 missing: unrecognized handling in the sync"
+grep -q "invoiceProbeTimeoutMs" "$WORK/src/src/app/api/admin/holoo/test/route.ts" \
+  || die "phase12 missing: invoice diagnostic timeout in the test route"
+grep -q "firstRecordKeys" "$WORK/src/src/components/panel/HolooTab.tsx" \
+  || die "phase12 missing: probe diagnostics columns in the tab"
 cd "$WORK/src"
 
 # ── 3. npm install ──────────────────────────────────────────────────────────
@@ -264,7 +287,15 @@ chk "holoo enc1 envelope in server"   "grep -rq 'enc1:' .next/server --include='
 chk "holoo passwordError surfaced"    "grep -rq 'passwordError' .next/server --include='*.js'"
 chk "holoo tab error banner chunks"   "grep -rq 'رمز ذخیره‌شده حذف نشده است' --include='*.js' ."
 chk "no holoo.key file in bundle"     "[ -z "$(find . -name 'holoo.key' -print -quit)" ]"
-echo "   hardening: PASS=$P FAIL=$F / 49"
+# phase 12 (Task 68 — robust extraction + probe diagnostics): the new
+# extractor and its honest error vocabulary must ship in the server, the
+# probe table upgrade in the client chunks
+chk "holoo extraction in server"     "grep -rq 'unrecognized' .next/server --include='*.js'"
+chk "holoo unrecognized error text"  "grep -rq 'ساختار شناسایی‌شده نداشت' .next/server --include='*.js'"
+chk "holoo probe elapsed/timeout"    "grep -rq 'elapsedMs' .next/server --include='*.js' && grep -rq 'timeoutMs' .next/server --include='*.js'"
+chk "holoo extraction diag keys"     "grep -rq 'firstRecordKeys' .next/server --include='*.js'"
+chk "holoo tab probe table upgrade"  "grep -rq 'مهلت تشخیصی' --include='*.js' . && grep -rq 'نمونه فیلدها' --include='*.js' ."
+echo "   hardening: PASS=$P FAIL=$F / 54"
 LAST_HARDENING="$P/$F PASS"
 [ "$F" -eq 0 ] || die "hardening checks failed"
 

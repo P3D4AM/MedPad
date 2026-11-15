@@ -1,0 +1,551 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# panel-src phase 12 — Task 68 / Phase 12 (Nov 2026): Holoo LIVE-integration
+# stabilization — robust response extraction + probe diagnostics.
+#
+# ROOT CAUSE this patch fixes: the live service (owner field test, Nov 2026)
+# wraps every list in a business-named envelope — Customer → {"Customer":[…]},
+# Product → {"product":[…]} (lowercase), Report/GetCustPay → {"report":[…]}.
+# The old extractItems() only knew data/list/items/records/result and fell
+# through to "return [o]" — the WHOLE envelope became one bogus record with
+# no business fields, so the live manual sync imported ZERO records while
+# the bare-array mock suite stayed green.
+#
+# Changes (4 files):
+#   src/lib/holoo.ts
+#     · extractHolooItemsDetailed(): bounded (≤3 levels) recursive
+#       unwrapping; case-insensitive known wrappers (customer[s],
+#       product[s], invoice[s], report[s] + the generic data/list/items/
+#       records/result[s]); single-record objects; an object that BOTH
+#       carries a wrapper-named key AND business fields is a RECORD
+#       (e.g. an invoice's "Customer" name string), never unwrapped.
+#     · explicit diagnostics: kind (array|wrapped|single|unrecognized),
+#       wrapper (as received), normalized shape, count, first-record
+#       FIELD NAMES (never values), top-level response keys, depth.
+#       A VALID EMPTY list ({"Customer":[]}) is 'wrapped' count 0 —
+#       'unrecognized' is reserved for unextractable bodies.
+#     · probe(): reports elapsedMs, timeoutMs, kind, wrapper, count,
+#       firstRecordKeys + classified failure (errorKind) — never
+#       credentials, tokens, URLs or record VALUES (Task 12.2).
+#     · probeTimeoutMs()/invoiceProbeTimeoutMs(): separately configurable
+#       diagnostic budgets (MEDPAD_HOLOO_PROBE_TIMEOUT_MS default 10 s,
+#       MEDPAD_HOLOO_INVOICE_PROBE_TIMEOUT_MS default 30 s) — the sync's
+#       30 s timeout is untouched (Task 12.5: no global inflation).
+#     · extractItems() kept as a backward-compatible items-only shim.
+#   src/lib/holoo-sync.ts
+#     · every section (customers/products/invoices) reports an honest
+#       Persian error when the response is 'unrecognized' (run = partial);
+#       per-customer payment reports aggregate into ONE summary error.
+#       Valid empty lists stay SUCCESS. Key names only, never values.
+#   src/app/api/admin/holoo/test/route.ts
+#     · Invoice/Invoice probe uses its own diagnostic timeout; response
+#       carries probeTimeouts for UI transparency. Read-only, unchanged
+#       endpoints — no invented paths or parameters.
+#   src/components/panel/HolooTab.tsx
+#     · probe table: HTTP status + elapsed ms per endpoint, detected
+#       wrapper, extracted record count + outcome label, first-record
+#       field names; failures show the classified error; timeouts show
+#       the diagnostic budget that applied.
+# ─────────────────────────────────────────────────────────────────────────────
+diff -ruN a/src/app/api/admin/holoo/test/route.ts b/src/app/api/admin/holoo/test/route.ts
+--- a/src/app/api/admin/holoo/test/route.ts	2026-11-15 07:44:43.943656017 +0000
++++ b/src/app/api/admin/holoo/test/route.ts	2026-11-15 07:44:43.944656015 +0000
+@@ -2,7 +2,7 @@
+ import { isAdmin } from '@/lib/auth'
+ import { writeAudit } from '@/lib/audit'
+ import { getHolooConfig, isConfigured, clearHolooToken } from '@/lib/holoo-config'
+-import { HolooClient, fStr, holooSafeError } from '@/lib/holoo'
++import { HolooClient, fStr, holooSafeError, invoiceProbeTimeoutMs, probeTimeoutMs } from '@/lib/holoo'
+ 
+ /**
+  * Holoo integration (phase 1) — REAL connection test (POST).
+@@ -60,12 +60,17 @@
+   } catch {
+     /* the Customer probe below reports that failure honestly */
+   }
+-  // read-only exploration (each probe has its own short timeout + never throws)
++  // read-only exploration (each probe has its own short timeout + never throws).
++  // Task 12.5: Invoice/Invoice gets its OWN separately-configurable diagnostic
++  // timeout (MEDPAD_HOLOO_INVOICE_PROBE_TIMEOUT_MS, default 30 s ≈ the sync
++  // budget) — the live service timed out on it at the short probe budget, and
++  // the evidence (status/elapsed/classification) must show whether it answers
++  // within the sync window at all. No other probe and no sync timeout changes.
+   const probes = await Promise.all([
+     client.probe('Customer'),
+     client.probe('Product'),
+     client.probe('Invoice'),
+-    client.probe('Invoice/Invoice'),
++    client.probe('Invoice/Invoice', undefined, { timeoutMs: invoiceProbeTimeoutMs() }),
+     client.probe('Report/GetCustPay', sampleErp ? { customerErpCode: sampleErp, code: sampleErp } : undefined),
+   ])
+   await writeAudit({
+@@ -73,5 +78,10 @@
+     targetType: 'holoo',
+     detail: `تست اتصال موفق؛ کاوش فقط-خواندنی: ${probes.map((p) => `${p.path}=${p.ok ? 'OK' : 'ناموفق'}`).join('، ')}`,
+   })
+-  return NextResponse.json({ ok: true, login: { ok: true }, endpoints: probes })
++  return NextResponse.json({
++    ok: true,
++    login: { ok: true },
++    endpoints: probes,
++    probeTimeouts: { default: probeTimeoutMs(), invoice: invoiceProbeTimeoutMs() },
++  })
+ }
+diff -ruN a/src/components/panel/HolooTab.tsx b/src/components/panel/HolooTab.tsx
+--- a/src/components/panel/HolooTab.tsx	2026-11-15 07:44:43.947656007 +0000
++++ b/src/components/panel/HolooTab.tsx	2026-11-15 07:44:43.948656005 +0000
+@@ -74,9 +74,14 @@
+   path: string
+   ok: boolean
+   status: number
++  elapsedMs: number
++  timeoutMs: number
+   shape: string
++  kind?: 'array' | 'wrapped' | 'single' | 'unrecognized'
++  wrapper?: string | null
+   count?: number
+-  sampleKeys?: string[]
++  firstRecordKeys?: string[]
++  errorKind?: string
+   error?: string
+ }
+ 
+@@ -93,6 +98,14 @@
+ }
+ 
+ const KIND_FA: Record<string, string> = { initial: 'اولیه', incremental: 'افزایشی', manual: 'دستی' }
++
++/** Task 12.2 — human labels for the probe extraction outcome. */
++const PROBE_KIND_FA: Record<string, string> = {
++  array: 'آرایهٔ مستقیم',
++  wrapped: 'پاکت‌شده',
++  single: 'یک رکورد',
++  unrecognized: 'ناشناخته',
++}
+ const STATUS_FA: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
+   success: { label: 'موفق', variant: 'default' },
+   partial: { label: 'ناقص', variant: 'outline' },
+@@ -356,6 +369,8 @@
+                     <TableHead>Endpoint</TableHead>
+                     <TableHead>وضعیت</TableHead>
+                     <TableHead>شکل پاسخ</TableHead>
++                    <TableHead>Wrapper</TableHead>
++                    <TableHead>رکوردها</TableHead>
+                     <TableHead>نمونه فیلدها</TableHead>
+                   </TableRow>
+                 </TableHeader>
+@@ -364,11 +379,42 @@
+                     <TableRow key={p.path}>
+                       <TableCell dir="ltr" className="font-mono text-xs">{p.path}</TableCell>
+                       <TableCell>
+-                        <Badge variant={p.ok ? 'default' : 'destructive'}>{p.ok ? 'OK' : 'ناموفق'}</Badge>
++                        <div className="flex flex-col gap-0.5">
++                          <div className="flex items-center gap-1.5">
++                            <Badge variant={p.ok ? 'default' : 'destructive'}>{p.ok ? 'OK' : 'ناموفق'}</Badge>
++                            <span dir="ltr" className="text-[10px] text-muted-foreground">
++                              {p.status > 0 ? `HTTP ${p.status}` : 'بدون پاسخ'} · {faNum(p.elapsedMs)}ms
++                            </span>
++                          </div>
++                          {!p.ok && p.error && (
++                            <span className="max-w-64 text-[10px] leading-4 text-red-700 dark:text-red-300">{p.error}</span>
++                          )}
++                          {p.ok === false && p.errorKind === 'timeout' && (
++                            <span dir="rtl" className="text-[10px] text-muted-foreground">(مهلت تشخیصی: {faNum(p.timeoutMs)}ms)</span>
++                          )}
++                        </div>
++                      </TableCell>
++                      <TableCell dir="ltr" className="max-w-44 break-all font-mono text-[10px]">{p.ok ? p.shape : '—'}</TableCell>
++                      <TableCell dir="ltr" className="font-mono text-xs">
++                        {p.ok ? (p.wrapper ?? '—') : '—'}
++                      </TableCell>
++                      <TableCell className="text-xs">
++                        {p.ok ? (
++                          <span className="flex flex-col gap-0.5">
++                            <span>{p.count !== undefined ? faNum(p.count) : '—'}</span>
++                            {p.kind && (
++                              <span className={`text-[10px] ${p.kind === 'unrecognized' ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}>
++                                {PROBE_KIND_FA[p.kind] ?? p.kind}
++                                {p.kind === 'unrecognized' ? ' — ساختار پاسخ شناسایی نشد' : ''}
++                              </span>
++                            )}
++                          </span>
++                        ) : (
++                          '—'
++                        )}
+                       </TableCell>
+-                      <TableCell dir="ltr" className="text-xs">{p.ok ? p.shape : p.error}</TableCell>
+-                      <TableCell dir="ltr" className="max-w-72 truncate font-mono text-[10px] text-muted-foreground">
+-                        {p.sampleKeys?.join(', ') ?? '—'}
++                      <TableCell dir="ltr" className="max-w-64 truncate font-mono text-[10px] text-muted-foreground">
++                        {p.firstRecordKeys?.length ? p.firstRecordKeys.join(', ') : '—'}
+                       </TableCell>
+                     </TableRow>
+                   ))}
+diff -ruN a/src/lib/holoo-sync.ts b/src/lib/holoo-sync.ts
+--- a/src/lib/holoo-sync.ts	2026-11-15 07:44:43.940656024 +0000
++++ b/src/lib/holoo-sync.ts	2026-11-15 07:44:43.940656024 +0000
+@@ -9,7 +9,7 @@
+ import {
+   HolooClient,
+   HolooError,
+-  extractItems,
++  type HolooListResult,
+   fStr,
+   fNum,
+   fBool,
+@@ -236,6 +236,16 @@
+ function z() {
+   return { checked: 0, created: 0, updated: 0, unchanged: 0, deactivated: 0, skipped: 0 }
+ }
++
++/** Task 12.1: an UNEXTRACTABLE response is an honest error (run = partial) —
++ *  a VALID EMPTY list (e.g. {"Customer":[]}) is not. Reports response KEY
++ *  NAMES only, never values (no credentials/customer data in logs). */
++function unrecognizedResponseError(section: string, r: HolooListResult): string {
++  const keys = r.extraction.responseKeys.length
++    ? ` — کلیدهای پاسخ: ${r.extraction.responseKeys.join('، ')}`
++    : ''
++  return `پاسخ هلو برای ${section} ساختار شناسایی‌شده نداشت (شکل: ${r.extraction.shape}${keys}) — هیچ رکوردی استخراج نشد`
++}
+ function sum(detail: Record<string, ReturnType<typeof z>>, k: 'checked' | 'created' | 'updated' | 'unchanged' | 'deactivated'): number {
+   return Object.values(detail).reduce((a, v) => a + v[k], 0)
+ }
+@@ -254,6 +264,9 @@
+   //    Sets of erpCodes whose MedPad Customer must be (re)examined for
+   //    linking feed steps 3-4.
+   const customersRaw = await client.get('Customer')
++  if (customersRaw.extraction.kind === 'unrecognized') {
++    addError(unrecognizedResponseError('Customer', customersRaw))
++  }
+   const unlinkedMedpad = await db.customer.findMany({
+     where: { erpCode: null },
+     select: { id: true, name: true },
+@@ -350,6 +363,9 @@
+   // 2) PRODUCTS (کالا) — full pull, idempotent upsert by ErpCode.
+   try {
+     const productsRaw = await client.get('Product')
++    if (productsRaw.extraction.kind === 'unrecognized') {
++      addError(unrecognizedResponseError('Product', productsRaw))
++    }
+     for (const rec of productsRaw.items) {
+       try {
+         const erpCode = fStr(rec, P_ERP)
+@@ -409,6 +425,9 @@
+         throw e
+       }
+     }
++    if (invoicesRaw.extraction.kind === 'unrecognized') {
++      addError(unrecognizedResponseError('Invoice', invoicesRaw))
++    }
+     const fallbackDate = new Date()
+     for (const rec of invoicesRaw.items) {
+       try {
+@@ -524,6 +543,7 @@
+       })
+       targets = all.map((a) => a.erpCode)
+     }
++    let unrecognizedPay = 0 // Task 12.1 — unextractable per-customer reports
+     for (const erpCode of targets) {
+       try {
+         // BOTH documented parameter spellings travel with the SAME value — the
+@@ -531,6 +551,7 @@
+         // TncHoloo clients send `customerErpCode`. Whichever the real service
+         // recognizes yields the same result; the other is ignored.
+         const pay = await client.get('Report/GetCustPay', { customerErpCode: erpCode, code: erpCode })
++        if (pay.extraction.kind === 'unrecognized') unrecognizedPay++
+         const fallbackDate = new Date()
+         let latestMandeh: number | null = null
+         for (const rec of pay.items) {
+@@ -580,6 +601,11 @@
+       }
+       await new Promise((r) => setTimeout(r, PAYMENT_DELAY_MS))
+     }
++    // Task 12.1 — unextractable per-customer reports are ONE honest summary
++    // error (per-report spam would drown the 20-error cap)
++    if (unrecognizedPay > 0) {
++      addError(`پاسخ ${unrecognizedPay} گزارش GetCustPay ساختار شناسایی‌شده نداشت — پرداخت/مانده آن مشتریان این بار استخراج نشد`)
++    }
+   } catch (e) {
+     addError(e)
+   }
+diff -ruN a/src/lib/holoo.ts b/src/lib/holoo.ts
+--- a/src/lib/holoo.ts	2026-11-15 07:44:43.935656037 +0000
++++ b/src/lib/holoo.ts	2026-11-15 07:44:43.937656032 +0000
+@@ -59,7 +59,22 @@
+ }
+ 
+ const DEFAULT_TIMEOUT_MS = 30_000
+-const PROBE_TIMEOUT_MS = 10_000
++/** Read-only probe timeout (connection-test exploration). Separately
++ *  configurable via MEDPAD_HOLOO_PROBE_TIMEOUT_MS — the sync timeout is
++ *  NEVER touched by this knob (Task 12.5: no global timeout inflation). */
++export function probeTimeoutMs(): number {
++  const n = Number(process.env.MEDPAD_HOLOO_PROBE_TIMEOUT_MS)
++  return Number.isFinite(n) && n > 0 ? n : 10_000
++}
++/** Separate DIAGNOSTIC timeout for the Invoice/Invoice probe (Task 12.5):
++ *  the live service timed out on it at the short probe budget; a longer,
++ *  independently-tunable window gives the owner evidence of whether the
++ *  endpoint answers within the SYNC budget (30 s) at all — without
++ *  touching any other probe or the sync itself. */
++export function invoiceProbeTimeoutMs(): number {
++  const n = Number(process.env.MEDPAD_HOLOO_INVOICE_PROBE_TIMEOUT_MS)
++  return Number.isFinite(n) && n > 0 ? n : 30_000
++}
+ 
+ /** Authorization header value: exactly what Holoo's login returned. Some
+  *  deployments return the bare token, others the prefixed "Bearer <tok>" —
+@@ -103,17 +118,31 @@
+ export interface HolooListResult {
+   /** the parsed JSON body as-is (for holooJson provenance) */
+   raw: unknown
+-  /** extracted record list (arrays, {data:[...]}, single objects, …) */
++  /** extracted record list (arrays, wrapped lists, single objects, …) */
+   items: Record<string, unknown>[]
++  /** Task 12.1 extraction diagnostics — wrapper, shape, counts. A valid
++   *  empty business list has kind 'array'/'wrapped' with count 0;
++   *  kind 'unrecognized' means NOTHING could be extracted (invalid). */
++  extraction: HolooExtraction
+ }
+ 
+ export interface HolooEndpointProbe {
+   path: string
+   ok: boolean
+   status: number
++  /** wall-clock duration of the probe (Task 12.2) */
++  elapsedMs: number
++  /** the diagnostic timeout budget that applied (ms) */
++  timeoutMs: number
+   shape: string
++  /** extraction outcome on success: array | wrapped | single | unrecognized */
++  kind?: HolooExtraction['kind']
++  /** the response key that carried the payload (as received), e.g. Customer */
++  wrapper?: string | null
+   count?: number
+-  sampleKeys?: string[]
++  firstRecordKeys?: string[]
++  /** classified failure (HolooErrorKind) when ok=false */
++  errorKind?: string
+   error?: string
+ }
+ 
+@@ -235,59 +264,189 @@
+     const text = await res.text()
+     try {
+       const raw = JSON.parse(text)
+-      return { raw, items: extractItems(raw) }
++      const { items, extraction } = extractHolooItemsDetailed(raw)
++      return { raw, items, extraction }
+     } catch {
+       throw new HolooError('invalid-response', `پاسخ غیر JSON از هلو برای ${path}`)
+     }
+   }
+ 
+   /** Read-only probe for the connection-test endpoint (never throws). */
+-  async probe(path: string, params?: Record<string, string | number | undefined>): Promise<HolooEndpointProbe> {
+-    const shortClient = new HolooClient(this.cfg, { timeoutMs: PROBE_TIMEOUT_MS })
++  async probe(
++    path: string,
++    params?: Record<string, string | number | undefined>,
++    opts?: { timeoutMs?: number },
++  ): Promise<HolooEndpointProbe> {
++    const timeoutMs = opts?.timeoutMs ?? probeTimeoutMs()
++    const shortClient = new HolooClient(this.cfg, { timeoutMs })
++    const startedAt = Date.now()
+     try {
+-      const { raw, items } = await shortClient.get(path, params)
+-      let shape = 'object'
+-      let count: number | undefined
+-      let sampleKeys: string[] | undefined
+-      if (Array.isArray(raw)) {
+-        shape = `array(${raw.length})`
+-        count = raw.length
+-      } else if (typeof raw === 'number') {
+-        shape = 'number'
+-      } else if (raw && typeof raw === 'object') {
+-        const keys = Object.keys(raw as Record<string, unknown>)
+-        shape = `object(${keys.length} keys)`
+-        const first = items[0]
+-        if (first) sampleKeys = Object.keys(first).slice(0, 12)
++      const { extraction } = await shortClient.get(path, params)
++      return {
++        path,
++        ok: true,
++        status: 200,
++        elapsedMs: Date.now() - startedAt,
++        timeoutMs,
++        shape: extraction.shape,
++        kind: extraction.kind,
++        wrapper: extraction.wrapper,
++        count: extraction.count,
++        firstRecordKeys: extraction.firstRecordKeys,
+       }
+-      return { path, ok: true, status: 200, shape, count, sampleKeys }
+     } catch (e) {
+       const he = e instanceof HolooError ? e : null
+       return {
+         path,
+         ok: false,
+         status: he?.status ?? 0,
++        elapsedMs: Date.now() - startedAt,
++        timeoutMs,
+         shape: '-',
++        errorKind: he?.kind ?? 'unknown',
+         error: holooSafeError(e),
+       }
+     }
+   }
+ }
+ 
+-/** Tolerant record-list extraction: direct arrays, wrapped lists
+- *  ({data:[…]} / {List:[…]} / …) or a single record object. */
+-export function extractItems(raw: unknown): Record<string, unknown>[] {
+-  if (Array.isArray(raw)) return raw.filter((r): r is Record<string, unknown> => !!r && typeof r === 'object')
+-  if (raw && typeof raw === 'object') {
+-    const o = raw as Record<string, unknown>
+-    for (const k of ['data', 'Data', 'list', 'List', 'items', 'Items', 'records', 'Records', 'Result', 'result']) {
+-      const v = o[k]
+-      if (Array.isArray(v)) return v.filter((r): r is Record<string, unknown> => !!r && typeof r === 'object')
+-    }
+-    // a single record (e.g. get-by-code style endpoints)
+-    return [o]
++// ── Task 12.1: robust response extraction ─────────────────────────────
++//
++// The LIVE service (owner's field test, Nov 2026) wraps every list in a
++// business-named envelope — exact observed shapes:
++//     GET Customer        → {"Customer": [ … ]}
++//     GET Product         → {"product":  [ … ]}   (lowercase!)
++//     GET Report/GetCustPay → {"report":  [ … ]}
++// The previous extractor only knew data/list/items/records/result and
++// therefore returned the WHOLE envelope as one bogus "record" — the root
++// cause of the live "zero imported records" report. These wrappers are
++// now first-class, matched case-insensitively, with bounded recursive
++// unwrapping and explicit diagnostics.
++
++/** Known Holoo response wrapper keys (lowercased; matched case-insensitively).
++ *  'code'/'name' are deliberately NOT wrappers — they are record FIELDS. */
++const KNOWN_WRAPPER_KEYS = new Set([
++  'customer', 'customers', 'product', 'products', 'invoice', 'invoices',
++  'report', 'reports', 'data', 'list', 'items', 'records', 'result', 'results',
++])
++
++/** Field-name hints (lowercased) that qualify a standalone object as a
++ *  business record rather than an envelope/status object — drawn from the
++ *  field-mapper candidates of all four record types. */
++const RECORD_FIELD_HINTS = new Set([
++  'erpcode', 'code', 'name', 'mandeh', 'credit', 'price', 'date',
++  'customererpcode', 'custerpcode', 'few', 'unit', 'buyprice', 'sellprice',
++  'sumprice', 'sum', 'total', 'scot', 'discount', 'sanadcode', 'invoiceno',
++  'groupname', 'maingroupname', 'isactive', 'isblacklist', 'nationalid',
++  'economicid', 'mobile', 'tel', 'city', 'ostan', 'address', 'email',
++])
++
++function isPlainObject(v: unknown): v is Record<string, unknown> {
++  return !!v && typeof v === 'object' && !Array.isArray(v)
++}
++
++/** A standalone object counts as ONE business record only when it has
++ *  several keys AND at least one recognized business field — arbitrary
++ *  one-key objects and status/error envelopes must NOT become records
++ *  (Task 12.1 rule 3). */
++function looksLikeSingleRecord(o: Record<string, unknown>): boolean {
++  const keys = Object.keys(o)
++  if (keys.length < 2) return false
++  return keys.some((k) => RECORD_FIELD_HINTS.has(k.toLowerCase()))
++}
++
++export interface HolooExtraction {
++  /** array = direct JSON array · wrapped = business/generic wrapper(s)
++   *  unwrapped · single = a standalone record object · unrecognized =
++   *  no known wrapper and not a qualifying record (INVALID — a valid
++   *  empty business list is 'array'/'wrapped' with count 0, never this) */
++  kind: 'array' | 'wrapped' | 'single' | 'unrecognized'
++  /** the immediate key that carried the extracted payload, as received
++   *  (e.g. "Customer" / "product" / "report" / "CUSTOMERS") */
++  wrapper: string | null
++  /** normalized response shape, e.g. object{Customer:array(3)} */
++  shape: string
++  /** extracted item count */
++  count: number
++  /** first record's FIELD NAMES (≤12) — never values (privacy) */
++  firstRecordKeys: string[]
++  /** top-level response keys (≤8) — diagnostics for unrecognized bodies */
++  responseKeys: string[]
++  /** wrapper levels unwrapped (bounded 0..3) */
++  depth: number
++}
++
++const MAX_UNWRAP_DEPTH = 3
++
++/** Bounded recursive unwrapping with explicit known-wrapper rules.
++ *  Never flattens arbitrary objects; never mistakes an envelope for a
++ *  record (an object that BOTH carries a wrapper-named key and business
++ *  fields is a RECORD containing a wrapper-named field, e.g. a "Customer"
++ *  name string on an invoice row — it is not unwrapped). */
++export function extractHolooItemsDetailed(raw: unknown): {
++  items: Record<string, unknown>[]
++  extraction: HolooExtraction
++} {
++  const shapeOf = (v: unknown): string => {
++    if (Array.isArray(v)) return `array(${v.length})`
++    if (isPlainObject(v)) return `object(${Object.keys(v).length} keys)`
++    if (v === null) return 'null'
++    return typeof v
++  }
++  const topKeys = isPlainObject(raw) ? Object.keys(raw).slice(0, 8) : []
++  let cur: unknown = raw
++  let depth = 0
++  let wrapper: string | null = null
++  let prefix = ''
++
++  const finish = (items: Record<string, unknown>[], kind: HolooExtraction['kind']): { items: Record<string, unknown>[]; extraction: HolooExtraction } => ({
++    items,
++    extraction: {
++      kind,
++      wrapper,
++      shape: prefix + shapeOf(cur) + '}'.repeat(depth),
++      count: items.length,
++      firstRecordKeys: items[0] ? Object.keys(items[0]).slice(0, 12) : [],
++      responseKeys: topKeys,
++      depth,
++    },
++  })
++  const unrecognized = () => finish([], 'unrecognized')
++
++  while (depth < MAX_UNWRAP_DEPTH) {
++    if (Array.isArray(cur)) {
++      const items = cur.filter(isPlainObject)
++      return finish(items, depth ? 'wrapped' : 'array')
++    }
++    if (!isPlainObject(cur)) return unrecognized()
++    const keys = Object.keys(cur)
++    const wrapperKey = keys.find((k) => KNOWN_WRAPPER_KEYS.has(k.toLowerCase()))
++    const hasPlainRecordField = keys.some(
++      (k) => RECORD_FIELD_HINTS.has(k.toLowerCase()) && !KNOWN_WRAPPER_KEYS.has(k.toLowerCase()),
++    )
++    if (wrapperKey !== undefined && !hasPlainRecordField) {
++      // pure envelope level — unwrap one (bounded) level
++      prefix += `${prefix ? '{' : 'object{'}${wrapperKey}:`
++      wrapper = wrapperKey
++      cur = cur[wrapperKey]
++      depth++
++      continue
++    }
++    // no wrapper to follow, or this object is itself a record carrying a
++    // wrapper-named field — single-record interpretation (when it qualifies)
++    return looksLikeSingleRecord(cur) ? finish([cur], depth ? 'wrapped' : 'single') : unrecognized()
++  }
++  // depth budget exhausted — same evaluation on what we have
++  if (Array.isArray(cur)) {
++    const items = cur.filter(isPlainObject)
++    return finish(items, 'wrapped')
+   }
+-  return []
++  return isPlainObject(cur) && looksLikeSingleRecord(cur) ? finish([cur], 'wrapped') : unrecognized()
++}
++
++/** Backward-compatible items-only view of the extraction. */
++export function extractItems(raw: unknown): Record<string, unknown>[] {
++  return extractHolooItemsDetailed(raw).items
+ }
+ 
+ // ── tolerant field mappers (multi-casing; every candidate documented) ──
