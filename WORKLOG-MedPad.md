@@ -1883,3 +1883,22 @@ Stage Summary (Task 68):
 Stage Summary (Task 68 — پوش):
 - پوش سه‌کامیتی `9f0f4cc..d0408f6` (feat: وصله+باندل+اسکریپت بیلد · test: mock پاکت واقعی + H10 · docs: گزارش فاز ۱۲ + WORKLOG + PROGRESS) — SHA از GitHub با ls-remote تأیید شد (`d0408f64f3425a2d5cc3e26516e175d402f76d28`)؛ `main` دست‌نخورده (`8db3319`)؛ درخت کار تمیز؛ بدون force-push. **بدون انتشار ریلیز** (ممنوع تا درخواست صریح مالک).
 - وضعیت: **DONE_VERIFIED** (کد + ۱۲۰/۱۲۰ + ۴۶/۴۶ + ۵۷/۵۷ + ۵۴/۵۴ + tsc صفر جدید + پوش). قدم بعدی: آزمایش میدانی مالک طبق ۶ گام HOLOO-PHASE12-REPORT-fa §۸ (تست اتصال با wrapper/تعداد → سینک دستی → idempotency → نتیجهٔ probe فاکتور با مهلت ۳۰s).
+
+---
+
+Task ID: 69
+Agent: main (Z.ai — Phase 12 test-release session)
+Task: ساخت و انتشار نسخهٔ آزمایشی Phase 12 برای اعتبارسنجی اتصال واقعی Holoo (دستور جامع مالک Nov 15: Task 12.7)
+Date: Nov 15, 2026
+
+Work Log:
+- **بازیابی وضعیت:** سندباکس بازیافت‌شده؛ کلون محلی develop همگام ریموت `16765e4` (ls-remote) — کار کامل Phase 12 (Task 68: `af6ada6` استخراج مقاوم + `ff116ab` تست‌های H10 + `d0408f6` مستندات + `16765e4` ثبت پوش) از قبل پوش شده بود؛ درخت تمیز؛ `main` دست‌نخورده (`8db3319`). AGENTS.md + RELEASE-CHECKLIST-fa + WORKLOG (Task 67/68) پیش از هر تغییر خوانده شد. الگوی ریلیزهای قبلی بررسی شد (۱۴ ریلیز زنده؛ آخرین v1.9.15-dev.2 id 443138584 با ۴ asset: APK · ZIP آفلاین · SHA1SUMS · SHA256SUMS).
+- **بازسازی محیط اندروید از صفر (سندباکس ریست شده بود):** JDK Temurin 21.0.13+9 (با javac — JRE سیستمی کافی نبود) · SDK cmdline-tools 11076708 + platform-tools + platforms;android-34 + build-tools;34.0.0 + لایسنس‌ها · jar روبولکتریک android-all-instrumented:14-robolectric-10818077-i6 (۱۵۰٬۶۴۶٬۲۶۲ بایت؛ sha256 `7d7c075c…3f0927` مطابق ثبت Task 59) از آینهٔ هواوی (repo1 برای IP مشترک 429 داد — درس شناخته‌شده) · `~/.gradle/init.gradle` با beforeSettings (آینه در pluginManagement + dependencyResolutionManagement — درس Task 59/60) · `scripts/run-gradle.sh` ماندگار (timeout + بدون پایپ stdout) · `Android/local.properties`.
+- **وضعیت امضا (شفاف):** keystore دیباگ dev.2 (`e5348f15…`) با بازیافت سندباکس از بین رفت (کپی تحویلی نزد مالک)؛ جستجوی کامل سندباکس هیچ فایل keystore/jks نیافت و در مخزن هم نیست (قانون ASSETS) → طبق گزینهٔ قانونی ثبت‌شده در RELEASE-CHECKLIST §۴/§۷ (همان مسیر dev.2)، کلید Debug تازهٔ سندباکس ساخته شد: گواهی SHA-256 `6b9cbb49b1209d16bbe2400e9eed13d4ea8a28fd91e8e08d652e51770bc401fa` — ارتقا از نصب dev.2 = حذف/نصب مجدد (هشدار در متن ریلیز + مسیر نجات بکاپ)؛ کپی keystore برای زنجیرهٔ بعدی به مالک تحویل می‌شود.
+- **رگرسیون روی HEAD پیش از انتشار (همه واقعی، همین سشن):** test-holoo **۱۲۰/۱۲۰** · customer360 **۴۶/۴۶** · settings-center **۵۷/۵۷** · اندروید **۲۰۴/۲۰۴** (۳۶ کلاس، صفر شکست از XML نتایج) + assembleDebug BUILD SUCCESSFUL در ۴m45s (۴۹ تسک؛ zipalign -c 4 OK؛ apksigner verify OK) — اعتبارسنجی زنجیرهٔ ابزار بازسازی‌شده.
+- **شماره‌گذاری نسخه:** الگوی دوره‌های ریلیز (۱.۹.۱۳=بسته‌های فاز ۲ · ۱.۹.۱۴=فازهای میانی · ۱.۹.۱۵=دستهٔ مالک + انتشار هلو) → تثبیت زندهٔ Phase 12 = **v1.9.16-dev.1** (vCode 24). bump کامل ۷ فایل: `Android/app/build.gradle.kts` · `APP-VERSION` · `INSTALLER_VER` · `WIZARD_VER` · `MANAGER_VER` · عنوان README-fa · بنر `install.bat` (۳ رشته با جایگزینی بایتی؛ CRLF=۱۹۲×/LF-only=۰ حفظ شد) — کامیت `7e68b24` پوش و با ls-remote تأیید شد.
+
+(ادامه: بازتولید زنجیرهٔ ۲۲-وصله‌ای + بیلد روی کامیت ریلیز + بسته‌بندی + انتشار + راستی‌آزمایی دانلود-برگشتی — در همین Task ثبت می‌شود)
+
+Stage Summary (Task 69):
+- نسخهٔ آزمایشی v1.9.16-dev.1 (vCode 24؛ تثبیت اتصال واقعی هلو — Phase 12) در حال ساخت/انتشار طبق RELEASE-CHECKLIST §۶ و دستور Task 12.7 مالک؛ نتیجهٔ بیلد نهایی، بسته‌ها، انتشار و راستی‌آزمایی دانلود-برگشتی در ادامهٔ همین Task ثبت می‌شود. `main` دست‌نخورده.
