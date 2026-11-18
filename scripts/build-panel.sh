@@ -65,11 +65,19 @@
 #           routes, geo refs on the customer write paths + the app mirror,
 #           the assignment «تکمیل» gate, the «جغرافیا و محلات» tab with the
 #           completion worklist + geographic reports, and the CustomersTab
-#           structured pickers — last)
+#           structured pickers) →
+#           phase14-strict-types (Task 71 / roadmap Phase 13, Nov 2026:
+#           TypeScript debt CLEARED — all 14 legacy typing errors fixed at
+#           the type level only (zero runtime change): the Promise.all
+#           union-degradation that broke Map tuple inference in the two
+#           assignment routes, the audit targetId null for bulk operations,
+#           the stale Employee._count type (tokens), the proximity typeof
+#           guards — and `typescript.ignoreBuildErrors` REMOVED from
+#           next.config.ts so `next build` enforces types again — last)
 #
 # This script performs the WHOLE reproducible pipeline and verifies it:
 #   1. fresh extraction of the base source (git archive)
-#   2. apply the 13-patch chain (fails hard on ANY .rej)
+#   2. apply the 24-patch chain (fails hard on ANY .rej)
 #   3. npm install --no-audit --no-fund        (tested with npm 11.19.1 / Node 24.x)
 #   4. DATABASE_URL=file:./dev.db  npx prisma generate   (3 query engines)
 #   5. DATABASE_URL=file:./build-time.db  npm run build  (next 16.4.3, standalone)
@@ -77,11 +85,11 @@
 #      with `cp -rL` — dereferencing symlinks is REQUIRED (committed bundle has
 #      zero symlinks; raw Next output has @prisma/bcryptjs symlinks in
 #      .next/node_modules — lesson from 5-C)
-#   7. run 18 hardening checks against the assembled bundle
+#   7. run 63 hardening checks against the assembled bundle
 #   8. compare the result with the committed bundle (app/panel/.next),
 #      BUILD_ID-normalized, and report equivalence
-#   9. honest typecheck report (next.config sets ignoreBuildErrors=true, so
-#      `next build` hides type errors — this step reports them separately)
+#   9. typecheck double-report (since phase 14 the build itself enforces
+#      types; this is the explicit standalone tsc result)
 #
 # Usage:  scripts/build-panel.sh [REPO_ROOT] [WORK_DIR]
 #   REPO_ROOT  repo root (default: parent of this script's dir)
@@ -101,7 +109,7 @@ set -euo pipefail
 REPO_ROOT="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
 WORK="${2:-$REPO_ROOT/panel-build}"
 BASE_REF="bd9c80b:medpad-full-1.9/inst-stage/panel-src"
-CHAIN="phase1-task1 phase2-remediation phase2-task1 phase2-task2 phase2-dev2-fixes phase2-package4 phase2-madrep phase2-package6 phase2-package7 phase2-package9 phase2-package5 phase2-package13 phase3-package14 phase4-package15 phase5-package16 phase6-customer360 phase7-central-settings phase8-owner-fixes phase9-holoo phase10-holoo-hardening phase11-holoo-secret-encryption phase12-holoo-extraction phase13-geo-mashhad"
+CHAIN="phase1-task1 phase2-remediation phase2-task1 phase2-task2 phase2-dev2-fixes phase2-package4 phase2-madrep phase2-package6 phase2-package7 phase2-package9 phase2-package5 phase2-package13 phase3-package14 phase4-package15 phase5-package16 phase6-customer360 phase7-central-settings phase8-owner-fixes phase9-holoo phase10-holoo-hardening phase11-holoo-secret-encryption phase12-holoo-extraction phase13-geo-mashhad phase14-strict-types"
 
 # RESUME mode (sandbox convenience): with MEDPAD_BUILD_RESUME=1 an existing
 # $WORK/src with node_modules (from an interrupted run — e.g. a sandbox that
@@ -130,7 +138,7 @@ fi
 if [ "$RESUME" = "1" ]; then
   say "2/9 RESUME — patch chain already applied (verified by the marker below)"
 else
-  say "2/9 applying 22-patch chain"
+  say "2/9 applying 24-patch chain"
   cd "$WORK/src"
   for p in $CHAIN; do
     patchfile="$REPO_ROOT/patches/panel-src-$p.patch"
@@ -195,6 +203,15 @@ grep -q "GEO_AREA_DDL" "$WORK/src/src/instrumentation.ts" \
   || die "phase13 missing: GEO_AREA_DDL in instrumentation"
 grep -q "seedGeoAreas" "$WORK/src/src/instrumentation.ts" \
   || die "phase13 missing: boot seed call"
+# phase 14 markers (Task 71 — strict types: tsc clean, escape hatch gone)
+! grep -q "ignoreBuildErrors" "$WORK/src/next.config.ts" \
+  || die "phase14: next.config.ts still sets ignoreBuildErrors"
+grep -q "typeof lat === 'number'" "$WORK/src/src/app/api/app/proximity/route.ts" \
+  || die "phase14 missing: proximity typeof guard"
+grep -q "targetId?: string | null" "$WORK/src/src/lib/audit.ts" \
+  || die "phase14 missing: audit targetId accepts null (bulk)"
+grep -q "tokens: number }" "$WORK/src/src/lib/types.ts" \
+  || die "phase14 missing: Employee._count tokens"
 cd "$WORK/src"
 
 # ── 3. npm install ──────────────────────────────────────────────────────────
@@ -323,7 +340,12 @@ chk "geo seed dataset in server"   "grep -rq 'منطقه ثامن' .next/server 
 chk "geo dedup normalization"      "grep -rq 'normalizedName' .next/server --include='*.js'"
 chk "geo tab UI chunks"            "grep -rq 'در انتظار تکمیل اطلاعات جغرافیایی' --include='*.js' ."
 chk "geo gate text in server"      "grep -rq 'ثبت موقت در انتظار تکمیل' .next/server --include='*.js'"
-echo "   hardening: PASS=$P FAIL=$F / 62"
+# phase 14 (Task 71 — strict types): the shipped next config must NOT hide
+# build errors (required-server-files.json embeds the serialized config;
+# Next writes the key explicitly with its default value — what matters is
+# that the value is never `true`)
+chk "shipped config enforces type checks" "! grep -qE 'ignoreBuildErrors[^:]*: *true' .next/required-server-files.json"
+echo "   hardening: PASS=$P FAIL=$F / 63"
 LAST_HARDENING="$P/$F PASS"
 [ "$F" -eq 0 ] || die "hardening checks failed"
 
@@ -388,14 +410,17 @@ print("   EQUIVALENT: fresh build reproduces the committed bundle (except BUILD_
 sys.exit(0 if ok else 3)
 PYEOF
 
-# ── 9. honest typecheck report (informational) ─────────────────────────────
-say "9/9 typecheck report (ignoreBuildErrors hides this from next build)"
+# ── 9. typecheck double-report ──────────────────────────────────────────────
+# Since phase 14 (Task 71) the `typescript.ignoreBuildErrors` escape hatch
+# is GONE — step 5 (`next build`) itself fails on any type error. This step
+# still runs the standalone tsc as an explicit belt-and-braces report.
+say "9/9 typecheck report (the build itself enforces types since phase 14)"
 cd "$WORK/src"
 if ./node_modules/.bin/tsc --noEmit > "$WORK/tsc.log" 2>&1; then
   echo "   tsc: CLEAN (0 errors)"
 else
   n=$(grep -c 'error TS' "$WORK/tsc.log" || true)
-  echo "   tsc: ${n} type errors — full log: $WORK/tsc.log (known debt, see WORKLOG Task 48)"
+  echo "   tsc: ${n} type errors — full log: $WORK/tsc.log (step 5 should have failed too!)"
 fi
 
 say "RESULT"

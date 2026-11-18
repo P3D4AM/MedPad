@@ -1,0 +1,108 @@
+diff -ruN a/next.config.ts b/next.config.ts
+--- a/next.config.ts	2026-11-18 21:50:16.436791203 +0000
++++ b/next.config.ts	2026-11-18 21:53:58.599320964 +0000
+@@ -10,9 +10,10 @@
+   // phase 4: web-push stays external too — same guarantee for the Push
+   // sender (src/lib/push.ts) and the VAPID bootstrap in instrumentation.
+   serverExternalPackages: ["bcryptjs", "web-push"],
+-  typescript: {
+-    ignoreBuildErrors: true,
+-  },
++  // Phase 13 (typing debt): the typescript escape hatch that hid build
++  // errors was REMOVED — `tsc --noEmit` is clean and `next build` enforces
++  // types again (WORKLOG Task 71). Do NOT reintroduce error-hiding flags:
++  // fix the error, never hide it.
+   reactStrictMode: false,
+   // socket.io handshake requires the trailing slash on /socket.io/ —
+   // Next's 308 normalization breaks it; skip it.
+diff -ruN a/src/app/api/app/proximity/route.ts b/src/app/api/app/proximity/route.ts
+--- a/src/app/api/app/proximity/route.ts	2026-11-18 21:50:16.427791220 +0000
++++ b/src/app/api/app/proximity/route.ts	2026-11-18 21:49:03.000000000 +0000
+@@ -35,8 +35,12 @@
+   })
+   if (recent) return NextResponse.json({ ok: true, throttled: true })
+ 
++  // Phase 13 (typing debt): `Number.isFinite` does not narrow
++  // `number | undefined` — the typeof guards do, and the condition stays
++  // logically identical for every input (Number.isFinite is false for
++  // non-numbers, so the added checks never change the outcome).
+   const dist =
+-    Number.isFinite(lat) && Number.isFinite(lng)
++    typeof lat === 'number' && typeof lng === 'number' && Number.isFinite(lat) && Number.isFinite(lng)
+       ? Math.round(distanceMeters(lat, lng, cus.lat, cus.lng))
+       : null
+ 
+diff -ruN a/src/app/api/assignment-requests/route.ts b/src/app/api/assignment-requests/route.ts
+--- a/src/app/api/assignment-requests/route.ts	2026-11-18 21:50:16.416791240 +0000
++++ b/src/app/api/assignment-requests/route.ts	2026-11-18 21:49:03.000000000 +0000
+@@ -33,7 +33,14 @@
+ 
+   const empIds = [...new Set(rows.map((r) => r.employeeId))]
+   const cusIds = [...new Set(rows.map((r) => r.customerId))]
+-  const [employees, customers] = await Promise.all([
++  // Phase 13 (typing debt): the `Promise.resolve([])` branches leave a
++  // union that degrades `employees`/`customers` to `any[]`, which breaks the
++  // Map tuple inference below (TS2769) and types the map values as `{}`
++  // (TS2339). The tuple annotation restores the exact selected shapes —
++  // no runtime change (`never[]` was already assignable to these).
++  type EmpRow = { id: string; name: string; username: string; active: boolean }
++  type CusRow = { id: string; name: string }
++  const [employees, customers]: [EmpRow[], CusRow[]] = await Promise.all([
+     empIds.length
+       ? db.employee.findMany({ where: { id: { in: empIds } }, select: { id: true, name: true, username: true, active: true } })
+       : Promise.resolve([]),
+diff -ruN a/src/app/api/assignments/bulk/route.ts b/src/app/api/assignments/bulk/route.ts
+--- a/src/app/api/assignments/bulk/route.ts	2026-11-18 21:50:16.448791180 +0000
++++ b/src/app/api/assignments/bulk/route.ts	2026-11-18 21:49:03.000000000 +0000
+@@ -83,7 +83,12 @@
+   }
+ 
+   // resolve names up front (unknown ids become per-pair failures)
+-  const [employees, customers] = await Promise.all([
++  // Phase 13 (typing debt): same union-degradation fix as the
++  // assignment-requests route — the tuple annotation restores the Map
++  // tuple inference and the `emp.active`/`emp.name` accesses below.
++  type EmpRow = { id: string; name: string; username: string; active: boolean }
++  type CusRow = { id: string; name: string }
++  const [employees, customers]: [EmpRow[], CusRow[]] = await Promise.all([
+     allEmployees ? Promise.resolve([]) : db.employee.findMany({
+       where: { id: { in: employeeIds } },
+       select: { id: true, name: true, username: true, active: true },
+@@ -136,8 +141,8 @@
+             failed.push({
+               employeeId: empId,
+               customerId: cusId,
+-              employeeName: (emp as { name?: string }).name,
+-              customerName: (cus as { name?: string }).name,
++              employeeName: emp.name,
++              customerName: cus.name,
+               reason: geoReason,
+             })
+             continue
+diff -ruN a/src/lib/audit.ts b/src/lib/audit.ts
+--- a/src/lib/audit.ts	2026-11-18 21:50:16.416791240 +0000
++++ b/src/lib/audit.ts	2026-11-18 21:49:02.000000000 +0000
+@@ -23,7 +23,10 @@
+   actorType?: 'admin' | 'employee'
+   actorId?: string
+   targetType?: string
+-  targetId?: string
++  /** null = the action has no single target row (bulk operations).
++   *  The DB column is nullable and writeAudit maps undefined the same
++   *  way (`?? null`) — Phase 13 typing fix, no runtime change. */
++  targetId?: string | null
+   detail?: string
+   outcome?: 'success' | 'failure'
+ }
+diff -ruN a/src/lib/types.ts b/src/lib/types.ts
+--- a/src/lib/types.ts	2026-11-18 21:50:16.436791203 +0000
++++ b/src/lib/types.ts	2026-11-18 21:49:02.000000000 +0000
+@@ -8,7 +8,7 @@
+   active: boolean
+   createdAt: string
+   assignments?: { id: string; customer: { id: string; name: string } }[]
+-  _count?: { checkins: number }
++  _count?: { checkins: number; tokens: number } // tokens = app sessions (/api/employees selects both)
+ }
+ 
+ export interface Customer {
