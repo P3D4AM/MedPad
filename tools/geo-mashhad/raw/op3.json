@@ -1,0 +1,5344 @@
+{
+  "version": 0.6,
+  "generator": "Overpass API 0.7.62.4 2390de5a",
+  "osm3s": {
+    "timestamp_osm_base": "2026-11-18T06:15:21Z",
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+
+{
+  "type": "node",
+  "id": 264682363,
+  "lat": 36.2092982,
+  "lon": 59.6648343,
+  "tags": {
+    "name": "طرق",
+    "name:en": "Toroq",
+    "place": "neighbourhood",
+    "wikidata": "Q5804630"
+  }
+},
+{
+  "type": "node",
+  "id": 391904677,
+  "lat": 36.2934767,
+  "lon": 59.6187556,
+  "tags": {
+    "name": "نوغان",
+    "name:en": "Nowghan",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 409169134,
+  "lat": 36.2973603,
+  "lon": 59.6390836,
+  "tags": {
+    "name": "شادکان",
+    "name:en": "Shadkan Community",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 409169136,
+  "lat": 36.2984529,
+  "lon": 59.5908596,
+  "tags": {
+    "name": "سناباد",
+    "name:en": "Sanabad",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 409214247,
+  "lat": 36.3180937,
+  "lon": 59.5166529,
+  "tags": {
+    "name": "کوثر",
+    "name:en": "Kosar",
+    "old_name": "کوی کوکاکولا",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 454078687,
+  "lat": 36.3135873,
+  "lon": 59.6639611,
+  "tags": {
+    "alt_name": "میثم",
+    "name": "رده",
+    "name:en": "Radeh",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 454078696,
+  "lat": 36.3023902,
+  "lon": 59.6431502,
+  "tags": {
+    "name": "کوی طلاب",
+    "name:en": "Tollab",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 479156361,
+  "lat": 36.3682129,
+  "lon": 59.5072295,
+  "tags": {
+    "name": "امامیه",
+    "name:en": "Emamieh",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 517343130,
+  "lat": 36.2845772,
+  "lon": 59.5698536,
+  "tags": {
+    "name": "کوهسنگی",
+    "name:en": "Kouh Sangi",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 517361617,
+  "lat": 36.2917856,
+  "lon": 59.5410229,
+  "tags": {
+    "name": "رضاشهر",
+    "name:en": "Reza Shahr",
+    "place": "neighbourhood",
+    "population": "50000"
+  }
+},
+{
+  "type": "node",
+  "id": 540917591,
+  "lat": 36.3422460,
+  "lon": 59.5515841,
+  "tags": {
+    "name": "کوی آلاله",
+    "name:en": "Kuy-e Alaleh",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 543438826,
+  "lat": 36.3311290,
+  "lon": 59.5399517,
+  "tags": {
+    "name": "آزادشهر",
+    "name:en": "Azadshahr",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 543438832,
+  "lat": 36.3410101,
+  "lon": 59.5378348,
+  "tags": {
+    "name": "زیبا شهر",
+    "name:en": "Ziba Shahr",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 544061180,
+  "lat": 36.3184508,
+  "lon": 59.5510317,
+  "tags": {
+    "name": "سجاد شهر",
+    "name:en": "Sajjad Shahr",
+    "place": "neighbourhood",
+    "population": "34000"
+  }
+},
+{
+  "type": "node",
+  "id": 552922032,
+  "lat": 36.2802954,
+  "lon": 59.6614510,
+  "tags": {
+    "name": "مهرآباد",
+    "name:en": "MehrAbad",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 559639910,
+  "lat": 36.2233908,
+  "lon": 59.6101905,
+  "tags": {
+    "name": "شهرک بهارستان",
+    "name:en": "Shahrak Baharestan",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 559642390,
+  "lat": 36.2002131,
+  "lon": 59.6513759,
+  "tags": {
+    "name": "ایوان",
+    "name:en": "Eyvan",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 559642393,
+  "lat": 36.2139749,
+  "lon": 59.6194540,
+  "tags": {
+    "name": "شهرک ابوذر",
+    "name:en": "Shahrak Abouzar",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 662429380,
+  "lat": 36.2940987,
+  "lon": 59.5486887,
+  "tags": {
+    "name": "نوفل لوشاتو",
+    "name:en": "Nofel Loshato",
+    "name:fr": "Neauphle le Chateau",
+    "place": "neighbourhood",
+    "population": "5000"
+  }
+},
+{
+  "type": "node",
+  "id": 663878216,
+  "lat": 36.2401269,
+  "lon": 59.5947852,
+  "tags": {
+    "name": "کوی ولیعصر",
+    "name:en": "Kuy Valiasr",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 663878218,
+  "lat": 36.2431966,
+  "lon": 59.6106537,
+  "tags": {
+    "name": "کوی سیدی",
+    "name:en": "Kuy Seyedi",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 663878220,
+  "lat": 36.2506859,
+  "lon": 59.5990396,
+  "tags": {
+    "name": "کوی المهدی",
+    "name:en": "AlMahdi",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 663878221,
+  "lat": 36.2551107,
+  "lon": 59.6032429,
+  "tags": {
+    "name": "کوی پلیس",
+    "name:en": "Koye Police",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 667359301,
+  "lat": 36.3621677,
+  "lon": 59.4919591,
+  "tags": {
+    "name": "شهرک لشکر",
+    "name:en": "Lashkar",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 667882563,
+  "lat": 36.3179385,
+  "lon": 59.4835861,
+  "tags": {
+    "name": "آب و برق",
+    "name:en": "Aab-o-Bargh",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 667882564,
+  "lat": 36.3230340,
+  "lon": 59.4679693,
+  "tags": {
+    "name": "شهرآرا",
+    "name:en": "ShahrAra",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 668278501,
+  "lat": 36.3525786,
+  "lon": 59.4769303,
+  "tags": {
+    "name": "شهرک مطهری",
+    "name:en": "Motahari Community",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 668278518,
+  "lat": 36.3744340,
+  "lon": 59.4773456,
+  "tags": {
+    "name": "الهیه",
+    "name:en": "Elahiyeh Community",
+    "place": "neighbourhood",
+    "population": "100000"
+  }
+},
+{
+  "type": "node",
+  "id": 668278628,
+  "lat": 36.3574759,
+  "lon": 59.5375389,
+  "tags": {
+    "name": "شهرک رازی",
+    "name:en": "Razi Community",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 672844673,
+  "lat": 36.3376631,
+  "lon": 59.6539294,
+  "tags": {
+    "is_in:country": "Iran",
+    "is_in:state": "Razavi Khorasan",
+    "name": "سیس آباد",
+    "name:en": "SisAbad",
+    "place": "neighbourhood",
+    "population": "12000"
+  }
+},
+{
+  "type": "node",
+  "id": 679758420,
+  "lat": 36.2877899,
+  "lon": 59.5315100,
+  "tags": {
+    "name": "شهرک شادیلون",
+    "name:en": "Shadiloon Community",
+    "place": "neighbourhood",
+    "population": "5000"
+  }
+},
+{
+  "type": "node",
+  "id": 679758425,
+  "lat": 36.2916844,
+  "lon": 59.5325485,
+  "tags": {
+    "name": "شهرک نفت",
+    "name:en": "Naft Community",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 679758432,
+  "lat": 36.3004673,
+  "lon": 59.5012517,
+  "tags": {
+    "name": "چهارچشمه",
+    "name:en": "Chahar Cheshmeh",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 679758435,
+  "lat": 36.3287366,
+  "lon": 59.4658752,
+  "tags": {
+    "name": "شهرک پاچنار",
+    "name:en": "Pachenar Community",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 679758443,
+  "lat": 36.3052515,
+  "lon": 59.4897122,
+  "tags": {
+    "name": "نیروی هوایی",
+    "name:en": "Niroo Havaee",
+    "old_name": "شهرک نیروی هوایی",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 679779116,
+  "lat": 36.3414750,
+  "lon": 59.5804464,
+  "tags": {
+    "name": "امیر",
+    "name:en": "Amir",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 679779121,
+  "lat": 36.3164678,
+  "lon": 59.6141763,
+  "tags": {
+    "name": "سمزقند",
+    "name:en": "Samezghand",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 694169379,
+  "lat": 36.3590764,
+  "lon": 59.5469321,
+  "tags": {
+    "name": "شهرک امام هادی",
+    "name:en": "Imam Hadi Community",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 720897184,
+  "lat": 36.2498513,
+  "lon": 59.7160741,
+  "tags": {
+    "is_in:country": "Iran",
+    "is_in:state": "Razavi Khorasan",
+    "name": "شهرک شهید باهنر",
+    "name:en": "ba honar",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 3054033848,
+  "lat": 36.4041787,
+  "lon": 59.6694841,
+  "tags": {
+    "name": "شهرک مهرگان",
+    "name:en": "Shahrak Mehrgan",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 3168687233,
+  "lat": 36.3214037,
+  "lon": 59.6446421,
+  "tags": {
+    "name": "کوی دروی",
+    "name:en": "Daravey",
+    "place": "neighbourhood",
+    "population": "30000"
+  }
+},
+{
+  "type": "node",
+  "id": 3195309202,
+  "lat": 36.3123966,
+  "lon": 59.5488304,
+  "tags": {
+    "name": "ملک آباد",
+    "name:en": "Malek Abad",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 3281686072,
+  "lat": 36.3092881,
+  "lon": 59.5694984,
+  "tags": {
+    "name": "آبکوه",
+    "name:en": "Abkuh",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 3575234091,
+  "lat": 36.3601288,
+  "lon": 59.5142377,
+  "tags": {
+    "name": "قاسم آباد",
+    "place": "neighbourhood",
+    "population": "250000"
+  }
+},
+{
+  "type": "node",
+  "id": 3860584068,
+  "lat": 36.3181138,
+  "lon": 59.6372772,
+  "tags": {
+    "name": "منطقه ۳",
+    "name:de": "3. Bezirk",
+    "name:en": "District 3",
+    "name:fr": "Région 3",
+    "place": "suburb",
+    "population": "400000",
+    "ref": "3"
+  }
+},
+{
+  "type": "node",
+  "id": 3860680758,
+  "lat": 36.3064052,
+  "lon": 59.5748953,
+  "tags": {
+    "name": "منطقه ۱",
+    "name:de": "1. Bezirk",
+    "name:en": "District 1",
+    "name:fr": "Région 1",
+    "place": "suburb",
+    "population": "200000",
+    "ref": "1"
+  }
+},
+{
+  "type": "node",
+  "id": 3870728157,
+  "lat": 36.3031049,
+  "lon": 59.6579969,
+  "tags": {
+    "name": "منطقه ۴",
+    "name:en": "District 4",
+    "name:fr": "Région 4",
+    "place": "suburb",
+    "ref": "4"
+  }
+},
+{
+  "type": "node",
+  "id": 3870728158,
+  "lat": 36.3372666,
+  "lon": 59.5848792,
+  "tags": {
+    "name": "منطقه ۲",
+    "name:de": "2. Bezirk",
+    "name:en": "District 2",
+    "name:fr": "Région 2",
+    "place": "suburb",
+    "population": "500000",
+    "ref": "2"
+  }
+},
+{
+  "type": "node",
+  "id": 3870728357,
+  "lat": 36.3034855,
+  "lon": 59.5058453,
+  "tags": {
+    "name": "منطقه ۹",
+    "name:de": "9. Bezirk",
+    "name:en": "District 9",
+    "name:fr": "Région 9",
+    "place": "suburb",
+    "population": "280000",
+    "ref": "9"
+  }
+},
+{
+  "type": "node",
+  "id": 3870728358,
+  "lat": 36.2794985,
+  "lon": 59.5865690,
+  "tags": {
+    "name": "منطقه ۸",
+    "name:en": "District 8",
+    "name:fr": "Région 8",
+    "place": "suburb",
+    "ref": "8"
+  }
+},
+{
+  "type": "node",
+  "id": 3871041161,
+  "lat": 36.3369096,
+  "lon": 59.5089531,
+  "tags": {
+    "name": "منطقه ۱۱",
+    "name:de": "11. Bezirk",
+    "name:en": "District 11",
+    "name:fr": "Région 11",
+    "place": "suburb",
+    "ref": "11"
+  }
+},
+{
+  "type": "node",
+  "id": 3881518364,
+  "lat": 36.2517441,
+  "lon": 59.6104940,
+  "tags": {
+    "name": "منطقه ۷",
+    "name:de": "7. Bezirk",
+    "name:en": "District 7",
+    "name:fr": "Région 7",
+    "place": "suburb",
+    "population": "250000",
+    "ref": "7"
+  }
+},
+{
+  "type": "node",
+  "id": 3885650858,
+  "lat": 36.3596959,
+  "lon": 59.5189661,
+  "tags": {
+    "name": "منطقه ۱۰",
+    "name:de": "10. Bezirk",
+    "name:en": "District 10",
+    "name:fr": "Région 10",
+    "place": "suburb",
+    "population": "250000",
+    "ref": "10"
+  }
+},
+{
+  "type": "node",
+  "id": 3918035258,
+  "lat": 36.2855620,
+  "lon": 59.6509112,
+  "tags": {
+    "name": "منطقه ۵",
+    "name:de": "5. Bezirk",
+    "name:en": "District 5",
+    "name:fr": "Région 5",
+    "place": "suburb"
+  }
+},
+{
+  "type": "node",
+  "id": 3918035358,
+  "lat": 36.2691718,
+  "lon": 59.6454536,
+  "tags": {
+    "name": "منطقه ۶",
+    "name:de": "6. Bezirk",
+    "name:en": "District 6",
+    "name:fr": "Région 6",
+    "place": "suburb"
+  }
+},
+{
+  "type": "node",
+  "id": 4419612778,
+  "lat": 36.2770504,
+  "lon": 59.6957160,
+  "tags": {
+    "is_in:country": "Iran",
+    "is_in:state": "Razavi Khorasan",
+    "name": "مهدی آباد",
+    "place": "neighbourhood",
+    "population": "454"
+  }
+},
+{
+  "type": "node",
+  "id": 4512748444,
+  "lat": 36.3646442,
+  "lon": 59.4648805,
+  "tags": {
+    "name": "مجتمع مسکونی تجاری آرمس",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5174476547,
+  "lat": 36.3475124,
+  "lon": 59.4935360,
+  "tags": {
+    "name": "مجتمع فجر۴",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5349142149,
+  "lat": 36.3747661,
+  "lon": 59.5096124,
+  "tags": {
+    "name": "مجتمع مسکونی آبی و قرمز",
+    "place": "neighbourhood",
+    "residential": "apartments"
+  }
+},
+{
+  "type": "node",
+  "id": 5368952818,
+  "lat": 36.3653580,
+  "lon": 59.4657782,
+  "tags": {
+    "alt_name": "آرمس",
+    "name": "مجتمع مسکونی آثار طوس",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5463136678,
+  "lat": 36.3776412,
+  "lon": 59.5112054,
+  "tags": {
+    "name": "مجتمع مسکونی میثاق",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5895490129,
+  "lat": 36.3611723,
+  "lon": 59.4680881,
+  "tags": {
+    "name": "جاهد شهر",
+    "name:en": "Jahed shahr",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5932836635,
+  "lat": 36.3206770,
+  "lon": 59.4686180,
+  "tags": {
+    "name": "مجتمع مسکونی ولیعصر",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5964223880,
+  "lat": 36.3071022,
+  "lon": 59.5622814,
+  "tags": {
+    "name": "فلسطین",
+    "name:en": "Felestin",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5964223881,
+  "lat": 36.2917586,
+  "lon": 59.5708913,
+  "tags": {
+    "name": "احمد آباد",
+    "name:en": "Ahmad Abad",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5964223882,
+  "lat": 36.3017199,
+  "lon": 59.5702368,
+  "tags": {
+    "name": "راهنمایی",
+    "name:en": "Rahnemayi",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5964223883,
+  "lat": 36.2973836,
+  "lon": 59.5806277,
+  "tags": {
+    "name": "بهشت",
+    "name:en": "Behesht",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5964223884,
+  "lat": 36.3048802,
+  "lon": 59.5929980,
+  "tags": {
+    "name": "سعد آباد",
+    "name:en": "Saad Abad",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5964224485,
+  "lat": 36.3083991,
+  "lon": 59.5837068,
+  "tags": {
+    "name": "کلاهدوز",
+    "name:en": "Kolahduz",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5964224486,
+  "lat": 36.3126786,
+  "lon": 59.5784497,
+  "tags": {
+    "name": "گوهرشاد",
+    "name:en": "Goharshad",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5964224487,
+  "lat": 36.3170952,
+  "lon": 59.5707063,
+  "tags": {
+    "name": "ارشاد",
+    "name:en": "Ershad",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5966309543,
+  "lat": 36.3608611,
+  "lon": 59.6048641,
+  "tags": {
+    "name": "وحدت",
+    "name:en": "Vahdat",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5966309544,
+  "lat": 36.3472779,
+  "lon": 59.5729136,
+  "tags": {
+    "name": "فدک",
+    "name:en": "Fadak",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5966309545,
+  "lat": 36.3459903,
+  "lon": 59.5581829,
+  "tags": {
+    "name": "بهاران",
+    "name:en": "Baharan",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5966309546,
+  "lat": 36.3317451,
+  "lon": 59.5609365,
+  "tags": {
+    "name": "جانباز",
+    "name:en": "Janbaz",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5966309547,
+  "lat": 36.3322879,
+  "lon": 59.5499217,
+  "tags": {
+    "name": "شهید فرامرز عباسی",
+    "name:en": "Faramarz Abbasi",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5966309548,
+  "lat": 36.3354901,
+  "lon": 59.5990169,
+  "tags": {
+    "name": "هدایت",
+    "name:en": "Hedayat",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5966309549,
+  "lat": 36.3329491,
+  "lon": 59.5841360,
+  "tags": {
+    "name": "قائم",
+    "name:en": "Ghaem",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5966309550,
+  "lat": 36.3304685,
+  "lon": 59.6105182,
+  "tags": {
+    "name": "ایثارگران",
+    "name:en": "Isargaran",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5966309551,
+  "lat": 36.3092982,
+  "lon": 59.5961952,
+  "tags": {
+    "name": "عامل",
+    "name:en": "Amel",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5966309552,
+  "lat": 36.3272186,
+  "lon": 59.6118057,
+  "tags": {
+    "name": "شفا",
+    "name:en": "Shafa",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5966309553,
+  "lat": 36.3155229,
+  "lon": 59.5997572,
+  "tags": {
+    "name": "شهید مطهری",
+    "name:en": "Motahari",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5966309554,
+  "lat": 36.3108025,
+  "lon": 59.6060228,
+  "tags": {
+    "name": "آیت الله عبادی",
+    "name:en": "Ebadi",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5966309555,
+  "lat": 36.3234239,
+  "lon": 59.6065539,
+  "tags": {
+    "name": "هنرور",
+    "name:en": "Honarvar",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5969114796,
+  "lat": 36.3935995,
+  "lon": 59.5221877,
+  "tags": {
+    "name": "شهید بصیر",
+    "name:en": "Shahid Basir",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5969114797,
+  "lat": 36.3894043,
+  "lon": 59.5279357,
+  "tags": {
+    "name": "شهرک مطهری",
+    "name:en": "Shahrak Motahari",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5969114798,
+  "lat": 36.3870356,
+  "lon": 59.5305294,
+  "tags": {
+    "name": "مشهدقلی",
+    "name:en": "MashhadGholi",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5969114799,
+  "lat": 36.3840515,
+  "lon": 59.5339197,
+  "tags": {
+    "name": "توس",
+    "name:en": "Toos",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5969114800,
+  "lat": 36.3672241,
+  "lon": 59.5512629,
+  "tags": {
+    "name": "مهدی آباد",
+    "name:en": "Mehdi Abad",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5969114802,
+  "lat": 36.3633061,
+  "lon": 59.5596421,
+  "tags": {
+    "name": "حضرت حجت",
+    "name:en": "Hazrat Hojjat",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5969114803,
+  "lat": 36.3516765,
+  "lon": 59.5675805,
+  "tags": {
+    "name": "شهرک نوید",
+    "name:en": "Navid",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5971995992,
+  "lat": 36.3195686,
+  "lon": 59.6305704,
+  "tags": {
+    "name": "گاز",
+    "name:en": "Gas",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5971995993,
+  "lat": 36.3127045,
+  "lon": 59.6430373,
+  "tags": {
+    "name": "رسالت",
+    "name:en": "Resalat",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5971995994,
+  "lat": 36.3057915,
+  "lon": 59.6225409,
+  "tags": {
+    "name": "راه آهن",
+    "name:en": "Rah Ahan",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5971995995,
+  "lat": 36.3002371,
+  "lon": 59.6133828,
+  "tags": {
+    "name": "شهید هاشمی نژاد",
+    "name:en": "Shahid HashemiNejad",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5971995996,
+  "lat": 36.3145373,
+  "lon": 59.6259463,
+  "tags": {
+    "name": "فاطمیه",
+    "name:en": "Fatemiyeh",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5971995997,
+  "lat": 36.3284286,
+  "lon": 59.6288538,
+  "tags": {
+    "name": "بلال",
+    "name:en": "Belal",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5971995998,
+  "lat": 36.3271062,
+  "lon": 59.6684861,
+  "tags": {
+    "name": "طبرسی شمالی",
+    "name:en": "North Tabarsi",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5971995999,
+  "lat": 36.3394829,
+  "lon": 59.6280169,
+  "tags": {
+    "name": "خواجه ربیع",
+    "name:en": "Khajeh Rabi",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5971996000,
+  "lat": 36.3451002,
+  "lon": 59.6220624,
+  "tags": {
+    "name": "بهمن",
+    "name:en": "Bahman",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5971996016,
+  "lat": 36.4001110,
+  "lon": 59.6760177,
+  "tags": {
+    "name": "شهید شهریاری",
+    "name:en": "Shahid Shahriari",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5981009092,
+  "lat": 36.2998566,
+  "lon": 59.6577787,
+  "tags": {
+    "name": "تلگرد",
+    "name:en": "Telgerd",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5981009093,
+  "lat": 36.2939853,
+  "lon": 59.6526825,
+  "tags": {
+    "name": "گلشور",
+    "name:en": "Golshur",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5981009094,
+  "lat": 36.2956196,
+  "lon": 59.6404195,
+  "tags": {
+    "name": "ایثار",
+    "name:en": "Isar",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5981009095,
+  "lat": 36.3076209,
+  "lon": 59.6517706,
+  "tags": {
+    "name": "ابوذر",
+    "name:en": "Abuzar",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5981009096,
+  "lat": 36.3044133,
+  "lon": 59.6549892,
+  "tags": {
+    "name": "وحید",
+    "name:en": "Vahid",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5981009097,
+  "lat": 36.3089999,
+  "lon": 59.6694249,
+  "tags": {
+    "name": "پنجتن",
+    "name:en": "Panjtan",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5981009098,
+  "lat": 36.3206318,
+  "lon": 59.6790540,
+  "tags": {
+    "name": "شهید قربانی",
+    "name:en": "Shahid Ghorbani",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5981009099,
+  "lat": 36.3188943,
+  "lon": 59.6878838,
+  "tags": {
+    "name": "پنجتن آل عبا",
+    "name:en": "Panjtan Al Abaa",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5984879877,
+  "lat": 36.2849915,
+  "lon": 59.6483266,
+  "tags": {
+    "name": "حسین آباد",
+    "name:en": "Hossein Abad",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5984879878,
+  "lat": 36.2858218,
+  "lon": 59.6343685,
+  "tags": {
+    "name": "رضاییه",
+    "name:en": "Rezayieh",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5984879879,
+  "lat": 36.2862542,
+  "lon": 59.6393680,
+  "tags": {
+    "name": "سجادیه",
+    "name:en": "Sajjadiyeh",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5984879880,
+  "lat": 36.2862801,
+  "lon": 59.6722841,
+  "tags": {
+    "name": "ثامن",
+    "name:en": "Samen",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5984879881,
+  "lat": 36.2979024,
+  "lon": 59.6675420,
+  "tags": {
+    "name": "شهید آوینی",
+    "name:en": "Shahid Avini",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5984879882,
+  "lat": 36.3028483,
+  "lon": 59.6843433,
+  "tags": {
+    "is_in:country": "Iran",
+    "is_in:state": "Razavi Khorasan",
+    "name": "نیزه",
+    "name:en": "Neyzeh",
+    "place": "neighbourhood",
+    "population": "127"
+  }
+},
+{
+  "type": "node",
+  "id": 5984879883,
+  "lat": 36.2940112,
+  "lon": 59.6819079,
+  "tags": {
+    "name": "امیر المومنین",
+    "name:en": "Amir AlMomenin",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5985294011,
+  "lat": 36.2708589,
+  "lon": 59.6301627,
+  "tags": {
+    "name": "شیرودی",
+    "name:en": "Shirudi",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5985294012,
+  "lat": 36.2757286,
+  "lon": 59.6247876,
+  "tags": {
+    "name": "چهنو",
+    "name:en": "Chahnow",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5985294013,
+  "lat": 36.2678486,
+  "lon": 59.6448612,
+  "tags": {
+    "name": "کارمندان دوم",
+    "name:en": "Karmandan Dovom",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5985294014,
+  "lat": 36.2771211,
+  "lon": 59.6325445,
+  "tags": {
+    "name": "کارمندان اول",
+    "name:en": "Karmandan Aval",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5985294015,
+  "lat": 36.2641117,
+  "lon": 59.6380699,
+  "tags": {
+    "name": "محمد آباد",
+    "name:en": "Mohammad Abad",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5985294016,
+  "lat": 36.2574980,
+  "lon": 59.6367770,
+  "tags": {
+    "name": "مصطفی خمینی",
+    "name:en": "Mostafa Khomeini",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5985294017,
+  "lat": 36.2538946,
+  "lon": 59.6546030,
+  "tags": {
+    "name": "شهرک شیرین",
+    "name:en": "Shahrak Shirin",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5985294018,
+  "lat": 36.2562651,
+  "lon": 59.6748805,
+  "tags": {
+    "name": "کشاورز",
+    "name:en": "Keshavarz",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5985294019,
+  "lat": 36.2597949,
+  "lon": 59.6662760,
+  "tags": {
+    "name": "شهید معقول",
+    "name:en": "Shahid Maghul",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5985294020,
+  "lat": 36.2648643,
+  "lon": 59.6569204,
+  "tags": {
+    "name": "امیر آباد",
+    "name:en": "Amir Abad",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5985294021,
+  "lat": 36.2731511,
+  "lon": 59.6750092,
+  "tags": {
+    "name": "پورسینا",
+    "name:en": "Pursina",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5985294022,
+  "lat": 36.2661791,
+  "lon": 59.6790004,
+  "tags": {
+    "name": "موعود",
+    "name:en": "Mowud",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5985294023,
+  "lat": 36.2643106,
+  "lon": 59.6823048,
+  "tags": {
+    "name": "اروند",
+    "name:en": "Arvand",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5985294024,
+  "lat": 36.2642674,
+  "lon": 59.6901154,
+  "tags": {
+    "name": "انصار",
+    "name:en": "Ansar",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5992893231,
+  "lat": 36.2332660,
+  "lon": 59.6286285,
+  "tags": {
+    "name": "عسگریه",
+    "name:en": "Asgariyeh",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5992893232,
+  "lat": 36.2303409,
+  "lon": 59.6186614,
+  "tags": {
+    "name": "انقلاب",
+    "name:en": "Enghelab",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5992893233,
+  "lat": 36.2022437,
+  "lon": 59.6301627,
+  "tags": {
+    "name": "رباط",
+    "name:en": "Robat",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5992893234,
+  "lat": 36.2517100,
+  "lon": 59.5928639,
+  "tags": {
+    "name": "ایمان",
+    "name:en": "Iman",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5992893235,
+  "lat": 36.2586010,
+  "lon": 59.6136832,
+  "tags": {
+    "name": "پروین اعتصامی",
+    "name:en": "Parvin Etesami",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5992893236,
+  "lat": 36.2618711,
+  "lon": 59.6097886,
+  "tags": {
+    "name": "مقدم",
+    "name:en": "Moghadam",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5992893237,
+  "lat": 36.2642587,
+  "lon": 59.6248627,
+  "tags": {
+    "name": "کارگران",
+    "name:en": "Kargaran",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5992893238,
+  "lat": 36.2694922,
+  "lon": 59.6153998,
+  "tags": {
+    "name": "هفده شهریور",
+    "name:en": "Hefdah Shahrivar",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5992893239,
+  "lat": 36.2647431,
+  "lon": 59.6028900,
+  "tags": {
+    "name": "کوشش",
+    "name:en": "Kushesh",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5992893240,
+  "lat": 36.2756162,
+  "lon": 59.6110225,
+  "tags": {
+    "name": "عنصری",
+    "name:en": "Onsori",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5993022088,
+  "lat": 36.2802435,
+  "lon": 59.5720553,
+  "tags": {
+    "name": "شهید بهشتی",
+    "name:en": "Shahid Beheshti",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5993022089,
+  "lat": 36.2733241,
+  "lon": 59.5885777,
+  "tags": {
+    "name": "امام خمینی",
+    "name:en": "Imam Khomeini",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5993022090,
+  "lat": 36.2683071,
+  "lon": 59.5927834,
+  "tags": {
+    "name": "خرمشهر",
+    "name:en": "KhorramShahr",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5993022091,
+  "lat": 36.2726753,
+  "lon": 59.5993388,
+  "tags": {
+    "name": "امام رضا (ع)",
+    "name:en": "Emam Reza",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5993022092,
+  "lat": 36.2824791,
+  "lon": 59.5973539,
+  "tags": {
+    "name": "ده دی",
+    "name:en": "Dah Dey",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5993022093,
+  "lat": 36.2909241,
+  "lon": 59.5964205,
+  "tags": {
+    "name": "جنت",
+    "name:en": "Jannat",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5993022094,
+  "lat": 36.2785093,
+  "lon": 59.6027076,
+  "tags": {
+    "name": "سلام",
+    "name:en": "Salam",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5993022095,
+  "lat": 36.2826824,
+  "lon": 59.6049607,
+  "tags": {
+    "name": "دانش",
+    "name:en": "Danesh",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5993022096,
+  "lat": 36.2869547,
+  "lon": 59.6070528,
+  "tags": {
+    "name": "آیت الله خامنه ای",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5993022097,
+  "lat": 36.2933973,
+  "lon": 59.6044242,
+  "tags": {
+    "name": "سراب",
+    "name:ar": "سراب",
+    "name:en": "Sarab",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5999662341,
+  "lat": 36.3333813,
+  "lon": 59.4697666,
+  "tags": {
+    "name": "اقبال",
+    "name:en": "Eghbal",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5999662342,
+  "lat": 36.3264536,
+  "lon": 59.4926351,
+  "tags": {
+    "name": "حافظ",
+    "name:en": "Hafez",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5999662343,
+  "lat": 36.3197155,
+  "lon": 59.5044851,
+  "tags": {
+    "name": "هنرستان",
+    "name:en": "Honarestan",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5999662344,
+  "lat": 36.2949797,
+  "lon": 59.5106327,
+  "tags": {
+    "name": "سرافرازان",
+    "name:en": "SarAfrazan",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5999662345,
+  "lat": 36.2796640,
+  "lon": 59.5439672,
+  "tags": {
+    "name": "بهارستان",
+    "name:en": "Baharestan",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5999783910,
+  "lat": 36.3495332,
+  "lon": 59.4842505,
+  "tags": {
+    "name": "نرگس",
+    "name:en": "Nargess",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5999783911,
+  "lat": 36.3500863,
+  "lon": 59.5218390,
+  "tags": {
+    "name": "ولیعصر",
+    "name:en": "ValiAsr",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5999783912,
+  "lat": 36.3563293,
+  "lon": 59.5192641,
+  "tags": {
+    "name": "استاد یوسفی",
+    "name:en": "Ostad Yusefi",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5999783913,
+  "lat": 36.3530934,
+  "lon": 59.5040774,
+  "tags": {
+    "name": "شاهد",
+    "name:en": "Shahed",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5999783914,
+  "lat": 36.3550202,
+  "lon": 59.4958752,
+  "tags": {
+    "name": "فرهنگیان",
+    "name:en": "Farhangian",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5999783915,
+  "lat": 36.3728351,
+  "lon": 59.5242798,
+  "tags": {
+    "name": "خاتم الانبیا",
+    "name:en": "Khatam AlAnbia",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5999783916,
+  "lat": 36.3696517,
+  "lon": 59.5161152,
+  "tags": {
+    "name": "حجاب",
+    "name:en": "Hejab",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5999783917,
+  "lat": 36.3755475,
+  "lon": 59.5350623,
+  "tags": {
+    "name": "ایثارگران",
+    "name:en": "Isargaran",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5999874136,
+  "lat": 36.3421274,
+  "lon": 59.4694233,
+  "tags": {
+    "name": "فارغ التحصیلان",
+    "name:en": "Fareghottahsilan",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5999874137,
+  "lat": 36.3422139,
+  "lon": 59.4888639,
+  "tags": {
+    "name": "تربیت",
+    "name:en": "Tarbiat",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5999874138,
+  "lat": 36.3373828,
+  "lon": 59.4827914,
+  "tags": {
+    "name": "شریف",
+    "name:en": "Sharif",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5999874139,
+  "lat": 36.3317088,
+  "lon": 59.5036643,
+  "tags": {
+    "name": "دانشجو",
+    "name:en": "Daneshjoo",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5999874140,
+  "lat": 36.3267086,
+  "lon": 59.5184004,
+  "tags": {
+    "name": "فرهنگ",
+    "name:en": "Farhang",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5999874141,
+  "lat": 36.3354728,
+  "lon": 59.5218980,
+  "tags": {
+    "name": "سید رضی",
+    "name:en": "Seyyed Razi",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 5999874142,
+  "lat": 36.3416781,
+  "lon": 59.5236039,
+  "tags": {
+    "name": "شهید رضوی",
+    "name:en": "Shahid Razavi",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 6000029312,
+  "lat": 36.3880029,
+  "lon": 59.4868469,
+  "tags": {
+    "name": "امیریه",
+    "name:en": "Amiriyeh",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 6000029313,
+  "lat": 36.3455842,
+  "lon": 59.4539738,
+  "tags": {
+    "name": "وکیل آباد",
+    "name:en": "Vakil Abad",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 6000640184,
+  "lat": 36.2992686,
+  "lon": 59.6223414,
+  "tags": {
+    "name": "دریادل",
+    "name:en": "DaryaDel",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 6000644185,
+  "lat": 36.2940112,
+  "lon": 59.6139729,
+  "tags": {
+    "name": "بالا خیابان",
+    "name:en": "Bala Khiaban",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 6000644186,
+  "lat": 36.2825527,
+  "lon": 59.6164942,
+  "tags": {
+    "name": "عیدگاه",
+    "name:en": "Eidgah",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 6000644187,
+  "lat": 36.2881827,
+  "lon": 59.6220088,
+  "tags": {
+    "name": "پایین خیابان",
+    "name:en": "Paeen Khiaban",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 6000644486,
+  "lat": 36.2893156,
+  "lon": 59.6211076,
+  "tags": {
+    "name": "منطقه ثامن",
+    "name:en": "Samen District",
+    "place": "suburb"
+  }
+},
+{
+  "type": "node",
+  "id": 6109812770,
+  "lat": 36.2702615,
+  "lon": 59.5505796,
+  "tags": {
+    "name": "آبادگران",
+    "name:en": "AbadGaran",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 6716230010,
+  "lat": 36.2659110,
+  "lon": 59.5396060,
+  "tags": {
+    "name": "مجتمع مسکونی برج های ‌آسمان",
+    "operator": "تعاونی مسکن آزاد شماره ۱",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 6932405012,
+  "lat": 36.3037133,
+  "lon": 59.6141516,
+  "tags": {
+    "name": "آیت الله کاشانی",
+    "name:en": "Kashani",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 7035457103,
+  "lat": 36.3186868,
+  "lon": 59.6556758,
+  "tags": {
+    "name": "عباس آباد",
+    "name:en": "Abbas Abad",
+    "natural": "tree",
+    "place": "neighbourhood",
+    "population": "30000"
+  }
+},
+{
+  "type": "node",
+  "id": 7035457106,
+  "lat": 36.3036784,
+  "lon": 59.6300983,
+  "tags": {
+    "name": "سیلو",
+    "name:en": "Siloo",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 7035457114,
+  "lat": 36.3073789,
+  "lon": 59.6365785,
+  "tags": {
+    "name": "خیرآباد",
+    "name:en": "Kheir Abad",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 7035457120,
+  "lat": 36.2757286,
+  "lon": 59.5245695,
+  "tags": {
+    "name": "زکریا",
+    "name:en": "Zakariya",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 7035457132,
+  "lat": 36.3134999,
+  "lon": 59.5316934,
+  "tags": {
+    "name": "دانشگاه",
+    "name:en": "University",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 7035457141,
+  "lat": 36.3358704,
+  "lon": 59.4452190,
+  "tags": {
+    "name": "کوهستان پارک",
+    "name:en": "Koohestan Park",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 7257209304,
+  "lat": 36.2825440,
+  "lon": 59.6300125,
+  "tags": {
+    "name": "جلالیه",
+    "name:en": "Jalaliyeh",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 7257209314,
+  "lat": 36.2909154,
+  "lon": 59.6096277,
+  "tags": {
+    "name": "چهارباغ",
+    "name:en": "ChaharBagh",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 7257209315,
+  "lat": 36.2920569,
+  "lon": 59.6269655,
+  "tags": {
+    "name": "جوادیه",
+    "name:en": "Javadiyeh",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 7257209316,
+  "lat": 36.2867990,
+  "lon": 59.6253776,
+  "tags": {
+    "name": "کوی راد",
+    "name:en": "Raad",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 7416376167,
+  "lat": 36.3502851,
+  "lon": 59.4733715,
+  "tags": {
+    "name": "یوسفیه",
+    "name:en": "Usefiyeh",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 7416376168,
+  "lat": 36.3546055,
+  "lon": 59.4817829,
+  "tags": {
+    "name": "میعاد",
+    "name:en": "Miad",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 7416376169,
+  "lat": 36.3245476,
+  "lon": 59.6353769,
+  "tags": {
+    "name": "قائم",
+    "name:en": "Ghaem",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 7416376178,
+  "lat": 36.3250145,
+  "lon": 59.5909595,
+  "tags": {
+    "name": "گلبرگ",
+    "name:en": "GolBarg",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 7416376179,
+  "lat": 36.3253602,
+  "lon": 59.5813464,
+  "tags": {
+    "name": "فتح المبین",
+    "name:en": "Fath Olmobin",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 7416376180,
+  "lat": 36.3200354,
+  "lon": 59.5857238,
+  "tags": {
+    "name": "خاتم الانبیا",
+    "name:en": "Khatam OlAnbia",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 7416376181,
+  "lat": 36.3202429,
+  "lon": 59.5927619,
+  "tags": {
+    "name": "حجت",
+    "name:en": "Hojjat",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 7416376182,
+  "lat": 36.3199663,
+  "lon": 59.5982551,
+  "tags": {
+    "alt_name": "نکاح",
+    "name": "رئوف",
+    "name:en": "Nekah",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 7416376183,
+  "lat": 36.3265358,
+  "lon": 59.6000575,
+  "tags": {
+    "name": "یاس",
+    "name:en": "Yas",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 7416376184,
+  "lat": 36.3286102,
+  "lon": 59.5952510,
+  "tags": {
+    "name": "گلبرگ شمالی",
+    "name:en": "Northern GolBarg",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 7416411085,
+  "lat": 36.3318601,
+  "lon": 59.5944785,
+  "tags": {
+    "name": "موسوی قوچانی",
+    "name:en": "Moosavi Ghouchani",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 7416411154,
+  "lat": 36.3396731,
+  "lon": 59.5918178,
+  "tags": {
+    "name": "زمرد",
+    "name:en": "Zomorrod",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 7660223117,
+  "lat": 36.3260863,
+  "lon": 59.5923328,
+  "tags": {
+    "name": "گلبرگ",
+    "name:en": "GolBarg",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 7660241073,
+  "lat": 36.3077248,
+  "lon": 59.4766330,
+  "tags": {
+    "name": "نه دره",
+    "name:en": "Noh Darreh",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 7660241082,
+  "lat": 36.3639541,
+  "lon": 59.5208573,
+  "tags": {
+    "name": "ادیب نیشابوری",
+    "name:en": "Adib Neyshabouri",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 7660246886,
+  "lat": 36.3496456,
+  "lon": 59.4956445,
+  "tags": {
+    "name": "حسابی جنوبی",
+    "name:en": "Hesabi Jonoubi",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 8019505764,
+  "lat": 36.3825485,
+  "lon": 59.4892180,
+  "tags": {
+    "name": "مجتمع مسکونی نسیم",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 8078732795,
+  "lat": 36.2040917,
+  "lon": 59.6637891,
+  "tags": {
+    "name": "شهرک طرق",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 8676887254,
+  "lat": 36.3403299,
+  "lon": 59.6051377,
+  "tags": {
+    "name": "شهرک قدس",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 8809115951,
+  "lat": 36.3750983,
+  "lon": 59.5247841,
+  "tags": {
+    "name": "مجتمع آفتاب",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 8889455300,
+  "lat": 36.2905099,
+  "lon": 59.5595239,
+  "tags": {
+    "building": "apartments",
+    "name": "مجتمع مسکونی تک مشهد",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 10734568083,
+  "lat": 36.2861590,
+  "lon": 59.6951258,
+  "tags": {
+    "name": "کریم آباد",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 11150511637,
+  "lat": 36.3503736,
+  "lon": 59.5997974,
+  "tags": {
+    "name": "شهرک مسکونی الماس",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 11247563320,
+  "lat": 36.3774954,
+  "lon": 59.5479798,
+  "tags": {
+    "name": "نوده",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 11520124567,
+  "lat": 36.3397961,
+  "lon": 59.4741972,
+  "tags": {
+    "name": "دندانپزشکان",
+    "name:en": "Dandanpezeshkan",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 11637380039,
+  "lat": 36.3824654,
+  "lon": 59.4896713,
+  "tags": {
+    "name": "مجتمع مسکونی آناهید",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 11731465615,
+  "lat": 36.2936026,
+  "lon": 59.5204523,
+  "tags": {
+    "name": "مجتمع مسکونی الماس",
+    "name:en": "Diamond residential complex",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 12137470648,
+  "lat": 36.3473643,
+  "lon": 59.4680715,
+  "tags": {
+    "name": "ارمغان",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 12334387384,
+  "lat": 36.2935875,
+  "lon": 59.4897169,
+  "tags": {
+    "name": "چهار چشمه",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 13534224208,
+  "lat": 36.3375816,
+  "lon": 59.6013343,
+  "tags": {
+    "name": "صادقیه",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 13534224209,
+  "lat": 36.2882692,
+  "lon": 59.6149921,
+  "tags": {
+    "name": "حرم مطهر رضوی",
+    "name:en": "Holy Shrine",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 13534258015,
+  "lat": 36.3287096,
+  "lon": 59.5562518,
+  "tags": {
+    "name": "فردوسی",
+    "name:en": "Ferdowsi",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 13534258018,
+  "lat": 36.3353518,
+  "lon": 59.5546424,
+  "tags": {
+    "name": "زمانه",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 13534289920,
+  "lat": 36.3367759,
+  "lon": 59.5097062,
+  "tags": {
+    "name": "مهران",
+    "place": "neighbourhood"
+  }
+},
+{
+  "type": "node",
+  "id": 13592563611,
+  "lat": 36.2598435,
+  "lon": 59.6381393,
+  "tags": {
+    "addr:city": "شهر مشهد",
+    "name": "شهرک عرب ها",
+    "place": "suburb"
+  }
+},
+{
+  "type": "relation",
+  "id": 5711010,
+  "center": {
+    "lat": 36.3330714,
+    "lon": 59.5042914
+  },
+  "tags": {
+    "admin_level": "9",
+    "boundary": "administrative",
+    "name": "منطقه ۱۱",
+    "name:en": "District 11",
+    "name:fr": "Région 11",
+    "place": "suburb",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 5711407,
+  "center": {
+    "lat": 36.2921584,
+    "lon": 59.6653630
+  },
+  "tags": {
+    "admin_level": "9",
+    "boundary": "administrative",
+    "name": "منطقه ۵",
+    "name:en": "District 5",
+    "name:fr": "Région 5",
+    "place": "suburb",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 5711567,
+  "center": {
+    "lat": 36.2603569,
+    "lon": 59.6705235
+  },
+  "tags": {
+    "admin_level": "9",
+    "boundary": "administrative",
+    "name": "منطقه ۶",
+    "name:en": "District 6",
+    "name:fr": "Région 6",
+    "place": "suburb",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 5712345,
+  "center": {
+    "lat": 36.2897366,
+    "lon": 59.6187689
+  },
+  "tags": {
+    "admin_level": "9",
+    "boundary": "administrative",
+    "name": "منطقه ثامن",
+    "name:en": "Samen District",
+    "place": "suburb",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 5714586,
+  "center": {
+    "lat": 36.3627745,
+    "lon": 59.6449692
+  },
+  "tags": {
+    "admin_level": "9",
+    "boundary": "administrative",
+    "name": "منطقه ۳",
+    "name:ar": "منطقة 3",
+    "name:en": "District 3",
+    "name:fr": "Région 3",
+    "place": "suburb",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 5714602,
+  "center": {
+    "lat": 36.2750370,
+    "lon": 59.5698358
+  },
+  "tags": {
+    "admin_level": "9",
+    "boundary": "administrative",
+    "name": "منطقه ۸",
+    "name:ar": "منطقة 8",
+    "name:en": "District 8",
+    "name:fr": "Région 8",
+    "place": "suburb",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 5714616,
+  "center": {
+    "lat": 36.3724325,
+    "lon": 59.5088915
+  },
+  "tags": {
+    "admin_level": "9",
+    "boundary": "administrative",
+    "name": "منطقه ۱۰",
+    "name:en": "District 10",
+    "name:fr": "Région 10",
+    "place": "suburb",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 5722613,
+  "center": {
+    "lat": 36.3075214,
+    "lon": 59.4996761
+  },
+  "tags": {
+    "admin_level": "9",
+    "boundary": "administrative",
+    "name": "منطقه ۹",
+    "name:en": "District 9",
+    "name:fr": "Région 9",
+    "place": "suburb",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 5724225,
+  "center": {
+    "lat": 36.2342143,
+    "lon": 59.6374174
+  },
+  "tags": {
+    "admin_level": "9",
+    "boundary": "administrative",
+    "name": "منطقه ۷",
+    "name:en": "District 7",
+    "name:fr": "Région 7",
+    "place": "suburb",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 5724306,
+  "center": {
+    "lat": 36.4195513,
+    "lon": 59.4833907
+  },
+  "tags": {
+    "admin_level": "9",
+    "boundary": "administrative",
+    "name": "منطقه ۱۲",
+    "name:en": "District 12",
+    "name:fr": "Région 12",
+    "place": "suburb",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 5725071,
+  "center": {
+    "lat": 36.3104080,
+    "lon": 59.6675009
+  },
+  "tags": {
+    "admin_level": "9",
+    "boundary": "administrative",
+    "name": "منطقه ۴",
+    "name:en": "District 4",
+    "name:fr": "Région 4",
+    "place": "suburb",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 5725072,
+  "center": {
+    "lat": 36.3500911,
+    "lon": 59.5671049
+  },
+  "tags": {
+    "admin_level": "9",
+    "boundary": "administrative",
+    "name": "منطقه ۲",
+    "name:ar": "منطقة 2",
+    "name:en": "District 2",
+    "name:fr": "Région 2",
+    "place": "suburb",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8785942,
+  "center": {
+    "lat": 36.3022273,
+    "lon": 59.5703099
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "راهنمایی",
+    "name:en": "Rahnemayi",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8785943,
+  "center": {
+    "lat": 36.3181028,
+    "lon": 59.5557335
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "سجاد شهر",
+    "name:en": "Sajjad Shahr",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8785944,
+  "center": {
+    "lat": 36.2917149,
+    "lon": 59.5715079
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "احمد آباد",
+    "name:en": "Ahmad Abad",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8785945,
+  "center": {
+    "lat": 36.2972707,
+    "lon": 59.5816288
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "بهشت",
+    "name:en": "Behesht",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8785946,
+  "center": {
+    "lat": 36.3075079,
+    "lon": 59.5597741
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "فلسطین",
+    "name:en": "Felestin",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8785947,
+  "center": {
+    "lat": 36.3093586,
+    "lon": 59.5683680
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "آبکوه",
+    "name:en": "Abkuh",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8785948,
+  "center": {
+    "lat": 36.3168355,
+    "lon": 59.5690754
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "ارشاد",
+    "name:en": "Ershad",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8785949,
+  "center": {
+    "lat": 36.3135633,
+    "lon": 59.5790720
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "گوهرشاد",
+    "name:en": "Goharshad",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8785950,
+  "center": {
+    "lat": 36.3086805,
+    "lon": 59.5838299
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "کلاهدوز",
+    "name:en": "Kolahduz",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8785951,
+  "center": {
+    "lat": 36.2979587,
+    "lon": 59.5915941
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "سناباد",
+    "name:en": "Sanabad",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8785952,
+  "center": {
+    "lat": 36.3040329,
+    "lon": 59.5956342
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "سعد آباد",
+    "name:en": "Saad Abad",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8788794,
+  "center": {
+    "lat": 36.3559372,
+    "lon": 59.5993412
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "وحدت",
+    "name:en": "Vahdat",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8788795,
+  "center": {
+    "lat": 36.3445083,
+    "lon": 59.5752854
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "فدک",
+    "name:en": "Fadak",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8788796,
+  "center": {
+    "lat": 36.3388539,
+    "lon": 59.5819305
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "امیر",
+    "name:en": "Amir",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8788797,
+  "center": {
+    "lat": 36.3435613,
+    "lon": 59.5577475
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "بهاران",
+    "name:en": "Baharan",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8788798,
+  "center": {
+    "lat": 36.3345377,
+    "lon": 59.5657548
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "جانباز",
+    "name:en": "Janbaz",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8788799,
+  "center": {
+    "lat": 36.3326650,
+    "lon": 59.5485889
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "شهید فرامرز عباسی",
+    "name:en": "Faramarz Abbasi",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8788800,
+  "center": {
+    "lat": 36.3349347,
+    "lon": 59.5999865
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "هدایت",
+    "name:en": "Hedayat",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8788801,
+  "center": {
+    "lat": 36.3339937,
+    "lon": 59.5858017
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "قائم",
+    "name:en": "Ghaem",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8788802,
+  "center": {
+    "lat": 36.3309436,
+    "lon": 59.6124409
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "ایثارگران",
+    "name:en": "Isargaran",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8788803,
+  "center": {
+    "lat": 36.3244150,
+    "lon": 59.6144099
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "شفا",
+    "name:en": "Shafa",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8788804,
+  "center": {
+    "lat": 36.3090114,
+    "lon": 59.5975557
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "عامل",
+    "name:en": "Amel",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8788805,
+  "center": {
+    "lat": 36.3150629,
+    "lon": 59.6012471
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "شهید مطهری",
+    "name:en": "Motahari",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8788806,
+  "center": {
+    "lat": 36.3098584,
+    "lon": 59.6066615
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "عبادی",
+    "name:en": "Ebadi",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8788807,
+  "center": {
+    "lat": 36.3226424,
+    "lon": 59.6082253
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "هنرور",
+    "name:en": "Honarvar",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8788808,
+  "center": {
+    "lat": 36.3166232,
+    "lon": 59.6142658
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "سمزقند",
+    "name:en": "Samezghand",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8792420,
+  "center": {
+    "lat": 36.3950459,
+    "lon": 59.5204751
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "شهید بصیر",
+    "name:en": "Shahid Basir",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8792421,
+  "center": {
+    "lat": 36.3895200,
+    "lon": 59.5281408
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "شهرک مطهری",
+    "name:en": "Shahrak Motahari",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8792422,
+  "center": {
+    "lat": 36.3871158,
+    "lon": 59.5301380
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "مشهدقلی",
+    "name:en": "MashhadGholi",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8792423,
+  "center": {
+    "lat": 36.3823291,
+    "lon": 59.5356996
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "توس",
+    "name:en": "Toos",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8792424,
+  "center": {
+    "lat": 36.3675435,
+    "lon": 59.5517558
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "مهدی آباد",
+    "name:en": "Mehdi Abad",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8792426,
+  "center": {
+    "lat": 36.3594445,
+    "lon": 59.5619008
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "حضرت حجت",
+    "name:en": "Hazrat Hojjat",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8792427,
+  "center": {
+    "lat": 36.3583681,
+    "lon": 59.5757232
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "نوید",
+    "name:en": "Navid",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8796694,
+  "center": {
+    "lat": 36.3201746,
+    "lon": 59.6297911
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "گاز",
+    "name:en": "Gas",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8796695,
+  "center": {
+    "lat": 36.3126642,
+    "lon": 59.6448654
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "رسالت",
+    "name:en": "Resalat",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8796696,
+  "center": {
+    "lat": 36.3269394,
+    "lon": 59.6704559
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "طبرسی شمالی",
+    "name:en": "North Tabarsi",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8796697,
+  "center": {
+    "lat": 36.3275265,
+    "lon": 59.6292671
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "بلال",
+    "name:en": "Belal",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8796698,
+  "center": {
+    "lat": 36.3129213,
+    "lon": 59.6267975
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "فاطمیه",
+    "name:en": "Fatemiyeh",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8796699,
+  "center": {
+    "lat": 36.3052508,
+    "lon": 59.6239398
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "راه آهن",
+    "name:en": "Rah Ahan",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8796700,
+  "center": {
+    "lat": 36.2987296,
+    "lon": 59.6140708
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "شهید هاشمی نژاد",
+    "name:en": "Shahid HashemiNejad",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8796701,
+  "center": {
+    "lat": 36.3233480,
+    "lon": 59.6472450
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "کوی دروی",
+    "name:en": "Daravey",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8796702,
+  "center": {
+    "lat": 36.3386699,
+    "lon": 59.6564348
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "سیس آباد",
+    "name:en": "SisAbad",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8796703,
+  "center": {
+    "lat": 36.3425645,
+    "lon": 59.6354547
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "خواجه ربیع",
+    "name:en": "Khajeh Rabi",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8796704,
+  "center": {
+    "lat": 36.3461362,
+    "lon": 59.6194704
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "بهمن",
+    "name:en": "Bahman",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8796705,
+  "center": {
+    "lat": 36.3762595,
+    "lon": 59.6711748
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "شهید احمدی روشن",
+    "name:en": "Shahid Ahmadi Roshan",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8796706,
+  "center": {
+    "lat": 36.3891761,
+    "lon": 59.6736585
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "شهید علی محمدی",
+    "name:en": "Shahid Ali Mohammadi",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8796707,
+  "center": {
+    "lat": 36.4134976,
+    "lon": 59.6692341
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "شهرک مهرگان",
+    "name:en": "Shahrak Mehrgan",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8796708,
+  "center": {
+    "lat": 36.3999518,
+    "lon": 59.6776466
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "شهید شهریاری",
+    "name:en": "Shahid Shahriari",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8810327,
+  "center": {
+    "lat": 36.4006338,
+    "lon": 59.6721780
+  },
+  "tags": {
+    "admin_level": "10",
+    "boundary": "administrative",
+    "name": "ناحیه ۴ منطقه ۳",
+    "name:en": "Quarter 4 of District 3",
+    "place": "quarter",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8810328,
+  "center": {
+    "lat": 36.3106750,
+    "lon": 59.6229062
+  },
+  "tags": {
+    "admin_level": "10",
+    "boundary": "administrative",
+    "name": "ناحیه ۱ منطقه ۳",
+    "name:en": "Quarter 1 of District 3",
+    "place": "quarter",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8810329,
+  "center": {
+    "lat": 36.3278095,
+    "lon": 59.6590586
+  },
+  "tags": {
+    "admin_level": "10",
+    "boundary": "administrative",
+    "name": "ناحیه ۲ منطقه ۳",
+    "name:en": "Quarter 2 of District 3",
+    "place": "quarter",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8810330,
+  "center": {
+    "lat": 36.3420280,
+    "lon": 59.6262142
+  },
+  "tags": {
+    "admin_level": "10",
+    "boundary": "administrative",
+    "name": "ناحیه ۳ منطقه ۳",
+    "name:en": "Quarter 3 of District 3",
+    "place": "quarter",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8810554,
+  "center": {
+    "lat": 36.2956814,
+    "lon": 59.6371589
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "ایثار",
+    "name:en": "Isar",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8810555,
+  "center": {
+    "lat": 36.2951957,
+    "lon": 59.6510934
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "گلشور",
+    "name:en": "Golshur",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8810556,
+  "center": {
+    "lat": 36.3018505,
+    "lon": 59.6432204
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "طلاب",
+    "name:en": "Tollab",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8810557,
+  "center": {
+    "lat": 36.3071974,
+    "lon": 59.6517366
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "ابوذر",
+    "name:en": "Abuzar",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8810558,
+  "center": {
+    "lat": 36.3036706,
+    "lon": 59.6555224
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "وحید",
+    "name:en": "Vahid",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8810559,
+  "center": {
+    "lat": 36.2999687,
+    "lon": 59.6579705
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "تلگرد",
+    "name:en": "Telgerd",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8810560,
+  "center": {
+    "lat": 36.3052875,
+    "lon": 59.6712723
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "پنجتن",
+    "name:en": "Panjtan",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8810561,
+  "center": {
+    "lat": 36.3136295,
+    "lon": 59.6624466
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "رده",
+    "name:en": "Radeh",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8810562,
+  "center": {
+    "lat": 36.3154752,
+    "lon": 59.6908892
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "پنجتن آل عبا",
+    "name:en": "Panjtan Al Abaa",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8810563,
+  "center": {
+    "lat": 36.3223532,
+    "lon": 59.6835274
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "شهید قربانی",
+    "name:en": "Shahid Ghorbani",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8815013,
+  "center": {
+    "lat": 36.2819487,
+    "lon": 59.6486422
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "حسین آباد",
+    "name:en": "Hossein Abad",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8815014,
+  "center": {
+    "lat": 36.2846364,
+    "lon": 59.6350616
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "رضاییه",
+    "name:en": "Rezayieh",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8815015,
+  "center": {
+    "lat": 36.2863213,
+    "lon": 59.6394004
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "سجادیه",
+    "name:en": "Sajjadiyeh",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8815016,
+  "center": {
+    "lat": 36.2981841,
+    "lon": 59.6684444
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "شهید آوینی",
+    "name:en": "Shahid Avini",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8815017,
+  "center": {
+    "lat": 36.2873169,
+    "lon": 59.6721610
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "ثامن",
+    "name:en": "Samen",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8815018,
+  "center": {
+    "lat": 36.3045050,
+    "lon": 59.6896464
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "نیزه",
+    "name:en": "Neyzeh",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8815019,
+  "center": {
+    "lat": 36.2991054,
+    "lon": 59.6870649
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "امیر المومنین",
+    "name:en": "Amir AlMomenin",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8815020,
+  "center": {
+    "lat": 36.2775313,
+    "lon": 59.6915408
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "مهدی آباد",
+    "name:en": "Mehdi Abad",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8815021,
+  "center": {
+    "lat": 36.2790466,
+    "lon": 59.6639524
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "شهرک مهر آباد",
+    "name:en": "Shahrak MehrAbad",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8815662,
+  "center": {
+    "lat": 36.2471973,
+    "lon": 59.7138783
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "شهرک شهید باهنر",
+    "name:en": "Shahrak Shahid Bahonar",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8815663,
+  "center": {
+    "lat": 36.2760751,
+    "lon": 59.6235128
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "چهنو",
+    "name:en": "Chahnow",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8815664,
+  "center": {
+    "lat": 36.2699341,
+    "lon": 59.6310220
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "شیرودی",
+    "name:en": "Shirudi",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8815665,
+  "center": {
+    "lat": 36.2756122,
+    "lon": 59.6323127
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "کارمندان اول",
+    "name:en": "Karmandan Aval",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8815666,
+  "center": {
+    "lat": 36.2685099,
+    "lon": 59.6466830
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "کارمندان دوم",
+    "name:en": "Karmandan Dovom",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8815667,
+  "center": {
+    "lat": 36.2638573,
+    "lon": 59.6362733
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "محمد آباد",
+    "name:en": "Mohammad Abad",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8815668,
+  "center": {
+    "lat": 36.2524036,
+    "lon": 59.6412842
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "مصطفی خمینی",
+    "name:en": "Mostafa Khomeini",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8815669,
+  "center": {
+    "lat": 36.2552538,
+    "lon": 59.6545627
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "شهرک شیرین",
+    "name:en": "Shahrak Shirin",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8815670,
+  "center": {
+    "lat": 36.2533133,
+    "lon": 59.6799361
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "کشاورز",
+    "name:en": "Keshavarz",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8815671,
+  "center": {
+    "lat": 36.2559584,
+    "lon": 59.6649899
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "شهید معقول",
+    "name:en": "Shahid Maghul",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8815672,
+  "center": {
+    "lat": 36.2652637,
+    "lon": 59.6595456
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "امیر آباد",
+    "name:en": "Amir Abad",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8815673,
+  "center": {
+    "lat": 36.2744023,
+    "lon": 59.6720692
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "پورسینا",
+    "name:en": "Pursina",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8815674,
+  "center": {
+    "lat": 36.2687741,
+    "lon": 59.6796092
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "موعود",
+    "name:en": "Mowud",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8815675,
+  "center": {
+    "lat": 36.2652494,
+    "lon": 59.6839283
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "اروند",
+    "name:en": "Arvand",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8815676,
+  "center": {
+    "lat": 36.2637108,
+    "lon": 59.6906464
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "انصار",
+    "name:en": "Ansar",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824629,
+  "center": {
+    "lat": 36.2329111,
+    "lon": 59.6286984
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "عسگریه",
+    "name:en": "Asgariyeh",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824630,
+  "center": {
+    "lat": 36.2277695,
+    "lon": 59.6173988
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "انقلاب",
+    "name:en": "Enghelab",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824631,
+  "center": {
+    "lat": 36.2132630,
+    "lon": 59.6767574
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "طرق",
+    "name:en": "Toroq",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824632,
+  "center": {
+    "lat": 36.2038181,
+    "lon": 59.6571695
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "ایوان",
+    "name:en": "Eyvan",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824633,
+  "center": {
+    "lat": 36.2000108,
+    "lon": 59.6251751
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "رباط",
+    "name:en": "Robat",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824634,
+  "center": {
+    "lat": 36.2080515,
+    "lon": 59.6131654
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "شهرک ابوذر",
+    "name:en": "Shahrak Abouzar",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824635,
+  "center": {
+    "lat": 36.2244486,
+    "lon": 59.6056115
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "شهرک بهارستان",
+    "name:en": "Shahrak Baharestan",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824636,
+  "center": {
+    "lat": 36.2431475,
+    "lon": 59.6105156
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "کوی سیدی",
+    "name:en": "Kuy Seyedi",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824637,
+  "center": {
+    "lat": 36.2387780,
+    "lon": 59.5930587
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "کوی ولیعصر",
+    "name:en": "Kuy Valiasr",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824638,
+  "center": {
+    "lat": 36.2485056,
+    "lon": 59.5981586
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "کوی المهدی",
+    "name:en": "AlMahdi",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824639,
+  "center": {
+    "lat": 36.2515594,
+    "lon": 59.5917709
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "ایمان",
+    "name:en": "Iman",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824640,
+  "center": {
+    "lat": 36.2482446,
+    "lon": 59.6120265
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "کوی پلیس",
+    "name:en": "Kuy Police",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824641,
+  "center": {
+    "lat": 36.2572018,
+    "lon": 59.6142941
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "پروین اعتصامی",
+    "name:en": "Parvin Etesami",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824642,
+  "center": {
+    "lat": 36.2628761,
+    "lon": 59.6097498
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "مقدم",
+    "name:en": "Moghadam",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824643,
+  "center": {
+    "lat": 36.2632864,
+    "lon": 59.6237372
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "کارگران",
+    "name:en": "Kargaran",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824644,
+  "center": {
+    "lat": 36.2687199,
+    "lon": 59.6174984
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "هفده شهریور",
+    "name:en": "Hefdah Shahrivar",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824645,
+  "center": {
+    "lat": 36.2647615,
+    "lon": 59.6012231
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "کوشش",
+    "name:en": "Kushesh",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824646,
+  "center": {
+    "lat": 36.2758196,
+    "lon": 59.6105101
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "عنصری",
+    "name:en": "Onsori",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824866,
+  "center": {
+    "lat": 36.2777898,
+    "lon": 59.5782707
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "شهید بهشتی",
+    "name:en": "Shahid Beheshti",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824867,
+  "center": {
+    "lat": 36.2733363,
+    "lon": 59.5872675
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "امام خمینی",
+    "name:en": "Imam Khomeini",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824868,
+  "center": {
+    "lat": 36.2682473,
+    "lon": 59.5918896
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "خرمشهر",
+    "name:en": "KhorramShahr",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824869,
+  "center": {
+    "lat": 36.2746363,
+    "lon": 59.5977249
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "امام رضا (ع)",
+    "name:en": "Emam Reza",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824870,
+  "center": {
+    "lat": 36.2816916,
+    "lon": 59.5712329
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "کوهسنگی",
+    "name:en": "Kuhsangi",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824871,
+  "center": {
+    "lat": 36.2861220,
+    "lon": 59.5961353
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "ده دی",
+    "name:en": "Dah Dey",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824872,
+  "center": {
+    "lat": 36.2895202,
+    "lon": 59.5961614
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "جنت",
+    "name:en": "Jannat",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824873,
+  "center": {
+    "lat": 36.2777299,
+    "lon": 59.6026546
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "سلام",
+    "name:en": "Salam",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824874,
+  "center": {
+    "lat": 36.2825196,
+    "lon": 59.6050290
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "دانش",
+    "name:en": "Danesh",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824875,
+  "center": {
+    "lat": 36.2863816,
+    "lon": 59.6074581
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "آیت الله خامنه ای",
+    "name:en": "Ayat Allah Khamenei",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8824876,
+  "center": {
+    "lat": 36.2944629,
+    "lon": 59.6036847
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "سراب",
+    "name:ar": "سراب",
+    "name:en": "Sarab",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833659,
+  "center": {
+    "lat": 36.3347401,
+    "lon": 59.4691106
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "اقبال",
+    "name:en": "Eghbal",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833660,
+  "center": {
+    "lat": 36.3216439,
+    "lon": 59.4672232
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "شهرآرا",
+    "name:en": "ShahrAra",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833661,
+  "center": {
+    "lat": 36.3167617,
+    "lon": 59.4831083
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "آب و برق",
+    "name:en": "Aab o Bargh",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833662,
+  "center": {
+    "lat": 36.3252715,
+    "lon": 59.4921453
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "حافظ",
+    "name:en": "Hafez",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833663,
+  "center": {
+    "lat": 36.3191423,
+    "lon": 59.5043809
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "هنرستان",
+    "name:en": "Honarestan",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833664,
+  "center": {
+    "lat": 36.3023809,
+    "lon": 59.4880237
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "نیروی هوایی",
+    "name:en": "Niroo Havaee",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833665,
+  "center": {
+    "lat": 36.2970426,
+    "lon": 59.4998200
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "چهارچشمه",
+    "name:en": "Chahar Cheshmeh",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833666,
+  "center": {
+    "lat": 36.2913020,
+    "lon": 59.5118542
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "سرافرازان",
+    "name:en": "SarAfrazan",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833667,
+  "center": {
+    "lat": 36.3138758,
+    "lon": 59.5160858
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "کوثر",
+    "name:en": "Kosar",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833668,
+  "center": {
+    "lat": 36.3004937,
+    "lon": 59.5503207
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "نوفل لوشاتو",
+    "name:en": "Nofel Loshato",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833669,
+  "center": {
+    "lat": 36.2924287,
+    "lon": 59.5400334
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "رضاشهر",
+    "name:en": "Reza Shahr",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833670,
+  "center": {
+    "lat": 36.2793407,
+    "lon": 59.5470879
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "بهارستان",
+    "name:en": "Baharestan",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833768,
+  "center": {
+    "lat": 36.3493793,
+    "lon": 59.4825548
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "نرگس",
+    "name:en": "Nargess",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833769,
+  "center": {
+    "lat": 36.3583349,
+    "lon": 59.4976851
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "فرهنگیان",
+    "name:en": "Farhangian",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833770,
+  "center": {
+    "lat": 36.3635266,
+    "lon": 59.4918083
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "شهرک لشکر",
+    "name:en": "Lashkar",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833771,
+  "center": {
+    "lat": 36.3666438,
+    "lon": 59.5088128
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "امامیه",
+    "name:en": "Emamieh",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833772,
+  "center": {
+    "lat": 36.3522583,
+    "lon": 59.5076083
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "شاهد",
+    "name:en": "Shahed",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833773,
+  "center": {
+    "lat": 36.3576823,
+    "lon": 59.5222937
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "استاد یوسفی",
+    "name:en": "Ostad Yusefi",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833774,
+  "center": {
+    "lat": 36.3507430,
+    "lon": 59.5224426
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "ولیعصر",
+    "name:en": "ValiAsr",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833775,
+  "center": {
+    "lat": 36.3725754,
+    "lon": 59.5144301
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "حجاب",
+    "name:en": "Hejab",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833776,
+  "center": {
+    "lat": 36.3554588,
+    "lon": 59.5370219
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "شهرک رازی",
+    "name:en": "Razi Community",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833777,
+  "center": {
+    "lat": 36.3736637,
+    "lon": 59.5256213
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "خاتم الانبیا",
+    "name:en": "Khatam AlAnbia",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833778,
+  "center": {
+    "lat": 36.3828069,
+    "lon": 59.5214541
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "ایثارگران",
+    "name:en": "Isargaran",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833779,
+  "center": {
+    "lat": 36.3578787,
+    "lon": 59.5441743
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "شهرک امام هادی",
+    "name:en": "Imam Hadi Community",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833839,
+  "center": {
+    "lat": 36.3438565,
+    "lon": 59.4686623
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "فارغ التحصیلان",
+    "name:en": "Fareghottahsilan",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833840,
+  "center": {
+    "lat": 36.3360757,
+    "lon": 59.4860056
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "شریف",
+    "name:en": "Sharif",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833841,
+  "center": {
+    "lat": 36.3419010,
+    "lon": 59.4892301
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "تربیت",
+    "name:en": "Tarbiat",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833842,
+  "center": {
+    "lat": 36.3311726,
+    "lon": 59.5041548
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "دانشجو",
+    "name:en": "Daneshjoo",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833843,
+  "center": {
+    "lat": 36.3269162,
+    "lon": 59.5184428
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "فرهنگ",
+    "name:en": "Farhang",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833844,
+  "center": {
+    "lat": 36.3345975,
+    "lon": 59.5216499
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "سید رضی",
+    "name:en": "Seyyed Razi",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833845,
+  "center": {
+    "lat": 36.3416967,
+    "lon": 59.5235845
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "شهید رضوی",
+    "name:en": "Shahid Razavi",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833846,
+  "center": {
+    "lat": 36.3403885,
+    "lon": 59.5396698
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "زیبا شهر",
+    "name:en": "Ziba Shahr",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833847,
+  "center": {
+    "lat": 36.3266483,
+    "lon": 59.5352429
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "آزادشهر",
+    "name:en": "Azadshahr",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833947,
+  "center": {
+    "lat": 36.4333874,
+    "lon": 59.4596842
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "اکبرآباد",
+    "name:en": "Akbar Abad",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833948,
+  "center": {
+    "lat": 36.3865672,
+    "lon": 59.4947063
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "امیریه",
+    "name:en": "Amirieh",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833949,
+  "center": {
+    "lat": 36.3795947,
+    "lon": 59.4743492
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "الهیه",
+    "name:en": "Elahiyeh Community",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8833950,
+  "center": {
+    "lat": 36.3659898,
+    "lon": 59.4678564
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "جاهد شهر",
+    "name:en": "Jahed shahr",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8834223,
+  "center": {
+    "lat": 36.2880302,
+    "lon": 59.6210815
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "پایین خیابان",
+    "name:en": "Paeen Khiaban",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8834224,
+  "center": {
+    "lat": 36.2815334,
+    "lon": 59.6180527
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "عیدگاه",
+    "name:en": "Eidgah",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8834225,
+  "center": {
+    "lat": 36.2946456,
+    "lon": 59.6160266
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "بالا خیابان",
+    "name:en": "Bala Khiaban",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8834226,
+  "center": {
+    "lat": 36.2995977,
+    "lon": 59.6231352
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "دریادل",
+    "name:en": "DaryaDel",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8834227,
+  "center": {
+    "lat": 36.2951826,
+    "lon": 59.6226450
+  },
+  "tags": {
+    "admin_level": "11",
+    "boundary": "administrative",
+    "name": "نوغان",
+    "name:en": "Nowghan",
+    "place": "neighbourhood",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8863117,
+  "center": {
+    "lat": 36.3047348,
+    "lon": 59.5632739
+  },
+  "tags": {
+    "admin_level": "10",
+    "boundary": "administrative",
+    "name": "ناحیه۱ منطقه ۱",
+    "name:en": "Quarter 1 of District 1",
+    "place": "quarter",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8863118,
+  "center": {
+    "lat": 36.3073421,
+    "lon": 59.5890883
+  },
+  "tags": {
+    "admin_level": "10",
+    "boundary": "administrative",
+    "name": "ناحیه۲ منطقه ۱",
+    "name:en": "Quarter 2 of District 1",
+    "place": "quarter",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8873125,
+  "center": {
+    "lat": 36.2056357,
+    "lon": 59.6487014
+  },
+  "tags": {
+    "admin_level": "10",
+    "boundary": "administrative",
+    "name": "ناحیه ۳ منطقه ۷",
+    "name:en": "Quarter 3 of District 7",
+    "place": "quarter",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8873126,
+  "center": {
+    "lat": 36.2279846,
+    "lon": 59.6070677
+  },
+  "tags": {
+    "admin_level": "10",
+    "boundary": "administrative",
+    "name": "ناحیه ۲ منطقه ۷",
+    "name:en": "Quarter 2 of District 7",
+    "place": "quarter",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8873127,
+  "center": {
+    "lat": 36.2589821,
+    "lon": 59.6123640
+  },
+  "tags": {
+    "admin_level": "10",
+    "boundary": "administrative",
+    "name": "ناحیه ۱ منطقه ۷",
+    "name:en": "Quarter 1 of District 7",
+    "place": "quarter",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 8873128,
+  "center": {
+    "lat": 36.2715765,
+    "lon": 59.5654550
+  },
+  "tags": {
+    "admin_level": "10",
+    "boundary": "administrative",
+    "name": "ناحیه ۲ منطقه ۸",
+    "name:en": "Quarter 2 of District 8",
+    "place": "quarter",
+    "type": "boundary"
+  }
+}
+
+  ]
+}

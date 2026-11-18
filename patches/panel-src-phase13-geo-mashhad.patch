@@ -1,0 +1,3053 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# panel-src phase 13 — Task 70 / Phase 5 (فاز پنج, Nov 2026): structured
+# Mashhad geography — GeoArea tree + auto-detect + completion gate + reports.
+#
+# WHAT THIS PATCH ADDS (see GEO-MASHHAD-REPORT-fa.md for the full design):
+#  * prisma/schema.prisma: GeoArea model (province←city←zone←neighborhood←
+#    street, self-referencing, (parentId, normalizedName) unique = the
+#    «رکورد تکراری با املای متفاوت» guard) + Customer geoNeighborhoodId/
+#    geoStreetId/geoStatus/geoSource (scalar, additive, FK-free like erpCode)
+#  * src/lib/geo-mashhad.ts: GENERATED seed dataset (13 zones + 341
+#    neighborhoods + 360 main streets, dual-sourced & dated: Mashhad City
+#    Council 13-region resolution + OpenStreetMap centroids) — regenerate
+#    with tools/geo-mashhad/build-dataset.py, do not hand-edit
+#  * src/lib/geo-seed.ts: idempotent boot seeder (upsert by parent+normalized
+#    name, NO-DELETE on re-seed, per-node source/sourceDate provenance)
+#  * src/lib/geo-areas.ts: shared gatekeepers — resolveGeoRefs (write-path
+#    validation), nearestNeighborhood (auto-detect from coordinates,
+#    documented nearest-centroid approximation), geoOnCreate (ثبت موقت
+#    «نیازمند تکمیل» policy), assertCustomersGeoComplete (assignment gate;
+#    legacy NULL-status rows are exempt by design)
+#  * instrumentation.ts: idempotent GeoArea DDL (byte-matched against
+#    `prisma db push` output) + boot seed call (never blocks the server)
+#  * 5 admin APIs under /api/panel/geo/: tree / resolve / report / nodes
+#    (POST, dedup-409) / nodes/[id] (PATCH rename+coords+active, guarded
+#    DELETE — children/customer references refuse with counts)
+#  * customer write paths (panel POST/PUT + app create): geo refs accepted
+#    (panel) / auto-detected (app + panel without picks) — the app mirror
+#    (/api/app/customers) gains an additive `geo` block per row
+#  * assignment gates: POST /api/assignments, /api/assignments/bulk (per-pair
+#    failures), assignment-request approve → 409 with a specific Persian
+#    message while geoStatus='incomplete'
+#  * GeoTab.tsx + Dashboard tab «جغرافیا و محلات»: summary cards, the
+#    «در انتظار تکمیل» worklist with a completion dialog (auto-hint from
+#    the customer's own coordinates), geographic reports (per zone/neighborhood
+#    counts, unassigned, per-rep workload & density, 30-day coverage
+#    comparison, per-street counts) and the provenance-labeled data browser
+#  * CustomersTab: structured neighborhood/street pickers (city-gated) +
+#    «تشخیص از موقعیت نقشه» + «ثبت موقت جغرافیایی» badge + neighborhood chip
+# ─────────────────────────────────────────────────────────────────────────────
+diff -ruN '--exclude=node_modules' '--exclude=dev.db' '--exclude=build-time.db' '--exclude=.next' '--exclude=x.db' /tmp/pristine/prisma/schema.prisma panel-build/src/prisma/schema.prisma
+
+diff -ruN '--exclude=node_modules' '--exclude=dev.db' '--exclude=build-time.db' '--exclude=.next' '--exclude=x.db' /tmp/pristine/prisma/schema.prisma panel-build/src/prisma/schema.prisma
+
+diff -ruN '--exclude=node_modules' '--exclude=dev.db' '--exclude=build-time.db' '--exclude=.next' '--exclude=x.db' /tmp/pristine/prisma/schema.prisma panel-build/src/prisma/schema.prisma
+
+diff -ruN '--exclude=node_modules' '--exclude=dev.db' '--exclude=build-time.db' '--exclude=.next' '--exclude=x.db' /tmp/pristine/prisma/schema.prisma panel-build/src/prisma/schema.prisma
+
+diff -ruN '--exclude=node_modules' '--exclude=dev.db' '--exclude=build-time.db' '--exclude=.next' '--exclude=x.db' /tmp/pristine/prisma/schema.prisma panel-build/src/prisma/schema.prisma
+--- a/prisma/schema.prisma	2026-11-18 06:55:00.317165139 +0000
++++ b/prisma/schema.prisma	2026-11-18 07:18:20.810238208 +0000
+@@ -112,6 +112,31 @@
+   // (assignments, visits, notes, active, …) stays 100% MedPad-side.
+   erpCode     String?  @unique
+ 
++  // ── Phase 5 (geo / فاز پنج جغرافیا) — structured geography.
++  // References into GeoArea (the province←city←zone←neighborhood←street
++  // tree). SCALAR columns with NO Prisma relation, exactly like erpCode:
++  // the boot migration path (ALTER TABLE on an existing Customer table)
++  // cannot attach SQLite FKs after the fact, so neither path declares one
++  // and the fresh-template vs boot-migrated layouts stay byte-identical.
++  // Referential integrity is enforced at the API layer (every write
++  // resolves the id against an ACTIVE node of the right type) and node
++  // deletion is guarded (a node referenced by customers cannot be
++  // deleted).
++  geoNeighborhoodId String?
++  geoStreetId       String?
++  // geoStatus lifecycle:
++  //   NULL          legacy row — created before Phase 5; NO gating, all
++  //                 old behavior applies (existing customers must never
++  //                 suddenly become unassignable).
++  //   'incomplete'  created (app or panel) with an AUTO-detected or absent
++  //                 neighborhood — «ثبت موقت نیازمند تکمیل اطلاعات
++  //                 جغرافیایی»: final assignment is BLOCKED until an
++  //                 admin completes the record.
++  //   'complete'    an admin (or an explicit structured pick in the panel
++  //                 form) has confirmed the geography.
++  geoStatus         String?
++  geoSource         String?   // 'auto' (nearest-centroid detect) | 'admin'
++
+   checkins    Checkin[]
+   visits      Visit[]
+   assignments Assignment[]
+@@ -121,6 +146,10 @@
+   clinicLinks     CustomerLink[]     @relation("LinkClinic")
+   physicianLinks  CustomerLink[]     @relation("LinkPhysician")
+   purchases       Purchase[]
++
++  // geo report group-bys (neighborhood-first — the primary report axis)
++  @@index([geoNeighborhoodId])
++  @@index([geoStreetId])
+ }
+ 
+ // ── Customer 360 (phase 1) — physician↔clinic MANY-TO-MANY link ──
+@@ -696,3 +725,48 @@
+ 
+   @@index([startedAt])
+ }
++
++// ── Phase 5 (geo / فاز پنج) — the structured geography tree ─────────────
++//
++// ONE self-referencing table for the whole استان←شهر←محدوده←محله←خیابان
++// chain (type ∈ province | city | zone | neighborhood | street). The
++// hierarchy rules are enforced at the API layer (a zone's parent must be
++// a city, a neighborhood's parent a zone OR a city, a street's parent a
++// city OR a neighborhood) — keeping the table flat lets the boot DDL stay
++// a single idempotent CREATE TABLE and the reports walk the tree in
++// memory (the whole dataset is a few hundred rows).
++//
++// DEDUP (the «رکورد تکراری با املای متفاوت» requirement): normalizedName
++// mirrors lib/iran-cities.ts normalizeFa (ZWNJ strip, ي→ی, ك→ک, Persian
++// digits, whitespace collapse) and (parentId, normalizedName) is UNIQUE —
++// «کوی سلمان»، «کوي سلمان» and «کوی  سلمان» are one node. NULL parentId
++// (only the seeded province rows) is outside the unique index by SQLite
++// semantics — provinces/cities are SEED-ONLY (no admin API creates them),
++// so no duplicate can ever be written there.
++//
++// NO-DELETE policy: absence from the packaged dataset is NEVER a delete
++// (mirrors the Holoo policy) — re-seeding refreshes coordinates/source
++// and reactivates, it never removes. Admin deletion is guarded: a node
++// with children or customer references is refused with counts.
++model GeoArea {
++  id             String   @id @default(cuid())
++  type           String   // province | city | zone | neighborhood | street
++  parentId       String?
++  parent         GeoArea? @relation("GeoTree", fields: [parentId], references: [id], onDelete: SetNull)
++  children       GeoArea[] @relation("GeoTree")
++  name           String   // display name (Persian, canonical)
++  normalizedName String   // dedup key — normalizeFa(name)
++  code           String?  @unique // stable slug, e.g. MHD-1 … MHD-SAMEN
++  lat            Float?   // centroid (neighborhoods with known coords)
++  lng            Float?
++  source         String?  // provenance (official resolution / OSM extract)
++  sourceDate     String?  // e.g. "2026-11-18"
++  active         Boolean  @default(true)
++  sortOrder      Int?
++  createdAt      DateTime @default(now())
++  updatedAt      DateTime @updatedAt
++
++  @@unique([parentId, type, normalizedName])
++  @@index([type])
++  @@index([parentId])
++}
+diff -ruN '--exclude=node_modules' '--exclude=dev.db' '--exclude=build-time.db' '--exclude=.next' '--exclude=x.db' /tmp/pristine/src/app/api/app/customers/create/route.ts panel-build/src/src/app/api/app/customers/create/route.ts
+--- a/src/app/api/app/customers/create/route.ts	2026-11-18 06:55:00.308165144 +0000
++++ b/src/app/api/app/customers/create/route.ts	2026-11-18 07:00:16.656977377 +0000
+@@ -5,6 +5,7 @@
+ import { emitEvent } from '@/lib/emit'
+ import { resolveCustomerCity } from '@/lib/customer-city'
+ import { pickCustomer360App, findCustomerDuplicate } from '@/lib/customer360'
++import { geoOnCreate } from '@/lib/geo-areas'
+ 
+ /** App creates a new customer (sales rep adds doctor/pharmacy) — no delete allowed */
+ export async function POST(req: Request) {
+@@ -38,6 +39,18 @@
+   if ('error' in city) {
+     return NextResponse.json({ ok: false, error: city.error }, { status: 400 })
+   }
++  // Phase 5 (geo) — «تشخیص خودکار از مختصات»: the app cannot send
++  // structured refs (offline first — no geo API dependency); the SERVER
++  // attaches the nearest neighborhood centroid of the city when the city
++  // has structured data and marks the record «ثبت موقت نیازمند تکمیل» —
++  // final assignment stays blocked until an admin completes it. Cities
++  // without geo data keep the exact legacy behavior (no gating).
++  const geoCreate = await geoOnCreate(
++    'city' in city ? city.city : null,
++    Number(b.lat),
++    Number(b.lng),
++    null,
++  )
+   // Customer 360 — duplicate prevention (advisory 409; the app shows the
+   // existing row's identity and the rep decides whether to retry anyway —
+   // there is no force flag on the app path to keep the flow simple, a
+@@ -65,6 +78,7 @@
+       radius: Number(b.radius) || 150,
+       ...(localId ? { appLocalId: localId } : {}),
+       ...pickCustomer360App(b),
++      ...geoCreate,
+     },
+   })
+   // mission 12 / item 1 (Nov 2026): NO automatic assignment for the creator.
+diff -ruN '--exclude=node_modules' '--exclude=dev.db' '--exclude=build-time.db' '--exclude=.next' '--exclude=x.db' /tmp/pristine/src/app/api/app/customers/route.ts panel-build/src/src/app/api/app/customers/route.ts
+--- a/src/app/api/app/customers/route.ts	2026-11-18 06:55:00.318165139 +0000
++++ b/src/app/api/app/customers/route.ts	2026-11-18 07:00:16.656977377 +0000
+@@ -85,13 +85,51 @@
+       })
+     }
+   }
+-  const customersWithErp = customers.map((c) => ({
+-    ...c,
+-    erp: c.erpCode ? (erpByCode.get(c.erpCode) ?? null) : null,
+-  }))
++  // ── Phase 5 (geo): attach the structured geography of each customer —
++  // neighborhood/zone/street DISPLAY NAMES + the incomplete flag, so the
++  // app can badge «نیازمند تکمیل اطلاعات جغرافیایی» offline. Purely
++  // additive (old app versions ignore the block).
++  const geoIds = new Set<string>()
++  for (const c of customers) {
++    if (c.geoNeighborhoodId) geoIds.add(c.geoNeighborhoodId)
++    if (c.geoStreetId) geoIds.add(c.geoStreetId)
++  }
++  const geoById = new Map<string, { id: string; name: string; type: string; parentId: string | null }>()
++  if (geoIds.size > 0) {
++    const rows = await db.geoArea.findMany({
++      where: { id: { in: [...geoIds] } },
++      select: { id: true, name: true, type: true, parentId: true },
++    })
++    for (const r of rows) geoById.set(r.id, r)
++    const parentIds = [...new Set(rows.map((r) => r.parentId).filter((v): v is string => !!v))]
++    if (parentIds.length > 0) {
++      const parents = await db.geoArea.findMany({
++        where: { id: { in: parentIds } },
++        select: { id: true, name: true, type: true, parentId: true },
++      })
++      for (const p2 of parents) if (!geoById.has(p2.id)) geoById.set(p2.id, p2)
++    }
++  }
++  const customersWithGeo = customers.map((c) => {
++    const hood = c.geoNeighborhoodId ? (geoById.get(c.geoNeighborhoodId) ?? null) : null
++    const street = c.geoStreetId ? (geoById.get(c.geoStreetId) ?? null) : null
++    const zone = hood?.parentId ? (geoById.get(hood.parentId) ?? null) : null
++    return {
++      ...c,
++      erp: c.erpCode ? (erpByCode.get(c.erpCode) ?? null) : null,
++      geo: {
++        neighborhoodId: c.geoNeighborhoodId,
++        neighborhood: hood?.name ?? null,
++        zone: zone?.name ?? null,
++        street: street?.name ?? null,
++        // 'incomplete' = ثبت موقت — the record awaits admin completion
++        status: c.geoStatus,
++      },
++    }
++  })
+   return NextResponse.json({
+     ok: true,
+-    customers: customersWithErp,
++    customers: customersWithGeo,
+     assignedIds,
+     serverTime: serverNow.toISOString(),
+   })
+diff -ruN '--exclude=node_modules' '--exclude=dev.db' '--exclude=build-time.db' '--exclude=.next' '--exclude=x.db' /tmp/pristine/src/app/api/assignment-requests/[id]/approve/route.ts panel-build/src/src/app/api/assignment-requests/[id]/approve/route.ts
+--- a/src/app/api/assignment-requests/[id]/approve/route.ts	2026-11-18 06:55:00.301165148 +0000
++++ b/src/app/api/assignment-requests/[id]/approve/route.ts	2026-11-18 07:00:16.656977377 +0000
+@@ -4,6 +4,7 @@
+ import { notifyEmployee } from '@/lib/notify'
+ import { writeAudit } from '@/lib/audit'
+ import { emitEvent } from '@/lib/emit'
++import { assertCustomersGeoComplete } from '@/lib/geo-areas'
+ 
+ /**
+  * package 6 (phase 2 / task 4) — approve an assignment request (admin).
+@@ -54,6 +55,14 @@
+       { status: 409 },
+     )
+   }
++  // Phase 5 (geo) — the approve path is a FINAL assignment: a customer
++  // with geoStatus='incomplete' (ثبت موقت) stays unassignable until the
++  // admin completes its geography. The request itself stays pending —
++  // complete the geo, then approve again.
++  const geoBlock = await assertCustomersGeoComplete([cus.id])
++  if (geoBlock) {
++    return NextResponse.json({ ok: false, error: geoBlock }, { status: 409 })
++  }
+ 
+   // the real assignment — idempotent under the unique constraint
+   let alreadyAssigned = false
+diff -ruN '--exclude=node_modules' '--exclude=dev.db' '--exclude=build-time.db' '--exclude=.next' '--exclude=x.db' /tmp/pristine/src/app/api/assignments/bulk/route.ts panel-build/src/src/app/api/assignments/bulk/route.ts
+--- a/src/app/api/assignments/bulk/route.ts	2026-11-18 06:55:00.315165140 +0000
++++ b/src/app/api/assignments/bulk/route.ts	2026-11-18 07:00:16.656977377 +0000
+@@ -93,6 +93,19 @@
+   const empById = new Map(employees.map((e) => [e.id, e]))
+   const cusById = new Map(customers.map((c) => [c.id, c]))
+ 
++  // Phase 5 (geo) — customers with geoStatus='incomplete' (ثبت موقت)
++  // cannot be FINALLY assigned. Resolved ONCE for the whole batch; per-pair
++  // failures carry the same Persian reason. UNASSIGN is never blocked.
++  const geoBlocked = new Set<string>()
++  if (action === 'assign') {
++    const blockedRows = await db.customer.findMany({
++      where: { id: { in: customerIds }, geoStatus: 'incomplete' },
++      select: { id: true, name: true },
++    })
++    for (const r of blockedRows) geoBlocked.add(r.id)
++  }
++  const geoReason = 'اطلاعات جغرافیایی این مشتری ناقص ثبت شده است (ثبت موقت در انتظار تکمیل) — ابتدا از تب «جغرافیا» تکمیلش کنید'
++
+   const failed: { employeeId: string | null; customerId: string; employeeName?: string; customerName?: string; reason: string }[] = []
+   let created = 0
+   let already = 0
+@@ -119,6 +132,16 @@
+             failed.push({ employeeId: empId, customerId: cusId, employeeName: emp.name, customerName: cus.name, reason: 'مدرپ غیرفعال است' })
+             continue
+           }
++          if (geoBlocked.has(cusId)) {
++            failed.push({
++              employeeId: empId,
++              customerId: cusId,
++              employeeName: (emp as { name?: string }).name,
++              customerName: (cus as { name?: string }).name,
++              reason: geoReason,
++            })
++            continue
++          }
+           const exists = await tx.assignment.findFirst({ where: { employeeId: empId, customerId: cusId } })
+           if (exists) {
+             already++
+diff -ruN '--exclude=node_modules' '--exclude=dev.db' '--exclude=build-time.db' '--exclude=.next' '--exclude=x.db' /tmp/pristine/src/app/api/assignments/route.ts panel-build/src/src/app/api/assignments/route.ts
+--- a/src/app/api/assignments/route.ts	2026-11-18 06:55:00.316165140 +0000
++++ b/src/app/api/assignments/route.ts	2026-11-18 07:00:16.656977377 +0000
+@@ -2,6 +2,7 @@
+ import { db } from '@/lib/db'
+ import { isAdmin } from '@/lib/auth'
+ import { notifyEmployee } from '@/lib/notify'
++import { assertCustomersGeoComplete } from '@/lib/geo-areas'
+ 
+ export async function GET() {
+   if (!(await isAdmin())) {
+@@ -39,6 +40,13 @@
+   if (exists) {
+     return NextResponse.json({ ok: false, error: 'این انتساب از قبل وجود دارد' }, { status: 409 })
+   }
++  // Phase 5 (geo) — «جلوگیری از تخصیص نهایی تا تکمیل»: a customer whose
++  // geoStatus='incomplete' (ثبت موقت) cannot be FINALLY assigned; legacy
++  // rows (geoStatus NULL) are exempt by design.
++  const geoBlock = await assertCustomersGeoComplete([customerId])
++  if (geoBlock) {
++    return NextResponse.json({ ok: false, error: geoBlock }, { status: 409 })
++  }
+   const row = await db.assignment.create({ data: { employeeId, customerId } })
+ 
+   // owner fix (admin received «…به شما اختصاص داده شد» as a Windows/browser
+diff -ruN '--exclude=node_modules' '--exclude=dev.db' '--exclude=build-time.db' '--exclude=.next' '--exclude=x.db' /tmp/pristine/src/app/api/customers/[id]/route.ts panel-build/src/src/app/api/customers/[id]/route.ts
+--- a/src/app/api/customers/[id]/route.ts	2026-11-18 06:55:00.308165144 +0000
++++ b/src/app/api/customers/[id]/route.ts	2026-11-18 07:00:16.656977377 +0000
+@@ -4,6 +4,8 @@
+ import { isValidLatLng } from '@/lib/geo'
+ import { resolveCustomerCity } from '@/lib/customer-city'
+ import { pickCustomer360, findCustomerDuplicate, customerTypeFa } from '@/lib/customer360'
++import { resolveGeoRefs } from '@/lib/geo-areas'
++import { writeAudit } from '@/lib/audit'
+ 
+ /** PUT — edit customer (panel side; bumps updatedAt for LWW sync to app) */
+ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }) {
+@@ -20,6 +22,11 @@
+     phone2?: string; district?: string; postalCode?: string; notes?: string
+     active?: boolean
+     force?: boolean // duplicate acknowledged by the admin
++    // Phase 5 (geo): structured neighborhood/street refs. Sending EITHER
++    // field is the «تکمیل اطلاعات جغرافیایی» action — it sets
++    // geoStatus='complete' / geoSource='admin' and unblocks assignment.
++    geoNeighborhoodId?: string | null
++    geoStreetId?: string | null
+   } | null
+   const data: Record<string, unknown> = { updatedAt: new Date() } // LWW bump
+   if (b?.name !== undefined) data.name = b.name
+@@ -39,6 +46,21 @@
+   }
+   if ('clear' in city) { data.city = null; data.province = null }
+   else if ('city' in city) { data.city = city.city; data.province = city.province }
++  // Phase 5 (geo) — structured refs: undefined=untouched; any field sent
++  // → both resolved (null=explicit clear) and the record is marked
++  // COMPLETE (admin-confirmed — the «در انتظار تکمیل» gate lifts).
++  const geoRefs = await resolveGeoRefs(b)
++  if ('error' in geoRefs) {
++    return NextResponse.json({ ok: false, error: geoRefs.error }, { status: 400 })
++  }
++  let geoCompleted = false
++  if (!('skip' in geoRefs)) {
++    data.geoNeighborhoodId = geoRefs.geoNeighborhoodId
++    data.geoStreetId = geoRefs.geoStreetId
++    data.geoStatus = 'complete'
++    data.geoSource = 'admin'
++    geoCompleted = true
++  }
+   // Customer 360 — profile fields + duplicate prevention on rename
+   Object.assign(data, pickCustomer360(b))
+   if (!b?.force && (b?.name !== undefined || b?.phone !== undefined)) {
+@@ -60,6 +82,15 @@
+     }
+   }
+   const row = await db.customer.update({ where: { id }, data })
++  if (geoCompleted) {
++    // the completion action lifts the assignment gate — always audited
++    await writeAudit({
++      action: 'customer.geo.complete',
++      targetType: 'Customer',
++      targetId: id,
++      detail: `تکمیل اطلاعات جغرافیایی «${row.name}» (تأیید مدیر)`,
++    })
++  }
+   return NextResponse.json({ ok: true, customer: row })
+ }
+ 
+diff -ruN '--exclude=node_modules' '--exclude=dev.db' '--exclude=build-time.db' '--exclude=.next' '--exclude=x.db' /tmp/pristine/src/app/api/customers/route.ts panel-build/src/src/app/api/customers/route.ts
+--- a/src/app/api/customers/route.ts	2026-11-18 06:55:00.308165144 +0000
++++ b/src/app/api/customers/route.ts	2026-11-18 07:00:16.656977377 +0000
+@@ -4,6 +4,7 @@
+ import { isValidLatLng } from '@/lib/geo'
+ import { resolveCustomerCity } from '@/lib/customer-city'
+ import { pickCustomer360, findCustomerDuplicate, customerTypeFa } from '@/lib/customer360'
++import { resolveGeoRefs, geoOnCreate } from '@/lib/geo-areas'
+ 
+ /**
+  * Customers list (admin). Customer-360 additions:
+@@ -66,6 +67,9 @@
+     phone2?: string; district?: string; postalCode?: string; notes?: string
+     active?: boolean
+     force?: boolean // duplicate acknowledged by the admin
++    // Phase 5 (geo): structured neighborhood/street refs (panel pick)
++    geoNeighborhoodId?: string | null
++    geoStreetId?: string | null
+   } | null
+   if (!b?.name || !isValidLatLng(Number(b.lat), Number(b.lng))) {
+     return NextResponse.json({ ok: false, error: 'نام و موقعیت روی نقشه لازم است' }, { status: 400 })
+@@ -75,6 +79,20 @@
+   if ('error' in city) {
+     return NextResponse.json({ ok: false, error: city.error }, { status: 400 })
+   }
++  // Phase 5 (geo) — validate the structured refs (single gatekeeper),
++  // then resolve the create-time policy: explicit pick → complete/admin;
++  // none sent + city has geo data → auto-detect + «ثبت موقت نیازمند تکمیل»;
++  // none sent + no geo data → untouched legacy behavior.
++  const geoRefs = await resolveGeoRefs(b)
++  if ('error' in geoRefs) {
++    return NextResponse.json({ ok: false, error: geoRefs.error }, { status: 400 })
++  }
++  const geoCreate = await geoOnCreate(
++    'city' in city ? city.city : null,
++    Number(b.lat),
++    Number(b.lng),
++    'skip' in geoRefs ? null : { geoNeighborhoodId: geoRefs.geoNeighborhoodId, geoStreetId: geoRefs.geoStreetId },
++  )
+   // Customer 360 — duplicate prevention: same (type, name) or same
+   // (type, phone) already exists → 409 with the existing row's identity,
+   // unless the admin explicitly acknowledged (force=true).
+@@ -106,6 +124,7 @@
+       lng: Number(b.lng),
+       radius: Number(b.radius) || 150,
+       ...pickCustomer360(b),
++      ...geoCreate,
+     },
+   })
+   return NextResponse.json({ ok: true, customer: row })
+diff -ruN '--exclude=node_modules' '--exclude=dev.db' '--exclude=build-time.db' '--exclude=.next' '--exclude=x.db' /tmp/pristine/src/app/api/panel/geo/nodes/[id]/route.ts panel-build/src/src/app/api/panel/geo/nodes/[id]/route.ts
+--- a/src/app/api/panel/geo/nodes/[id]/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/panel/geo/nodes/[id]/route.ts	2026-11-18 07:18:20.811238207 +0000
+@@ -0,0 +1,123 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { isAdmin } from '@/lib/auth'
++import { normalizeFa } from '@/lib/iran-cities'
++import { writeAudit } from '@/lib/audit'
++
++/**
++ * Phase 5 (geo) — PATCH /api/panel/geo/nodes/[id] (admin session)
++ *                      DELETE /api/panel/geo/nodes/[id]
++ *
++ * PATCH  — rename (the normalized key is recomputed; a collision with a
++ *          sibling → 409 with the existing name), set/clear coordinates,
++ *          activate/deactivate. Renaming NEVER breaks the customer links:
++ *          customers reference the node id, not the name.
++ *
++ * DELETE — guarded, both ways:
++ *            a node with children        → 409 with the child count
++ *            a node referenced by customers → 409 with the customer count
++ *          (provinces and cities are seed-owned → 400.) The packaged
++ *          dataset's NO-DELETE policy is unaffected: re-seeding never
++ *          removes, and this endpoint only removes admin-confirmable
++ *          leaves. Audit rows record every outcome.
++ */
++export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const { id } = await ctx.params
++  const node = await db.geoArea.findUnique({ where: { id } })
++  if (!node) return NextResponse.json({ ok: false, error: 'گره پیدا نشد' }, { status: 404 })
++
++  let b: Record<string, unknown>
++  try {
++    b = (await req.json()) as Record<string, unknown>
++  } catch {
++    return NextResponse.json({ ok: false, error: 'بدنهٔ درخواست نامعتبر است' }, { status: 400 })
++  }
++
++  const data: Record<string, unknown> = {}
++  const changes: string[] = []
++
++  if (typeof b.name === 'string') {
++    const name = b.name.trim()
++    if (!name || name.length > 120) {
++      return NextResponse.json({ ok: false, error: 'نام گره نامعتبر است (۱ تا ۱۲۰ نویسه)' }, { status: 400 })
++    }
++    const normalizedName = normalizeFa(name)
++    if (normalizedName !== node.normalizedName) {
++      const dup = await db.geoArea.findFirst({
++        where: { parentId: node.parentId, type: node.type, normalizedName, id: { not: node.id } },
++      })
++      if (dup) {
++        return NextResponse.json(
++          { ok: false, error: `گره‌ای با همین نام در همین والد از قبل وجود دارد: «${dup.name}»` },
++          { status: 409 },
++        )
++      }
++    }
++    data.name = name
++    data.normalizedName = normalizedName
++    changes.push('name')
++  }
++  if ('lat' in b || 'lng' in b) {
++    const lat = b.lat as number | null
++    const lng = b.lng as number | null
++    if (lat === null || lng === null) {
++      data.lat = null
++      data.lng = null
++    } else if (typeof lat === 'number' && typeof lng === 'number' && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
++      data.lat = lat
++      data.lng = lng
++    } else {
++      return NextResponse.json({ ok: false, error: 'مختصات نامعتبر است' }, { status: 400 })
++    }
++    changes.push('coords')
++  }
++  if (typeof b.active === 'boolean') {
++    data.active = b.active
++    changes.push(b.active ? 'activate' : 'deactivate')
++  }
++  if (!changes.length) {
++    return NextResponse.json({ ok: false, error: 'تغییری ارسال نشده است' }, { status: 400 })
++  }
++
++  const updated = await db.geoArea.update({ where: { id }, data })
++  await writeAudit({
++    action: 'geo.node.update',
++    targetType: 'GeoArea',
++    targetId: id,
++    detail: `ویرایش گرهٔ جغرافیایی «${updated.name}» (${changes.join('، ')})`,
++  })
++  return NextResponse.json({ ok: true, node: { id: updated.id, name: updated.name, active: updated.active } })
++}
++
++export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const { id } = await ctx.params
++  const node = await db.geoArea.findUnique({ where: { id } })
++  if (!node) return NextResponse.json({ ok: false, error: 'گره پیدا نشد' }, { status: 404 })
++  if (node.type === 'province' || node.type === 'city') {
++    return NextResponse.json({ ok: false, error: 'استان و شهر متعلق به دادهٔ بستهٔ نصب هستند و حذف نمی‌شوند' }, { status: 400 })
++  }
++  const childCount = await db.geoArea.count({ where: { parentId: id } })
++  if (childCount > 0) {
++    return NextResponse.json({ ok: false, error: `این گره ${childCount} گرهٔ فرزند دارد — ابتدا فرزندها را منتقل یا حذف کنید` }, { status: 409 })
++  }
++  const refCount = await db.customer.count({
++    where: { OR: [{ geoNeighborhoodId: id }, { geoStreetId: id }] },
++  })
++  if (refCount > 0) {
++    return NextResponse.json({ ok: false, error: `${refCount} مشتری به این گره ارجاع دارد — ابتدا ارجاع‌ها را تغییر دهید` }, { status: 409 })
++  }
++  await db.geoArea.delete({ where: { id } })
++  await writeAudit({
++    action: 'geo.node.delete',
++    targetType: 'GeoArea',
++    targetId: id,
++    detail: `حذف گرهٔ جغرافیایی «${node.name}» (${node.type})`,
++  })
++  return NextResponse.json({ ok: true })
++}
+diff -ruN '--exclude=node_modules' '--exclude=dev.db' '--exclude=build-time.db' '--exclude=.next' '--exclude=x.db' /tmp/pristine/src/app/api/panel/geo/nodes/route.ts panel-build/src/src/app/api/panel/geo/nodes/route.ts
+--- a/src/app/api/panel/geo/nodes/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/panel/geo/nodes/route.ts	2026-11-18 07:18:20.811238207 +0000
+@@ -0,0 +1,92 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { isAdmin } from '@/lib/auth'
++import { normalizeFa } from '@/lib/iran-cities'
++import { GEO_PARENT_RULES, isGeoAreaType } from '@/lib/geo-areas'
++import { writeAudit } from '@/lib/audit'
++
++/**
++ * Phase 5 (geo) — POST /api/panel/geo/nodes (admin session)
++ *
++ * Create a geo node (zone | neighborhood | street — provinces and cities
++ * are SEED-ONLY, the packaged dataset owns them). This is the structured
++ * path the roadmap asks for: adding a neighborhood or street through the
++ * API always NORMALIZES the name, so «کوی سلمان» / «کوي سلمان» / «کوی
++ * سلمان» can never become three nodes («جلوگیری از رکورد تکراری با املای
++ * متفاوت»).
++ *
++ * Body: { type, parentId, name, code?, lat?, lng? }
++ *  - type must be zone|neighborhood|street with a parent allowed by
++ *    GEO_PARENT_RULES (zone→city, neighborhood→zone|city, street→city|neighborhood)
++ *  - the (parentId, normalizedName) pair must not already exist → 409 with
++ *    the existing node's name so the admin sees the duplicate
++ *  - code, when given, must be unique → 409
++ */
++export async function POST(req: Request) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  let b: Record<string, unknown>
++  try {
++    b = (await req.json()) as Record<string, unknown>
++  } catch {
++    return NextResponse.json({ ok: false, error: 'بدنهٔ درخواست نامعتبر است' }, { status: 400 })
++  }
++  const type = typeof b.type === 'string' ? b.type : ''
++  if (!isGeoAreaType(type) || type === 'province' || type === 'city') {
++    return NextResponse.json({ ok: false, error: 'نوع گره فقط محدوده، محله یا خیابان می‌تواند باشد (استان و شهر فقط از طریق دادهٔ بستهٔ نصب)' }, { status: 400 })
++  }
++  const parentId = typeof b.parentId === 'string' ? b.parentId.trim() : ''
++  if (!parentId) return NextResponse.json({ ok: false, error: 'گرهٔ والد مشخص نیست' }, { status: 400 })
++  const name = typeof b.name === 'string' ? b.name.trim() : ''
++  if (!name || name.length > 120) {
++    return NextResponse.json({ ok: false, error: 'نام گره نامعتبر است (۱ تا ۱۲۰ نویسه)' }, { status: 400 })
++  }
++  const parent = await db.geoArea.findUnique({ where: { id: parentId } })
++  if (!parent || !parent.active) {
++    return NextResponse.json({ ok: false, error: 'گرهٔ والد موجود یا فعال نیست' }, { status: 400 })
++  }
++  if (!GEO_PARENT_RULES[type].includes(parent.type as never)) {
++    return NextResponse.json(
++      { ok: false, error: `والد مجاز برای «${type === 'zone' ? 'محدوده' : type === 'neighborhood' ? 'محله' : 'خیابان'}» در این ساختار نیست (والد فعلی: ${parent.type})` },
++      { status: 400 },
++    )
++  }
++
++  const normalizedName = normalizeFa(name)
++  const dup = await db.geoArea.findFirst({ where: { parentId, type, normalizedName } })
++  if (dup) {
++    return NextResponse.json(
++      { ok: false, error: `گره‌ای با همین نام در همین والد از قبل وجود دارد: «${dup.name}» — برای جلوگیری از رکورد تکراری، همان گره را ویرایش کنید` },
++      { status: 409 },
++    )
++  }
++  const code = typeof b.code === 'string' && b.code.trim() ? b.code.trim() : undefined
++  if (code) {
++    const dupCode = await db.geoArea.findUnique({ where: { code } })
++    if (dupCode) return NextResponse.json({ ok: false, error: `کد «${code}» تکراری است` }, { status: 409 })
++  }
++  const lat = typeof b.lat === 'number' ? b.lat : undefined
++  const lng = typeof b.lng === 'number' ? b.lng : undefined
++  const hasCoords = typeof lat === 'number' && typeof lng === 'number' && Math.abs(lat) <= 90 && Math.abs(lng) <= 180
++
++  const row = await db.geoArea.create({
++    data: {
++      type,
++      parentId,
++      name,
++      normalizedName,
++      code,
++      ...(hasCoords ? { lat, lng } : {}),
++      source: 'ایجاد دستی توسط مدیر',
++      sourceDate: new Date().toISOString().slice(0, 10),
++    },
++  })
++  await writeAudit({
++    action: 'geo.node.create',
++    targetType: 'GeoArea',
++    targetId: row.id,
++    detail: `ایجاد گرهٔ جغرافیایی (${type}) «${name}» زیر «${parent.name}»`,
++  })
++  return NextResponse.json({ ok: true, node: { id: row.id, name: row.name, type: row.type, parentId: row.parentId } }, { status: 201 })
++}
+diff -ruN '--exclude=node_modules' '--exclude=dev.db' '--exclude=build-time.db' '--exclude=.next' '--exclude=x.db' /tmp/pristine/src/app/api/panel/geo/report/route.ts panel-build/src/src/app/api/panel/geo/report/route.ts
+--- a/src/app/api/panel/geo/report/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/panel/geo/report/route.ts	2026-11-18 07:22:58.658124415 +0000
+@@ -0,0 +1,167 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { isAdmin } from '@/lib/auth'
++import { normalizeFa } from '@/lib/iran-cities'
++
++/**
++ * Phase 5 (geo) — GET /api/panel/geo/report?city=مشهد
++ *
++ * گزارش‌های جغرافیایی (admin session) — the roadmap's four reports, one
++ * honest snapshot:
++ *
++ *  1. تعداد مشتری به تفکیک محدوده/محله — per zone AND per neighborhood:
++ *     total customers, assigned, unassigned, incomplete («ثبت موقت»).
++ *  2. تخصیص‌نیافته‌ها — the unassigned customers list grouped by
++ *     neighborhood (with name/id so the UI can link to assignment).
++ *  3. بار کاری و تراکم — per active marketer: customers in this city,
++ *     spread across how many zones (concentration), avg customers per
++ *     zone.
++ *  4. مقایسهٔ پوشش — per zone: coverage% = customers with ≥1 check-in in
++ *     the last 30 days / total customers of the zone.
++ *
++ * All counts are over ACTIVE customers of the requested city only
++ * (Customer.city matched by normalized name). A neighborhood with 0
++ * customers still appears (the tree is the axis, not the customers).
++ */
++export async function GET(req: Request) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const url = new URL(req.url)
++  const cityName = (url.searchParams.get('city') ?? 'مشهد').trim()
++  const cityKey = normalizeFa(cityName)
++
++  const cities = await db.geoArea.findMany({ where: { type: 'city', active: true } })
++  const city = cities.find((c) => normalizeFa(c.name) === cityKey)
++  if (!city) {
++    return NextResponse.json({ ok: true, city: null, zones: [], unassigned: [], workload: [], streets: [] })
++  }
++
++  const monthAgo = new Date(Date.now() - 30 * 24 * 3600 * 1000)
++  const [zones, hoods, streets, customers, employees] = await Promise.all([
++    db.geoArea.findMany({
++      where: { type: 'zone', parentId: city.id, active: true },
++      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
++    }),
++    db.geoArea.findMany({ where: { type: 'neighborhood', active: true } }),
++    db.geoArea.findMany({ where: { type: 'street', active: true } }),
++    db.customer.findMany({
++      where: { active: true, city: { not: null } },
++      select: {
++        id: true, name: true, city: true, geoNeighborhoodId: true, geoStreetId: true, geoStatus: true,
++        assignments: { select: { employeeId: true } }, // unassign deletes the row — every row IS an active assignment
++        checkins: { where: { createdAt: { gte: monthAgo } }, select: { id: true } },
++      },
++    }),
++    db.employee.findMany({ where: { active: true }, select: { id: true, name: true, username: true } }),
++  ])
++
++  // only customers of THIS city (normalized compare — same rule as the tree)
++  const cityCustomers = customers.filter((c) => normalizeFa(c.city ?? '') === cityKey)
++  const zoneIds = new Set(zones.map((z) => z.id))
++  const inCity = hoods.filter((h) => h.parentId === city.id || zoneIds.has(h.parentId ?? ''))
++  const hoodById = new Map(inCity.map((h) => [h.id, h]))
++  const streetById = new Map(streets.map((s) => [s.id, s.name]))
++
++  // neighborhood → zone id (for customers whose neighborhood hangs directly
++  // on the city, the zone is null → counted under «بدون محدوده»)
++  const zoneOfHood = new Map<string, string | null>()
++  for (const h of inCity) zoneOfHood.set(h.id, zoneIds.has(h.parentId ?? '') ? h.parentId : null)
++
++  interface ZoneAgg {
++    total: number; assigned: number; unassigned: number; incomplete: number; visited30d: number
++  }
++  const emptyAgg = (): ZoneAgg => ({ total: 0, assigned: 0, unassigned: 0, incomplete: 0, visited30d: 0 })
++  const zoneAgg = new Map<string | '__none__', ZoneAgg>()
++  for (const z of zones) zoneAgg.set(z.id, emptyAgg())
++  zoneAgg.set('__none__', emptyAgg())
++  const hoodAgg = new Map<string, ZoneAgg>()
++  const streetAgg = new Map<string, number>()
++  const unassigned: { id: string; name: string; neighborhood: string | null; zone: string | null; geoStatus: string | null }[] = []
++  // workload: employee → { customers, zones set, neighborhoods set }
++  const workloadMap = new Map<string, { customers: number; zones: Set<string>; hoods: Set<string> }>()
++
++  for (const c of cityCustomers) {
++    const nhId: string | null = c.geoNeighborhoodId
++    const zid = nhId ? (zoneOfHood.get(nhId) ?? '__none__') : '__none__'
++    const bucket = zoneAgg.get(zid as string) ?? emptyAgg()
++    const hb = nhId ? (hoodAgg.get(nhId) ?? emptyAgg()) : null
++    const bump = (k: 'total' | 'assigned' | 'unassigned' | 'incomplete' | 'visited30d') => {
++      bucket[k]++
++      if (hb && nhId) { hb[k]++; hoodAgg.set(nhId, hb) }
++    }
++    bump('total')
++    if (c.assignments.length > 0) {
++      bump('assigned')
++    } else {
++      bump('unassigned')
++      unassigned.push({
++        id: c.id, name: c.name,
++        neighborhood: nhId ? (hoodById.get(nhId)?.name ?? null) : null,
++        zone: zid !== '__none__' ? (zones.find((z) => z.id === zid)?.name ?? null) : null,
++        geoStatus: c.geoStatus,
++      })
++    }
++    if (c.geoStatus === 'incomplete') bump('incomplete')
++    if (c.checkins.length > 0) bump('visited30d')
++    if (c.geoStreetId) streetAgg.set(c.geoStreetId, (streetAgg.get(c.geoStreetId) ?? 0) + 1)
++    for (const a of c.assignments) {
++      const w = workloadMap.get(a.employeeId) ?? { customers: 0, zones: new Set<string>(), hoods: new Set<string>() }
++      w.customers++
++      if (zid !== '__none__') w.zones.add(zid)
++      if (nhId) w.hoods.add(nhId)
++      workloadMap.set(a.employeeId, w)
++    }
++  }
++
++  const zoneJson = (id: string | '__none__', name: string | null, code: string | null) => {
++    const a = zoneAgg.get(id) ?? emptyAgg()
++    return {
++      id: id === '__none__' ? null : id,
++      name: name ?? 'بدون محدوده',
++      code,
++      total: a.total, assigned: a.assigned, unassigned: a.unassigned,
++      incomplete: a.incomplete,
++      coverage: a.total > 0 ? Math.round((a.visited30d / a.total) * 100) : null,
++      neighborhoods: inCity
++        .filter((h) => (zoneOfHood.get(h.id) ?? '__none__') === id)
++        .map((h) => {
++          const ha = hoodAgg.get(h.id) ?? emptyAgg()
++          return {
++            id: h.id, name: h.name,
++            total: ha.total, assigned: ha.assigned, unassigned: ha.unassigned,
++            incomplete: ha.incomplete,
++            coverage: ha.total > 0 ? Math.round((ha.visited30d / ha.total) * 100) : null,
++          }
++        }),
++    }
++  }
++
++  const workload = employees
++    .map((e) => {
++      const w = workloadMap.get(e.id)
++      return {
++        id: e.id, name: e.name, username: e.username,
++        customers: w?.customers ?? 0,
++        zones: w?.zones.size ?? 0,
++        neighborhoods: w?.hoods.size ?? 0,
++        density: w && w.zones.size > 0 ? Math.round((w.customers / w.zones.size) * 10) / 10 : null,
++      }
++    })
++    .filter((e) => e.customers > 0)
++    .sort((a, b) => b.customers - a.customers)
++
++  const streetReport = [...streetAgg.entries()]
++    .map(([id, count]) => ({ id, name: streetById.get(id) ?? '؟', count }))
++    .filter((s) => streetById.has(s.id))
++    .sort((a, b) => b.count - a.count)
++
++  return NextResponse.json({
++    ok: true,
++    city: { id: city.id, name: city.name },
++    zones: [...zones.map((z) => zoneJson(z.id, z.name, z.code)), zoneJson('__none__', null, null)],
++    unassigned: unassigned.sort((a, b) => (a.zone ?? '').localeCompare(b.zone ?? '') || (a.neighborhood ?? '').localeCompare(b.neighborhood ?? '')),
++    workload,
++    streets: streetReport,
++  })
++}
+diff -ruN '--exclude=node_modules' '--exclude=dev.db' '--exclude=build-time.db' '--exclude=.next' '--exclude=x.db' /tmp/pristine/src/app/api/panel/geo/resolve/route.ts panel-build/src/src/app/api/panel/geo/resolve/route.ts
+--- a/src/app/api/panel/geo/resolve/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/panel/geo/resolve/route.ts	2026-11-18 07:00:16.657977376 +0000
+@@ -0,0 +1,60 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { isAdmin } from '@/lib/auth'
++import { normalizeFa } from '@/lib/iran-cities'
++import { distanceMeters, isValidLatLng } from '@/lib/geo'
++
++/**
++ * Phase 5 (geo) — GET /api/panel/geo/resolve?city=مشهد&lat=&lng=
++ *
++ * «تشخیص خودکار از مختصات» (admin session): the K nearest neighborhood
++ * CENTROIDS of the city, with distances in meters. An APPROXIMATION —
++ * place centroids, not boundaries — and the response says so
++ * (approx: true) so no client can present it as a boundary decision.
++ *
++ * Used by the customer form («تشخیص از موقعیت نقشه») and by the
++ * completion worklist to preselect the likely neighborhood.
++ */
++export async function GET(req: Request) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const url = new URL(req.url)
++  const cityName = (url.searchParams.get('city') ?? '').trim()
++  const lat = Number(url.searchParams.get('lat'))
++  const lng = Number(url.searchParams.get('lng'))
++  if (!cityName) return NextResponse.json({ ok: false, error: 'شهر مشخص نیست' }, { status: 400 })
++  if (!isValidLatLng(lat, lng)) {
++    return NextResponse.json({ ok: false, error: 'مختصات نامعتبر است' }, { status: 400 })
++  }
++
++  const cityKey = normalizeFa(cityName)
++  const cities = await db.geoArea.findMany({ where: { type: 'city', active: true } })
++  const city = cities.find((c) => normalizeFa(c.name) === cityKey)
++  if (!city) return NextResponse.json({ ok: true, approx: true, city: null, hits: [] })
++
++  const zones = await db.geoArea.findMany({
++    where: { type: 'zone', parentId: city.id, active: true },
++    select: { id: true, name: true },
++  })
++  const zoneById = new Map(zones.map((z) => [z.id, z.name]))
++  const hoods = await db.geoArea.findMany({
++    where: { type: 'neighborhood', active: true, lat: { not: null }, lng: { not: null } },
++    select: { id: true, name: true, parentId: true, lat: true, lng: true },
++  })
++  const zoneIds = new Set(zoneById.keys())
++  const hits = hoods
++    .filter((h) => h.parentId === city.id || zoneIds.has(h.parentId ?? ''))
++    .map((h) => ({
++      id: h.id,
++      name: h.name,
++      zoneId: zoneIds.has(h.parentId ?? '') ? (h.parentId as string) : null,
++      zoneName: zoneIds.has(h.parentId ?? '') ? (zoneById.get(h.parentId as string) as string) : null,
++      distanceM: Math.round(distanceMeters(lat, lng, h.lat as number, h.lng as number)),
++    }))
++    .filter((h) => h.distanceM <= 6000)
++    .sort((a, b) => a.distanceM - b.distanceM)
++    .slice(0, 5)
++
++  return NextResponse.json({ ok: true, approx: true, city: { id: city.id, name: city.name }, hits })
++}
+diff -ruN '--exclude=node_modules' '--exclude=dev.db' '--exclude=build-time.db' '--exclude=.next' '--exclude=x.db' /tmp/pristine/src/app/api/panel/geo/tree/route.ts panel-build/src/src/app/api/panel/geo/tree/route.ts
+--- a/src/app/api/panel/geo/tree/route.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/app/api/panel/geo/tree/route.ts	2026-11-18 07:00:16.657977376 +0000
+@@ -0,0 +1,103 @@
++import { NextResponse } from 'next/server'
++import { db } from '@/lib/db'
++import { isAdmin } from '@/lib/auth'
++import { normalizeFa } from '@/lib/iran-cities'
++
++/**
++ * Phase 5 (geo) — GET /api/panel/geo/tree?city=مشهد
++ *
++ * The structured geography tree for a city (admin session), with the
++ * customer count per node — the backbone of the «جغرافیا» tab:
++ *  zones[] → each { id, name, code, neighborhoods[] }
++ *  cityLess[] → neighborhoods parented directly to the city (OSM-only
++ *               entries with no official zone mapping — «بدون محدوده»)
++ *  streets[] → city-level main streets (flat; a street spans neighborhoods)
++ *
++ * Everything is ACTIVE nodes only; provenance (source/sourceDate) is
++ * included per node so the admin can always see WHERE the data came from.
++ */
++export async function GET(req: Request) {
++  if (!(await isAdmin())) {
++    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
++  }
++  const url = new URL(req.url)
++  const cityName = (url.searchParams.get('city') ?? 'مشهد').trim()
++  const cityKey = normalizeFa(cityName)
++
++  const cities = await db.geoArea.findMany({ where: { type: 'city', active: true } })
++  const city = cities.find((c) => normalizeFa(c.name) === cityKey)
++  if (!city) {
++    // honest empty tree — a city without structured geo data
++    return NextResponse.json({ ok: true, city: null, zones: [], cityLess: [], streets: [], totals: null })
++  }
++
++  const [zones, hoods, streets, customers] = await Promise.all([
++    db.geoArea.findMany({
++      where: { type: 'zone', parentId: city.id, active: true },
++      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
++    }),
++    db.geoArea.findMany({
++      where: { type: 'neighborhood', active: true },
++      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
++    }),
++    db.geoArea.findMany({
++      where: { type: 'street', active: true },
++      orderBy: [{ name: 'asc' }],
++      select: { id: true, name: true, code: true, source: true, sourceDate: true },
++    }),
++    db.customer.findMany({
++      where: { active: true },
++      select: {
++        id: true,
++        geoNeighborhoodId: true,
++        geoStatus: true,
++        assignments: { select: { id: true } }, // unassign deletes the row — every row IS an active assignment
++      },
++    }),
++  ])
++
++  const zoneIds = new Set(zones.map((z) => z.id))
++  const inCity = hoods.filter((h) => h.parentId === city.id || zoneIds.has(h.parentId ?? ''))
++
++  // customer aggregation per neighborhood
++  const agg = new Map<string, { total: number; incomplete: number; unassigned: number }>()
++  const totals = { total: 0, incomplete: 0, unassigned: 0 }
++  for (const c of customers) {
++    const bucket = c.geoNeighborhoodId
++      ? (agg.get(c.geoNeighborhoodId) ?? { total: 0, incomplete: 0, unassigned: 0 })
++      : totals
++    bucket.total++
++    if (c.geoStatus === 'incomplete') bucket.incomplete++
++    if (c.assignments.length === 0) bucket.unassigned++
++    if (c.geoNeighborhoodId) agg.set(c.geoNeighborhoodId, bucket)
++  }
++
++  const hoodJson = (h: (typeof hoods)[number]) => ({
++    id: h.id,
++    name: h.name,
++    zoneId: h.parentId && zoneIds.has(h.parentId) ? h.parentId : null,
++    lat: h.lat,
++    lng: h.lng,
++    source: h.source,
++    sourceDate: h.sourceDate,
++    customerCount: agg.get(h.id)?.total ?? 0,
++    incompleteCount: agg.get(h.id)?.incomplete ?? 0,
++    unassignedCount: agg.get(h.id)?.unassigned ?? 0,
++  })
++
++  return NextResponse.json({
++    ok: true,
++    city: { id: city.id, name: city.name, code: city.code, source: city.source, sourceDate: city.sourceDate },
++    zones: zones.map((z) => ({
++      id: z.id,
++      name: z.name,
++      code: z.code,
++      source: z.source,
++      sourceDate: z.sourceDate,
++      neighborhoods: inCity.filter((h) => h.parentId === z.id).map(hoodJson),
++    })),
++    cityLess: inCity.filter((h) => h.parentId === city.id).map(hoodJson),
++    streets,
++    totals: { ...totals, neighborhoods: inCity.length, streets: streets.length },
++  })
++}
+diff -ruN '--exclude=node_modules' '--exclude=dev.db' '--exclude=build-time.db' '--exclude=.next' '--exclude=x.db' /tmp/pristine/src/components/panel/CustomersTab.tsx panel-build/src/src/components/panel/CustomersTab.tsx
+--- a/src/components/panel/CustomersTab.tsx	2026-11-18 06:55:00.316165140 +0000
++++ b/src/components/panel/CustomersTab.tsx	2026-11-18 07:00:16.657977376 +0000
+@@ -56,6 +56,10 @@
+   district: '',
+   postalCode: '',
+   notes: '',
++  // Phase 5 (geo): structured refs — empty string = not sent (untouched
++  // on edit); picked value = explicit admin choice → geoStatus complete
++  geoNeighborhoodId: '',
++  geoStreetId: '',
+   lat: 0,
+   lng: 0,
+   radius: 150,
+@@ -85,6 +89,12 @@
+   const [form, setForm] = useState(emptyForm)
+   const [pickMode, setPickMode] = useState<{ customerId: string; name: string } | null>(null)
+   const [saving, setSaving] = useState(false)
++  // Phase 5 (geo) — structured geography for the selected city (مشهد today):
++  // neighborhoods (with zone names for grouped labels) + main streets
++  const [geoHoods, setGeoHoods] = useState<{ id: string; name: string; zone: string | null }[]>([])
++  const [geoStreets, setGeoStreets] = useState<{ id: string; name: string }[]>([])
++  const [geoCity, setGeoCity] = useState<string | null>(null)
++  const [geoHint, setGeoHint] = useState<string | null>(null)
+   // Customer 360 — search + filters (mission §6.1)
+   const [query, setQuery] = useState('')
+   const [fType, setFType] = useState<string>('all')
+@@ -174,6 +184,19 @@
+       ])
+       if (c.ok) setRows(c.customers)
+       if (e.ok) setEmployees(e.employees)
++      // Phase 5 (geo) — structured geo tree for the geo-enabled city
++      try {
++        const t = await fetch('/api/panel/geo/tree?city=' + encodeURIComponent('مشهد'), { cache: 'no-store' }).then((r) => r.json())
++        if (t.ok && t.city) {
++          setGeoCity(t.city.name)
++          setGeoHoods([
++            ...t.zones.flatMap((z: { id: string; name: string; neighborhoods: { id: string; name: string }[] }) =>
++              z.neighborhoods.map((h) => ({ id: h.id, name: h.name, zone: z.name }))),
++            ...t.cityLess.map((h: { id: string; name: string }) => ({ id: h.id, name: h.name, zone: null })),
++          ])
++          setGeoStreets(t.streets ?? [])
++        }
++      } catch { /* geo pickers are optional — never break the tab */ }
+     } finally {
+       setLoading(false)
+     }
+@@ -238,6 +261,8 @@
+       district: c.district || '',
+       postalCode: c.postalCode || '',
+       notes: c.notes || '',
++      geoNeighborhoodId: (c as { geoNeighborhoodId?: string | null }).geoNeighborhoodId || '',
++      geoStreetId: (c as { geoStreetId?: string | null }).geoStreetId || '',
+       lat: c.lat,
+       lng: c.lng,
+       radius: c.radius,
+@@ -296,10 +321,17 @@
+     setSaving(true)
+     try {
+       const url = creating ? '/api/customers' : `/api/customers/${editing!.id}`
++      // Phase 5 (geo): send the geo refs ONLY when at least one is picked —
++      // an untouched picker must never act as an explicit clear.
++      const payload: Record<string, unknown> = { ...form, force }
++      if (!form.geoNeighborhoodId && !form.geoStreetId) {
++        delete payload.geoNeighborhoodId
++        delete payload.geoStreetId
++      }
+       const res = await fetch(url, {
+         method: creating ? 'POST' : 'PUT',
+         headers: { 'content-type': 'application/json' },
+-        body: JSON.stringify({ ...form, force }),
++        body: JSON.stringify(payload),
+       })
+       const data = await res.json().catch(() => ({ ok: false, error: 'پاسخ نامعتبر سرور' }))
+       if (data.ok) {
+@@ -604,12 +636,24 @@
+                   {(!c.assignments || c.assignments.length === 0) && (
+                     <Badge className="shrink-0 bg-warning/15 text-warning-foreground hover:bg-warning/15">بدون تخصیص</Badge>
+                   )}
++                  {/* Phase 5 (geo) — «ثبت موقت» badge: geography awaits completion */}
++                  {(c as { geoStatus?: string | null }).geoStatus === 'incomplete' && (
++                    <Badge className="shrink-0 bg-amber-500/15 text-amber-700 dark:text-amber-400 hover:bg-amber-500/15">ثبت موقت جغرافیایی</Badge>
++                  )}
+                   {c.active === false && (
+                     <Badge variant="destructive" className="shrink-0">غیرفعال</Badge>
+                   )}
+                   <span className="flex-1 truncate font-medium">
+                     {c.name}{c.lastName ? ` ${c.lastName}` : ''}
+                   </span>
++                  {(() => {
++                    const nh = geoHoods.find((h) => h.id === (c as { geoNeighborhoodId?: string | null }).geoNeighborhoodId)
++                    return nh ? (
++                      <span className="hidden shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground md:inline" title={nh.zone || undefined}>
++                        {nh.name}
++                      </span>
++                    ) : null
++                  })()}
+                   {c.city && (
+                     <span className="hidden shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground sm:inline" title={c.province || undefined}>
+                       {c.city}
+@@ -972,6 +1016,61 @@
+                 <Input dir="ltr" className="text-left" type="number" step="any" value={form.lng} onChange={(e) => setForm({ ...form, lng: parseFloat(e.target.value) })} />
+               </div>
+             </div>
++            {/* Phase 5 (geo) — structured neighborhood/street pickers.
++                Rendered ONLY when the customer's city has structured data
++                (مشهد today). Empty = not sent; a pick is an EXPLICIT admin
++                choice → geoStatus 'complete' (never blocks assignment). */}
++            {geoCity && form.city === geoCity && (
++              <div className="space-y-2 rounded-md border border-dashed p-2.5">
++                <div className="flex items-center justify-between">
++                  <span className="text-xs font-medium text-muted-foreground">جغرافیای ساختاریافته (محله / خیابان)</span>
++                  <Button type="button" variant="ghost" size="sm"
++                    onClick={async () => {
++                      setGeoHint(null)
++                      try {
++                        const r = await fetch('/api/panel/geo/resolve?city=' + encodeURIComponent(form.city) + '&lat=' + form.lat + '&lng=' + form.lng, { cache: 'no-store' })
++                        const j = await r.json()
++                        if (j.ok && j.hits?.length) {
++                          const best = j.hits[0]
++                          setGeoHint('نزدیک‌ترین محله از مختصات نقشه: «' + best.name + '» — حدود ' + best.distanceM.toLocaleString('fa-IR') + ' متر (تقریب)')
++                          if (best.id) setForm((f) => ({ ...f, geoNeighborhoodId: best.id }))
++                        } else {
++                          setGeoHint('در شعاع تشخیص این مختصات محله‌ای پیدا نشد — دستی انتخاب کنید')
++                        }
++                      } catch { setGeoHint('تشخیص خودکار ممکن نشد') }
++                    }}>
++                    <MapPin className="ml-1 h-3.5 w-3.5" /> تشخیص از موقعیت نقشه
++                  </Button>
++                </div>
++                {geoHint && <div className="text-[11px] text-muted-foreground bg-muted/50 rounded p-1.5">{geoHint}</div>}
++                <div className="grid grid-cols-2 gap-3">
++                  <div className="space-y-1">
++                    <Label>محله</Label>
++                    <Select value={form.geoNeighborhoodId || '__none'} onValueChange={(v) => setForm((f) => ({ ...f, geoNeighborhoodId: v === '__none' ? '' : v }))}>
++                      <SelectTrigger><SelectValue placeholder="انتخاب نشده" /></SelectTrigger>
++                      <SelectContent>
++                        <SelectItem value="__none">انتخاب نشده</SelectItem>
++                        {geoHoods.map((h) => (
++                          <SelectItem key={h.id} value={h.id}>{h.zone ? h.zone + ' — ' + h.name : h.name}</SelectItem>
++                        ))}
++                      </SelectContent>
++                    </Select>
++                  </div>
++                  <div className="space-y-1">
++                    <Label>خیابان</Label>
++                    <Select value={form.geoStreetId || '__none'} onValueChange={(v) => setForm((f) => ({ ...f, geoStreetId: v === '__none' ? '' : v }))}>
++                      <SelectTrigger><SelectValue placeholder="انتخاب نشده" /></SelectTrigger>
++                      <SelectContent>
++                        <SelectItem value="__none">انتخاب نشده</SelectItem>
++                        {geoStreets.map((st) => (
++                          <SelectItem key={st.id} value={st.id}>{st.name}</SelectItem>
++                        ))}
++                      </SelectContent>
++                    </Select>
++                  </div>
++                </div>
++              </div>
++            )}
+             <div className="space-y-1">
+               <Label>یادداشت‌های مشتری</Label>
+               <Input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="یادداشت عمومی پروندهٔ مشتری" />
+diff -ruN '--exclude=node_modules' '--exclude=dev.db' '--exclude=build-time.db' '--exclude=.next' '--exclude=x.db' /tmp/pristine/src/components/panel/Dashboard.tsx panel-build/src/src/components/panel/Dashboard.tsx
+--- a/src/components/panel/Dashboard.tsx	2026-11-18 06:55:00.319165138 +0000
++++ b/src/components/panel/Dashboard.tsx	2026-11-18 07:06:27.924712123 +0000
+@@ -12,6 +12,7 @@
+   DoorOpen,
+   Download,
+   LogOut,
++  MapPin,
+   Navigation,
+   RadioTower,
+   Settings,
+@@ -29,6 +30,9 @@
+ import SettingsTab from './SettingsTab'
+ // Holoo integration (phase 1) — the Holoo ERP sync tab
+ import HolooTab from './HolooTab'
++// Phase 5 (geo) — structured geography: Mashhad zones/neighborhoods/streets,
++// the «در انتظار تکمیل» worklist and the geographic reports
++import GeoTab from './GeoTab'
+ // package 5 / phase 5-C — the panel's notification center (persisted bell)
+ import NotificationsBell from './NotificationsBell'
+ // UI/UX redesign — theme switcher (Light / Dark / System, persisted)
+@@ -40,7 +44,7 @@
+   useRealtimeSocket,
+ } from '@/lib/realtime'
+ 
+-type TabKey = 'overview' | 'plans' | 'checkins' | 'customers' | 'employees' | 'tracking' | 'events' | 'holoo' | 'settings'
++type TabKey = 'overview' | 'plans' | 'checkins' | 'customers' | 'employees' | 'tracking' | 'events' | 'holoo' | 'geo' | 'settings'
+ 
+ const TABS: { key: TabKey; label: string; short: string; icon: React.ComponentType<{ className?: string }> }[] = [
+   { key: 'overview', label: 'نمای کلی', short: 'نمای کلی', icon: RadioTower },
+@@ -54,6 +58,7 @@
+   { key: 'events', label: 'گزارش رویدادها', short: 'رویدادها', icon: ClipboardList },
+   // Holoo integration (phase 1) — ERP accounting sync (admin only)
+   { key: 'holoo', label: 'هلو (حسابداری)', short: 'هلو', icon: Calculator },
++  { key: 'geo', label: 'جغرافیا و محلات', short: 'جغرافیا', icon: MapPin },
+   // phase 4 — the UNIFIED settings section (comprehensive phase 4) replaces the
+   // old security dialog: every server policy lives in ONE place now
+   { key: 'settings', label: 'تنظیمات', short: 'تنظیمات', icon: Settings },
+@@ -278,6 +283,7 @@
+             {tab === 'tracking' && <TrackingTab refreshKey={refreshKey} />}
+             {tab === 'events' && <EventsTab refreshKey={refreshKey} />}
+             {tab === 'holoo' && <HolooTab />}
++            {tab === 'geo' && <GeoTab refreshKey={refreshKey} onNavigate={(k) => setTab(k as TabKey)} />}
+             {tab === 'settings' && <SettingsTab cfg={cfg} />}
+           </div>
+         </main>
+diff -ruN '--exclude=node_modules' '--exclude=dev.db' '--exclude=build-time.db' '--exclude=.next' '--exclude=x.db' /tmp/pristine/src/components/panel/GeoTab.tsx panel-build/src/src/components/panel/GeoTab.tsx
+--- a/src/components/panel/GeoTab.tsx	1970-01-01 00:00:00.000000000 +0000
++++ b/src/components/panel/GeoTab.tsx	2026-11-18 07:00:16.657977376 +0000
+@@ -0,0 +1,615 @@
++'use client'
++
++/**
++ * Phase 5 (geo / فاز پنج) — the panel's «جغرافیا و محلات» tab.
++ *
++ * Four surfaces, one tab (all admin session, all real data):
++ *  1. خلاصه — zone/neighborhood/street counts + «ثبت موقت» (geo
++ *     incomplete) and unassigned counters.
++ *  2. در انتظار تکمیل — the «نیازمند تکمیل اطلاعات جغرافیایی» worklist:
++ *     every customer with geoStatus='incomplete'. The completion dialog
++ *     preselects the nearest neighborhood from the customer's own map
++ *     coordinates («تشخیص خودکار از مختصات» — labeled an APPROXIMATION),
++ *     the admin confirms neighborhood + street, and the save lifts the
++ *     assignment gate (PUT /api/customers/[id]).
++ *  3. گزارش‌های جغرافیایی — customers per zone/neighborhood, unassigned,
++ *     per-rep workload & density, and 30-day coverage comparison.
++ *  4. مرور دادهٔ جغرافیایی — the zone→neighborhood tree with per-node
++ *     customer counts and provenance (source + date on every node), plus
++ *     add-neighborhood/add-street with server-side dedup (normalized
++ *     names — «کوي سلمان» can never become a second node).
++ */
++
++import { useCallback, useEffect, useMemo, useState } from 'react'
++import { Badge } from '@/components/ui/badge'
++import { Button } from '@/components/ui/button'
++import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
++import {
++  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
++} from '@/components/ui/dialog'
++import { Input } from '@/components/ui/input'
++import { Label } from '@/components/ui/label'
++import {
++  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
++} from '@/components/ui/select'
++import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
++import { useToast } from '@/hooks/use-toast'
++import {
++  AlertTriangle, CheckCircle2, ChevronDown, ChevronLeft, Loader2, MapPin, Plus,
++} from 'lucide-react'
++
++interface GeoHood {
++  id: string; name: string; zoneId: string | null
++  lat: number | null; lng: number | null
++  source: string | null; sourceDate: string | null
++  customerCount: number; incompleteCount: number; unassignedCount: number
++}
++interface GeoZone {
++  id: string; name: string; code: string | null
++  source: string | null; sourceDate: string | null
++  neighborhoods: GeoHood[]
++}
++interface GeoTree {
++  ok: true
++  city: { id: string; name: string; code: string | null; source: string | null; sourceDate: string | null } | null
++  zones: GeoZone[]
++  cityLess: GeoHood[]
++  streets: { id: string; name: string; code: string | null; source: string | null; sourceDate: string | null }[]
++  totals: { total: number; incomplete: number; unassigned: number; neighborhoods: number; streets: number } | null
++}
++interface ReportZone {
++  id: string | null; name: string; code: string | null
++  total: number; assigned: number; unassigned: number; incomplete: number
++  coverage: number | null
++  neighborhoods: { id: string; name: string; total: number; assigned: number; unassigned: number; incomplete: number; coverage: number | null }[]
++}
++interface GeoReport {
++  ok: true
++  city: { id: string; name: string } | null
++  zones: ReportZone[]
++  unassigned: { id: string; name: string; neighborhood: string | null; zone: string | null; geoStatus: string | null }[]
++  workload: { id: string; name: string; username: string; customers: number; zones: number; neighborhoods: number; density: number | null }[]
++  streets: { id: string; name: string; count: number }[]
++}
++interface CustomerRowLite {
++  id: string; name: string; type: string; city: string | null
++  lat: number; lng: number
++  geoNeighborhoodId: string | null; geoStreetId: string | null
++  geoStatus: string | null; geoSource: string | null
++}
++
++export default function GeoTab({ refreshKey, onNavigate }: { refreshKey: number; onNavigate?: (k: string) => void }) {
++  const { toast } = useToast()
++  const [tree, setTree] = useState<GeoTree | null>(null)
++  const [report, setReport] = useState<GeoReport | null>(null)
++  const [customers, setCustomers] = useState<CustomerRowLite[]>([])
++  const [busy, setBusy] = useState(false)
++  const [expandedZone, setExpandedZone] = useState<string | null>(null)
++  // completion dialog state
++  const [completing, setCompleting] = useState<CustomerRowLite | null>(null)
++  const [pickZone, setPickZone] = useState('')
++  const [pickHood, setPickHood] = useState('')
++  const [pickStreet, setPickStreet] = useState('')
++  const [autoHint, setAutoHint] = useState<string | null>(null)
++  const [saving, setSaving] = useState(false)
++  // add-node dialog state
++  const [adding, setAdding] = useState<{ type: 'neighborhood' | 'street'; parentId: string; parentName: string } | null>(null)
++  const [newName, setNewName] = useState('')
++  const [view, setView] = useState<'reports' | 'browse'>('reports')
++
++  const load = useCallback(async () => {
++    setBusy(true)
++    try {
++      const [t, r, c] = await Promise.all([
++        fetch('/api/panel/geo/tree?city=' + encodeURIComponent('مشهد'), { cache: 'no-store' }),
++        fetch('/api/panel/geo/report?city=' + encodeURIComponent('مشهد'), { cache: 'no-store' }),
++        fetch('/api/customers', { cache: 'no-store' }),
++      ])
++      if (t.ok) setTree((await t.json()) as GeoTree)
++      if (r.ok) setReport((await r.json()) as GeoReport)
++      if (c.ok) {
++        const j = (await c.json()) as { customers: CustomerRowLite[] }
++        setCustomers(j.customers ?? [])
++      }
++    } catch {
++      toast({ title: 'خطا در دریافت دادهٔ جغرافیایی' })
++    } finally {
++      setBusy(false)
++    }
++  }, [toast])
++
++  useEffect(() => { void load() }, [load, refreshKey])
++
++  const incomplete = useMemo(
++    () => customers.filter((c) => c.geoStatus === 'incomplete'),
++    [customers],
++  )
++  const allHoods = useMemo(() => {
++    if (!tree) return [] as GeoHood[]
++    return [...tree.zones.flatMap((z) => z.neighborhoods), ...tree.cityLess]
++  }, [tree])
++
++  /** open the completion dialog; preselect the nearest neighborhood from the customer's own coordinates */
++  const openComplete = useCallback(async (c: CustomerRowLite) => {
++    setCompleting(c)
++    setPickHood(c.geoNeighborhoodId ?? '')
++    setPickStreet(c.geoStreetId ?? '')
++    setAutoHint(null)
++    const hood = allHoods.find((h) => h.id === c.geoNeighborhoodId)
++    setPickZone(hood?.zoneId ?? '')
++    if (c.lat && c.lng) {
++      try {
++        const res = await fetch(
++          `/api/panel/geo/resolve?city=${encodeURIComponent('مشهد')}&lat=${c.lat}&lng=${c.lng}`,
++          { cache: 'no-store' },
++        )
++        if (res.ok) {
++          const j = (await res.json()) as { hits: { id: string; name: string; zoneName: string | null; distanceM: number }[] }
++          if (j.hits?.length) {
++            const best = j.hits[0]
++            setAutoHint(`نزدیک‌ترین محله از مختصات نقشه: «${best.name}»${best.zoneName ? ` (${best.zoneName})` : ''} — حدود ${best.distanceM.toLocaleString('fa-IR')} متر (تقریب نقطهٔ نزدیک، نه مرز رسمی)`)
++            if (!c.geoNeighborhoodId) {
++              const h = allHoods.find((x) => x.id === best.id)
++              if (h) { setPickHood(h.id); setPickZone(h.zoneId ?? '') }
++            }
++          } else {
++            setAutoHint('هیچ محله‌ای در شعاع تشخیص این مختصات پیدا نشد — محله را دستی انتخاب کنید')
++          }
++        }
++      } catch { /* hint is best-effort */ }
++    }
++  }, [allHoods])
++
++  const saveComplete = useCallback(async () => {
++    if (!completing) return
++    if (!pickHood) { toast({ title: 'انتخاب محله برای تکمیل لازم است' }); return }
++    setSaving(true)
++    try {
++      const res = await fetch(`/api/customers/${completing.id}`, {
++        method: 'PUT',
++        headers: { 'content-type': 'application/json' },
++        body: JSON.stringify({ geoNeighborhoodId: pickHood, geoStreetId: pickStreet === '__none' ? null : (pickStreet || null) }),
++      })
++      const j = (await res.json()) as { ok: boolean; error?: string }
++      if (!res.ok || !j.ok) {
++        toast({ title: 'خطا در تکمیل', description: j.error ?? String(res.status) })
++        return
++      }
++      toast({ title: `اطلاعات جغرافیایی «${completing.name}» تکمیل شد — تخصیص نهایی آزاد شد` })
++      setCompleting(null)
++      void load()
++    } finally {
++      setSaving(false)
++    }
++  }, [completing, pickHood, pickStreet, toast, load])
++
++  const saveNode = useCallback(async () => {
++    if (!adding) return
++    if (!newName.trim()) { toast({ title: 'نام را وارد کنید' }); return }
++    setSaving(true)
++    try {
++      const res = await fetch('/api/panel/geo/nodes', {
++        method: 'POST',
++        headers: { 'content-type': 'application/json' },
++        body: JSON.stringify({ type: adding.type, parentId: adding.parentId, name: newName.trim() }),
++      })
++      const j = (await res.json()) as { ok: boolean; error?: string }
++      if (!res.ok || !j.ok) {
++        toast({ title: 'ثبت نشد', description: j.error ?? String(res.status) })
++        return
++      }
++      toast({ title: `«${newName.trim()}» ثبت شد` })
++      setAdding(null); setNewName('')
++      void load()
++    } finally {
++      setSaving(false)
++    }
++  }, [adding, newName, toast, load])
++
++  const hoodsOfZone = useMemo(() => {
++    const m = new Map<string, GeoHood[]>()
++    for (const z of tree?.zones ?? []) m.set(z.id, z.neighborhoods)
++    return m
++  }, [tree])
++
++  const cityStreets = tree?.streets ?? []
++
++  if (busy && !tree) {
++    return (
++      <div className="flex items-center gap-2 text-sm text-muted-foreground p-8">
++        <Loader2 className="h-4 w-4 animate-spin" /> در حال دریافت دادهٔ جغرافیایی…
++      </div>
++    )
++  }
++  if (tree && !tree.city) {
++    return (
++      <Card><CardContent className="p-6 text-sm text-muted-foreground">
++        دادهٔ جغرافیایی ساختاریافته‌ای برای هیچ شهری ثبت نشده است.
++      </CardContent></Card>
++    )
++  }
++
++  return (
++    <div className="space-y-4">
++      {/* ── summary ── */}
++      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
++        <Card><CardContent className="p-4">
++          <div className="text-xs text-muted-foreground">محدوده‌های شهری</div>
++          <div className="text-2xl font-bold">{(tree?.zones.length ?? 0).toLocaleString('fa-IR')}</div>
++          <div className="text-[11px] text-muted-foreground">مرزبندی ۱۳گانه + ثامن</div>
++        </CardContent></Card>
++        <Card><CardContent className="p-4">
++          <div className="text-xs text-muted-foreground">محله‌ها</div>
++          <div className="text-2xl font-bold">{(tree?.totals?.neighborhoods ?? 0).toLocaleString('fa-IR')}</div>
++          <div className="text-[11px] text-muted-foreground">با مختصات: {allHoods.filter((h) => h.lat != null).length.toLocaleString('fa-IR')}</div>
++        </CardContent></Card>
++        <Card><CardContent className="p-4">
++          <div className="text-xs text-muted-foreground">خیابان‌های اصلی</div>
++          <div className="text-2xl font-bold">{(tree?.totals?.streets ?? 0).toLocaleString('fa-IR')}</div>
++        </CardContent></Card>
++        <Card><CardContent className="p-4">
++          <div className="text-xs text-muted-foreground">ثبت موقت (ناقص)</div>
++          <div className="text-2xl font-bold text-amber-600 dark:text-amber-400">{incomplete.length.toLocaleString('fa-IR')}</div>
++          <div className="text-[11px] text-muted-foreground">در انتظار تکمیل → تخصیص قفل</div>
++        </CardContent></Card>
++        <Card><CardContent className="p-4">
++          <div className="text-xs text-muted-foreground">تخصیص‌نیافتهٔ مشهد</div>
++          <div className="text-2xl font-bold">{(report?.zones.reduce((s, z) => s + z.unassigned, 0) ?? 0).toLocaleString('fa-IR')}</div>
++        </CardContent></Card>
++      </div>
++
++      {/* ── worklist: در انتظار تکمیل ── */}
++      <Card>
++        <CardHeader className="pb-2"><CardTitle className="flex items-center gap-2 text-base">
++          <AlertTriangle className="h-4 w-4 text-amber-500" />
++          در انتظار تکمیل اطلاعات جغرافیایی
++          <Badge variant="secondary">{incomplete.length.toLocaleString('fa-IR')}</Badge>
++        </CardTitle></CardHeader>
++        <CardContent>
++          {incomplete.length === 0 ? (
++            <div className="flex items-center gap-2 text-sm text-muted-foreground">
++              <CheckCircle2 className="h-4 w-4 text-green-600" /> موردی در انتظار تکمیل نیست.
++            </div>
++          ) : (
++            <Table>
++              <TableHeader><TableRow>
++                <TableHead>مشتری</TableHead><TableHead>محلهٔ تشخیص‌داده‌شده</TableHead>
++                <TableHead>منبع</TableHead><TableHead></TableHead>
++              </TableRow></TableHeader>
++              <TableBody>
++                {incomplete.slice(0, 50).map((c) => {
++                  const hood = allHoods.find((h) => h.id === c.geoNeighborhoodId)
++                  const zone = hood ? (tree?.zones.find((z) => z.id === hood.zoneId)?.name ?? null) : null
++                  return (
++                    <TableRow key={c.id}>
++                      <TableCell className="font-medium">{c.name}</TableCell>
++                      <TableCell>
++                        {hood ? `${hood.name}${zone ? ` — ${zone}` : ''}` : <span className="text-muted-foreground">بدون تشخیص (خارج از شعاع یا بدون مختصات)</span>}
++                      </TableCell>
++                      <TableCell>
++                        <Badge variant={c.geoSource === 'auto' ? 'outline' : 'secondary'}>
++                          {c.geoSource === 'auto' ? 'تشخیص خودکار از مختصات' : '—'}
++                        </Badge>
++                      </TableCell>
++                      <TableCell className="text-left">
++                        <Button size="sm" variant="outline" onClick={() => void openComplete(c)}>
++                          <MapPin className="ml-1 h-3.5 w-3.5" /> تکمیل
++                        </Button>
++                      </TableCell>
++                    </TableRow>
++                  )
++                })}
++              </TableBody>
++            </Table>
++          )}
++        </CardContent>
++      </Card>
++
++      {/* view switch */}
++      <div className="flex gap-2">
++        <Button size="sm" variant={view === 'reports' ? 'default' : 'outline'} onClick={() => setView('reports')}>گزارش‌های جغرافیایی</Button>
++        <Button size="sm" variant={view === 'browse' ? 'default' : 'outline'} onClick={() => setView('browse')}>مرور دادهٔ جغرافیایی</Button>
++        <Button size="sm" variant="ghost" onClick={() => void load()} disabled={busy}>
++          <Loader2 className={`ml-1 h-3.5 w-3.5 ${busy ? 'animate-spin' : ''}`} /> تازه‌سازی
++        </Button>
++      </div>
++
++      {view === 'reports' && report && (
++        <>
++          {/* per-zone report */}
++          <Card>
++            <CardHeader className="pb-2"><CardTitle className="text-base">
++              مشتریان به تفکیک محدوده (مقایسهٔ پوشش ۳۰ روزه)
++            </CardTitle></CardHeader>
++            <CardContent>
++              <Table>
++                <TableHeader><TableRow>
++                  <TableHead>محدوده</TableHead><TableHead className="text-center">مشتریان</TableHead>
++                  <TableHead className="text-center">تخصیص‌یافته</TableHead><TableHead className="text-center">تخصیص‌نیافته</TableHead>
++                  <TableHead className="text-center">ثبت موقت</TableHead><TableHead className="text-center">پوشش ۳۰ روزه</TableHead>
++                </TableRow></TableHeader>
++                <TableBody>
++                  {report.zones.map((z) => (
++                    <TableRow key={z.id ?? 'none'}>
++                      <TableCell className="font-medium">
++                        {z.name}
++                        {z.id && (
++                          <Button variant="ghost" size="sm" className="mr-1 h-6 px-1.5"
++                            onClick={() => { setExpandedZone(expandedZone === z.id ? null : z.id); setView('browse') }}>
++                            <ChevronLeft className="h-3.5 w-3.5" /> محله‌ها
++                          </Button>
++                        )}
++                      </TableCell>
++                      <TableCell className="text-center">{z.total.toLocaleString('fa-IR')}</TableCell>
++                      <TableCell className="text-center">{z.assigned.toLocaleString('fa-IR')}</TableCell>
++                      <TableCell className="text-center">{z.unassigned.toLocaleString('fa-IR')}</TableCell>
++                      <TableCell className="text-center">{z.incomplete > 0 ? <span className="text-amber-600 dark:text-amber-400 font-bold">{z.incomplete.toLocaleString('fa-IR')}</span> : '۰'}</TableCell>
++                      <TableCell className="text-center">{z.coverage == null ? '—' : `${z.coverage.toLocaleString('fa-IR')}٪`}</TableCell>
++                    </TableRow>
++                  ))}
++                </TableBody>
++              </Table>
++            </CardContent>
++          </Card>
++
++          {/* workload */}
++          <Card>
++            <CardHeader className="pb-2"><CardTitle className="text-base">
++              بار کاری و تراکم مدرپ‌ها در مشهد
++            </CardTitle></CardHeader>
++            <CardContent>
++              {report.workload.length === 0 ? (
++                <div className="text-sm text-muted-foreground">هنوز تخصیصی در مشهد ثبت نشده است.</div>
++              ) : (
++                <Table>
++                  <TableHeader><TableRow>
++                    <TableHead>مدرپ</TableHead><TableHead className="text-center">مشتریان مشهد</TableHead>
++                    <TableHead className="text-center">محدوده‌ها</TableHead><TableHead className="text-center">محله‌ها</TableHead>
++                    <TableHead className="text-center">تراکم (مشتری/محدوده)</TableHead>
++                  </TableRow></TableHeader>
++                  <TableBody>
++                    {report.workload.map((w) => (
++                      <TableRow key={w.id}>
++                        <TableCell className="font-medium">{w.name}</TableCell>
++                        <TableCell className="text-center">{w.customers.toLocaleString('fa-IR')}</TableCell>
++                        <TableCell className="text-center">{w.zones.toLocaleString('fa-IR')}</TableCell>
++                        <TableCell className="text-center">{w.neighborhoods.toLocaleString('fa-IR')}</TableCell>
++                        <TableCell className="text-center">{w.density == null ? '—' : w.density.toLocaleString('fa-IR')}</TableCell>
++                      </TableRow>
++                    ))}
++                  </TableBody>
++                </Table>
++              )}
++            </CardContent>
++          </Card>
++
++          {/* unassigned */}
++          <Card>
++            <CardHeader className="pb-2"><CardTitle className="text-base">
++              تخصیص‌نیافته‌ها به تفکیک محله
++              <Badge variant="secondary" className="mr-2">{report.unassigned.length.toLocaleString('fa-IR')}</Badge>
++            </CardTitle></CardHeader>
++            <CardContent>
++              {report.unassigned.length === 0 ? (
++                <div className="text-sm text-muted-foreground">همهٔ مشتریان مشهد تخصیص دارند.</div>
++              ) : (
++                <div className="max-h-72 overflow-auto">
++                  <Table>
++                    <TableHeader><TableRow>
++                      <TableHead>مشتری</TableHead><TableHead>محله</TableHead><TableHead>محدوده</TableHead>
++                    </TableRow></TableHeader>
++                    <TableBody>
++                      {report.unassigned.map((u) => (
++                        <TableRow key={u.id}>
++                          <TableCell className="font-medium">{u.name}</TableCell>
++                          <TableCell>{u.neighborhood ?? <span className="text-muted-foreground">—</span>}</TableCell>
++                          <TableCell>{u.zone ?? <span className="text-muted-foreground">—</span>}</TableCell>
++                        </TableRow>
++                      ))}
++                    </TableBody>
++                  </Table>
++                </div>
++              )}
++              {onNavigate && (
++                <Button variant="outline" size="sm" className="mt-3" onClick={() => onNavigate('customers')}>
++                  مدیریت تخصیص‌ها در تب مشتریان
++                </Button>
++              )}
++            </CardContent>
++          </Card>
++
++          {/* street report */}
++          {report.streets.length > 0 && (
++            <Card>
++              <CardHeader className="pb-2"><CardTitle className="text-base">
++                مشتریان به تفکیک خیابان (خیابان‌های دارای مشتری)
++              </CardTitle></CardHeader>
++              <CardContent>
++                <div className="max-h-60 overflow-auto">
++                  <Table>
++                    <TableHeader><TableRow>
++                      <TableHead>خیابان</TableHead><TableHead className="text-center">مشتریان</TableHead>
++                    </TableRow></TableHeader>
++                    <TableBody>
++                      {report.streets.map((s) => (
++                        <TableRow key={s.id}>
++                          <TableCell className="font-medium">{s.name}</TableCell>
++                          <TableCell className="text-center">{s.count.toLocaleString('fa-IR')}</TableCell>
++                        </TableRow>
++                      ))}
++                    </TableBody>
++                  </Table>
++                </div>
++              </CardContent>
++            </Card>
++          )}
++        </>
++      )}
++
++      {view === 'browse' && tree && (
++        <Card>
++          <CardHeader className="pb-2">
++            <CardTitle className="text-base">دادهٔ ساختاریافتهٔ جغرافیای مشهد</CardTitle>
++            <p className="text-xs text-muted-foreground mt-1">
++              منبع هر گره درج شده (مصوبه مرزبندی ۱۳گانهٔ شورای شهر مشهد + دادهٔ OpenStreetMap با تاریخ استخراج) — مختصات محله‌ها «مرکز تقریبی» است، نه مرز رسمی.
++            </p>
++          </CardHeader>
++          <CardContent className="space-y-2">
++            {tree.zones.map((z) => {
++              const open = expandedZone === z.id
++              const totalCustomers = z.neighborhoods.reduce((s, h) => s + h.customerCount, 0)
++              return (
++                <div key={z.id} className="rounded-lg border">
++                  <button
++                    className="flex w-full items-center gap-2 p-3 text-right"
++                    onClick={() => setExpandedZone(open ? null : z.id)}
++                  >
++                    <ChevronDown className={`h-4 w-4 transition-transform ${open ? '' : '-rotate-90'}`} />
++                    <span className="font-medium">{z.name}</span>
++                    <Badge variant="secondary">{z.neighborhoods.length.toLocaleString('fa-IR')} محله</Badge>
++                    {totalCustomers > 0 && <Badge>{totalCustomers.toLocaleString('fa-IR')} مشتری</Badge>}
++                    <span className="mr-auto text-[11px] text-muted-foreground">{z.code}</span>
++                  </button>
++                  {open && (
++                    <div className="border-t px-3 pb-3">
++                      <div className="max-h-80 overflow-auto pt-2">
++                        <Table>
++                          <TableHeader><TableRow>
++                            <TableHead>محله</TableHead><TableHead className="text-center">مشتریان</TableHead>
++                            <TableHead className="text-center">ناقص</TableHead><TableHead className="text-center">تخصیص‌نیافته</TableHead>
++                            <TableHead>مختصات</TableHead><TableHead>منبع</TableHead>
++                          </TableRow></TableHeader>
++                          <TableBody>
++                            {z.neighborhoods.map((h) => (
++                              <TableRow key={h.id}>
++                                <TableCell className="font-medium">{h.name}</TableCell>
++                                <TableCell className="text-center">{h.customerCount.toLocaleString('fa-IR')}</TableCell>
++                                <TableCell className="text-center">{h.incompleteCount > 0 ? <span className="text-amber-600 dark:text-amber-400">{h.incompleteCount.toLocaleString('fa-IR')}</span> : '—'}</TableCell>
++                                <TableCell className="text-center">{h.unassignedCount > 0 ? h.unassignedCount.toLocaleString('fa-IR') : '—'}</TableCell>
++                                <TableCell className="text-[11px] text-muted-foreground">{h.lat != null ? `${h.lat.toFixed(3)}، ${h.lng?.toFixed(3)}` : '—'}</TableCell>
++                                <TableCell className="max-w-56 truncate text-[11px] text-muted-foreground" title={h.source ?? ''}>{h.source ?? '—'}</TableCell>
++                              </TableRow>
++                            ))}
++                          </TableBody>
++                        </Table>
++                      </div>
++                      <Button variant="outline" size="sm" className="mt-2"
++                        onClick={() => { setAdding({ type: 'neighborhood', parentId: z.id, parentName: z.name }); setNewName('') }}>
++                        <Plus className="ml-1 h-3.5 w-3.5" /> افزودن محله به {z.name}
++                      </Button>
++                    </div>
++                  )}
++                </div>
++              )
++            })}
++            {/* zone-less neighborhoods */}
++            {tree.cityLess.length > 0 && (
++              <div className="rounded-lg border border-dashed">
++                <div className="flex items-center gap-2 p-3">
++                  <span className="font-medium">بدون محدوده (فقط OpenStreetMap)</span>
++                  <Badge variant="secondary">{tree.cityLess.length.toLocaleString('fa-IR')} محله</Badge>
++                </div>
++                <div className="border-t px-3 pb-3 pt-2 text-sm text-muted-foreground">
++                  {tree.cityLess.map((h) => h.name).join('، ')}
++                </div>
++              </div>
++            )}
++            <div className="flex flex-wrap items-center gap-2 pt-2">
++              <Button variant="outline" size="sm"
++                onClick={() => { setAdding({ type: 'neighborhood', parentId: tree.city!.id, parentName: 'شهرداری مشهد (بدون محدوده)' }); setNewName('') }}>
++                <Plus className="ml-1 h-3.5 w-3.5" /> افزودن محلهٔ بدون محدوده
++              </Button>
++              <Button variant="outline" size="sm"
++                onClick={() => { setAdding({ type: 'street', parentId: tree.city!.id, parentName: 'خیابان‌های مشهد' }); setNewName('') }}>
++                <Plus className="ml-1 h-3.5 w-3.5" /> افزودن خیابان
++              </Button>
++              <span className="text-xs text-muted-foreground">
++                {cityStreets.length.toLocaleString('fa-IR')} خیابان اصلی ثبت شده
++              </span>
++            </div>
++          </CardContent>
++        </Card>
++      )}
++
++      {/* ── completion dialog ── */}
++      <Dialog open={!!completing} onOpenChange={(v) => !v && setCompleting(null)}>
++        <DialogContent className="max-w-lg">
++          <DialogHeader>
++            <DialogTitle>تکمیل اطلاعات جغرافیایی — {completing?.name}</DialogTitle>
++          </DialogHeader>
++          {autoHint && (
++            <div className="rounded-md bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 p-2.5 text-xs leading-5">
++              {autoHint}
++            </div>
++          )}
++          <div className="space-y-3">
++            <div className="space-y-1.5">
++              <Label>محدوده</Label>
++              <Select value={pickZone} onValueChange={(v) => { setPickZone(v); setPickHood('') }}>
++                <SelectTrigger><SelectValue placeholder="انتخاب محدوده" /></SelectTrigger>
++                <SelectContent>
++                  {(tree?.zones ?? []).map((z) => (
++                    <SelectItem key={z.id} value={z.id}>{z.name}</SelectItem>
++                  ))}
++                </SelectContent>
++              </Select>
++            </div>
++            <div className="space-y-1.5">
++              <Label>محله *</Label>
++              <Select value={pickHood} onValueChange={setPickHood}>
++                <SelectTrigger><SelectValue placeholder="انتخاب محله" /></SelectTrigger>
++                <SelectContent>
++                  {(pickZone ? (hoodsOfZone.get(pickZone) ?? []) : allHoods).map((h) => (
++                    <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>
++                  ))}
++                </SelectContent>
++              </Select>
++            </div>
++            <div className="space-y-1.5">
++              <Label>خیابان (اختیاری)</Label>
++              <Select value={pickStreet} onValueChange={setPickStreet}>
++                <SelectTrigger><SelectValue placeholder="بدون خیابان" /></SelectTrigger>
++                <SelectContent>
++                  <SelectItem value="__none">بدون خیابان</SelectItem>
++                  {cityStreets.map((s) => (
++                    <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
++                  ))}
++                </SelectContent>
++              </Select>
++            </div>
++          </div>
++          <DialogFooter>
++            <Button variant="outline" onClick={() => setCompleting(null)}>انصراف</Button>
++            <Button onClick={() => void saveComplete()} disabled={saving || !pickHood}>
++              {saving && <Loader2 className="ml-1 h-4 w-4 animate-spin" />} تأیید و رفع قفل تخصیص
++            </Button>
++          </DialogFooter>
++        </DialogContent>
++      </Dialog>
++
++      {/* ── add-node dialog ── */}
++      <Dialog open={!!adding} onOpenChange={(v) => !v && setAdding(null)}>
++        <DialogContent className="max-w-md">
++          <DialogHeader>
++            <DialogTitle>
++              افزودن {adding?.type === 'neighborhood' ? 'محله' : 'خیابان'} — {adding?.parentName}
++            </DialogTitle>
++          </DialogHeader>
++          <div className="space-y-1.5">
++            <Label>نام</Label>
++            <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="نام دقیق و رسمی" />
++            <p className="text-[11px] text-muted-foreground">
++              نام‌ها هنگام ثبت نرمال‌سازی می‌شوند (ي/ی، ك/ک، فاصله‌ها) — تکراری‌ها با پیام مشخص رد می‌شوند.
++            </p>
++          </div>
++          <DialogFooter>
++            <Button variant="outline" onClick={() => setAdding(null)}>انصراف</Button>
++            <Button onClick={() => void saveNode()} disabled={saving || !newName.trim()}>
++              {saving && <Loader2 className="ml-1 h-4 w-4 animate-spin" />} ثبت
++            </Button>
++          </DialogFooter>
++        </DialogContent>
++      </Dialog>
++    </div>
++  )
++}
+diff -ruN '--exclude=node_modules' '--exclude=dev.db' '--exclude=build-time.db' '--exclude=.next' '--exclude=x.db' /tmp/pristine/src/instrumentation.ts panel-build/src/src/instrumentation.ts
+--- a/src/instrumentation.ts	2026-11-18 06:55:00.319165138 +0000
++++ b/src/instrumentation.ts	2026-11-18 07:18:20.811238207 +0000
+@@ -474,6 +474,51 @@
+   '"errors" = COALESCE("errors", \'[]\') WHERE "status" = \'running\' AND ' +
+   '"startedAt" < datetime(\'now\', \'-30 minutes\')'
+ 
++// ── Phase 5 (geo / فاز پنج) — structured geography ────────────────────
++// 1) Customer geo columns (additive ALTERs; SCALAR — no FK, like erpCode:
++//    SQLite cannot attach FKs to an existing table, so neither the fresh
++//    template nor a boot-migrated db declares one; integrity is enforced
++//    by the API layer and guarded node deletion).
++const GEO_CUSTOMER_DDL = [
++  'ALTER TABLE "Customer" ADD COLUMN "geoNeighborhoodId" TEXT',
++  'ALTER TABLE "Customer" ADD COLUMN "geoStreetId" TEXT',
++  'ALTER TABLE "Customer" ADD COLUMN "geoStatus" TEXT',
++  'ALTER TABLE "Customer" ADD COLUMN "geoSource" TEXT',
++]
++const GEO_CUSTOMER_NH_INDEX_DDL =
++  'CREATE INDEX IF NOT EXISTS "Customer_geoNeighborhoodId_idx" ON "Customer"("geoNeighborhoodId")'
++const GEO_CUSTOMER_ST_INDEX_DDL =
++  'CREATE INDEX IF NOT EXISTS "Customer_geoStreetId_idx" ON "Customer"("geoStreetId")'
++// 2) The GeoArea tree table (layout = prisma db push output for the
++//    phase-5 schema; self-referencing parent FK with ON DELETE SET NULL —
++//    the admin API refuses to delete a node that still has children, so
++//    the SET NULL is a last-resort safety, not a routine path).
++const GEO_AREA_DDL = `CREATE TABLE IF NOT EXISTS "GeoArea" (
++    "id" TEXT NOT NULL PRIMARY KEY,
++    "type" TEXT NOT NULL,
++    "parentId" TEXT,
++    "name" TEXT NOT NULL,
++    "normalizedName" TEXT NOT NULL,
++    "code" TEXT,
++    "lat" REAL,
++    "lng" REAL,
++    "source" TEXT,
++    "sourceDate" TEXT,
++    "active" BOOLEAN NOT NULL DEFAULT true,
++    "sortOrder" INTEGER,
++    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
++    "updatedAt" DATETIME NOT NULL,
++    CONSTRAINT "GeoArea_parentId_fkey" FOREIGN KEY ("parentId") REFERENCES "GeoArea" ("id") ON DELETE SET NULL ON UPDATE CASCADE
++)`
++const GEO_AREA_UNIQUE_DDL =
++  'CREATE UNIQUE INDEX IF NOT EXISTS "GeoArea_parentId_type_normalizedName_key" ON "GeoArea"("parentId", "type", "normalizedName")'
++const GEO_AREA_CODE_UNIQUE_DDL =
++  'CREATE UNIQUE INDEX IF NOT EXISTS "GeoArea_code_key" ON "GeoArea"("code")'
++const GEO_AREA_TYPE_INDEX_DDL =
++  'CREATE INDEX IF NOT EXISTS "GeoArea_type_idx" ON "GeoArea"("type")'
++const GEO_AREA_PARENT_INDEX_DDL =
++  'CREATE INDEX IF NOT EXISTS "GeoArea_parentId_idx" ON "GeoArea"("parentId")'
++
+ export async function register() {
+   if (process.env.NEXT_RUNTIME !== 'nodejs') return
+   const { PrismaClient } = await import('@prisma/client')
+@@ -483,7 +528,7 @@
+   // index is created (a violating legacy row would otherwise fail the
+   // index creation loudly); both are idempotent, so every boot just
+   // re-applies them as no-ops.
+-  for (const sql of [...MIGRATIONS, AUDIT_TABLE_DDL, PLANNED_VISIT_DDL, PLANNED_VISIT_INDEX_DDL, NOTIF_EVENTKEY_DDL, NOTIF_EVENTKEY_INDEX_DDL, PANEL_NOTIFICATION_DDL, PANEL_NOTIFICATION_INDEX_DDL, ASSIGNMENT_REQUEST_DDL, ASSIGNMENT_REQUEST_PENDING_INDEX_DDL, ...CUSTOMER_CITY_DDL, CHECKIN_NOTE_VERSION_DDL, CHECKIN_NOTE_VERSION_INDEX_DDL, LOCATION_PING_DDL, LOCATION_PING_LOCALID_INDEX_DDL, LOCATION_PING_ROUTE_INDEX_DDL, TRACK_STATUS_DDL, VISIT_ONE_OPEN_RECONCILE_DDL, VISIT_ONE_OPEN_INDEX_DDL, OP_EVENT_DDL, OP_EVENT_EMP_IDX_DDL, OP_EVENT_TYPE_IDX_DDL, OP_EVENT_TIME_IDX_DDL, OP_EVENT_REQUEST_ID_INDEX_DDL, VOICE_FILE_DDL, VOICE_FILE_PATH_INDEX_DDL, VOICE_FILE_CHECKIN_INDEX_DDL, VOICE_FILE_BACKFILL_SQL, ...CUSTOMER_360_DDL, CUSTOMER_APPLOCALID_INDEX_DDL, CUSTOMER_LINK_DDL, CUSTOMER_LINK_UNIQUE_DDL, CUSTOMER_LINK_PHYSICIAN_INDEX_DDL, PURCHASE_DDL, PURCHASE_CUSTOMER_DATE_INDEX_DDL, PURCHASE_EXTERNALID_INDEX_DDL, PURCHASE_EXTERNALID_UNIQUE_DDL, PURCHASE_ITEM_DDL, PURCHASE_ITEM_INDEX_DDL, ...TRACK_STATUS_ACK_DDL, PUSH_SUBSCRIPTION_DDL, ...HOLOO_CUSTOMER_DDL, HOLOO_CUSTOMER_ERPCODE_INDEX_DDL, ERP_CUSTOMER_DDL, ERP_CUSTOMER_UNIQUE_DDL, ERP_CUSTOMER_ACTIVE_INDEX_DDL, ERP_PRODUCT_DDL, ERP_PRODUCT_UNIQUE_DDL, ERP_PAYMENT_DDL, ERP_PAYMENT_UNIQUE_DDL, ERP_PAYMENT_CUSTOMER_INDEX_DDL, HOLOO_SYNC_LOG_DDL, HOLOO_SYNC_LOG_TIME_INDEX_DDL, HOLOO_SYNC_LOG_STALE_DDL]) {
++  for (const sql of [...MIGRATIONS, AUDIT_TABLE_DDL, PLANNED_VISIT_DDL, PLANNED_VISIT_INDEX_DDL, NOTIF_EVENTKEY_DDL, NOTIF_EVENTKEY_INDEX_DDL, PANEL_NOTIFICATION_DDL, PANEL_NOTIFICATION_INDEX_DDL, ASSIGNMENT_REQUEST_DDL, ASSIGNMENT_REQUEST_PENDING_INDEX_DDL, ...CUSTOMER_CITY_DDL, CHECKIN_NOTE_VERSION_DDL, CHECKIN_NOTE_VERSION_INDEX_DDL, LOCATION_PING_DDL, LOCATION_PING_LOCALID_INDEX_DDL, LOCATION_PING_ROUTE_INDEX_DDL, TRACK_STATUS_DDL, VISIT_ONE_OPEN_RECONCILE_DDL, VISIT_ONE_OPEN_INDEX_DDL, OP_EVENT_DDL, OP_EVENT_EMP_IDX_DDL, OP_EVENT_TYPE_IDX_DDL, OP_EVENT_TIME_IDX_DDL, OP_EVENT_REQUEST_ID_INDEX_DDL, VOICE_FILE_DDL, VOICE_FILE_PATH_INDEX_DDL, VOICE_FILE_CHECKIN_INDEX_DDL, VOICE_FILE_BACKFILL_SQL, ...CUSTOMER_360_DDL, CUSTOMER_APPLOCALID_INDEX_DDL, CUSTOMER_LINK_DDL, CUSTOMER_LINK_UNIQUE_DDL, CUSTOMER_LINK_PHYSICIAN_INDEX_DDL, PURCHASE_DDL, PURCHASE_CUSTOMER_DATE_INDEX_DDL, PURCHASE_EXTERNALID_INDEX_DDL, PURCHASE_EXTERNALID_UNIQUE_DDL, PURCHASE_ITEM_DDL, PURCHASE_ITEM_INDEX_DDL, ...TRACK_STATUS_ACK_DDL, PUSH_SUBSCRIPTION_DDL, ...HOLOO_CUSTOMER_DDL, HOLOO_CUSTOMER_ERPCODE_INDEX_DDL, ERP_CUSTOMER_DDL, ERP_CUSTOMER_UNIQUE_DDL, ERP_CUSTOMER_ACTIVE_INDEX_DDL, ERP_PRODUCT_DDL, ERP_PRODUCT_UNIQUE_DDL, ERP_PAYMENT_DDL, ERP_PAYMENT_UNIQUE_DDL, ERP_PAYMENT_CUSTOMER_INDEX_DDL, HOLOO_SYNC_LOG_DDL, HOLOO_SYNC_LOG_TIME_INDEX_DDL, HOLOO_SYNC_LOG_STALE_DDL, ...GEO_CUSTOMER_DDL, GEO_CUSTOMER_NH_INDEX_DDL, GEO_CUSTOMER_ST_INDEX_DDL, GEO_AREA_DDL, GEO_AREA_UNIQUE_DDL, GEO_AREA_CODE_UNIQUE_DDL, GEO_AREA_TYPE_INDEX_DDL, GEO_AREA_PARENT_INDEX_DDL]) {
+     try {
+       await db.$executeRawUnsafe(sql)
+       applied++
+@@ -551,6 +596,21 @@
+   } catch {
+     // best-effort at boot
+   }
++  // ── Phase 5 (geo): seed the structured geography tree (Mashhad dataset).
++  // Idempotent UPSERT by (parent, normalized name); NO-DELETE on re-seed.
++  // A failure must never block the server — geo features degrade to
++  // "no data" honestly (empty tree, auto-detect returns nothing).
++  try {
++    const { seedGeoAreas } = await import('./lib/geo-seed')
++    const stats = await seedGeoAreas()
++    if (stats.created > 0) {
++      console.log(
++        `edpad][geo] seeded ${stats.created} node(s), refreshed ${stats.updated}, unchanged ${stats.unchanged}`,
++      )
++    }
++  } catch (e) {
++    console.error('edpad][geo] seed failed:', e instanceof Error ? e.message : e)
++  }
+   await db.$disconnect()
+   if (applied > 0) console.log(`[medpad][migrate] applied ${applied} migration statement(s)`)
+   // ── Holoo integration (phase 1): the periodic sync scheduler. NO new
+diff -ruN '--exclude=node_modules' '--exclude=dev.db' '--exclude=build-time.db' '--exclude=.next' '--exclude=x.db' /tmp/pristine/src/lib/geo-areas.ts panel-build/src/src/lib/geo-areas.ts
+--- a/src/lib/geo-areas.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/lib/geo-areas.ts	2026-11-18 07:00:16.658977376 +0000
+@@ -0,0 +1,213 @@
++import { db } from '@/lib/db'
++import { normalizeFa } from './iran-cities'
++import { distanceMeters, isValidLatLng } from './geo'
++
++/**
++ * Phase 5 (geo / فاز پنج) — structured geography helpers.
++ *
++ * The GeoArea tree (province←city←zone←neighborhood←street) is seeded at
++ * boot from the packaged Mashhad dataset (lib/geo-mashhad.ts via
++ * lib/geo-seed.ts) and managed through /api/panel/geo/*. This module holds
++ * the logic SHARED by the customer write paths and the assignment gates:
++ *
++ *  - resolveGeoRefs(): validates optional geoNeighborhoodId / geoStreetId
++ *    bodies against ACTIVE nodes of the right type — the single
++ *    gatekeeper, exactly like resolveCustomerCity for (city, province).
++ *  - nearestNeighborhood(): «تشخیص خودکار از مختصات» — nearest ACTIVE
++ *    neighborhood CENTROID of the same city within GEO_DETECT_RADIUS_M.
++ *    Centroids, not boundaries: an APPROXIMATION, labeled as such in the
++ *    UI («تقریب نقطهٔ نزدیک»), never presented as a boundary decision.
++ *  - assertCustomersGeoComplete(): the «جلوگیری از تخصیص نهایی تا تکمیل»
++ *    gate — customers with geoStatus='incomplete' (and ONLY those; NULL
++ *    = legacy rows that must keep working) block final assignment with a
++ *    specific Persian error.
++ */
++
++export type GeoAreaType = 'province' | 'city' | 'zone' | 'neighborhood' | 'street'
++
++/** Nearest-centroid detection radius (meters). Documented approximation. */
++export const GEO_DETECT_RADIUS_M = 3000
++
++/** Allowed parent types per child type (API-level hierarchy rule). */
++export const GEO_PARENT_RULES: Record<Exclude<GeoAreaType, 'province'>, GeoAreaType[]> = {
++  city: ['province'],
++  zone: ['city'],
++  neighborhood: ['city', 'zone'],
++  street: ['city', 'neighborhood'],
++}
++
++export function isGeoAreaType(v: string): v is GeoAreaType {
++  return v === 'province' || v === 'city' || v === 'zone' || v === 'neighborhood' || v === 'street'
++}
++
++/** Partial-update semantics for the geo fields (mirrors resolveCustomerCity). */
++export type GeoRefsResolution =
++  | { skip: true }
++  | { error: string }
++  | { geoNeighborhoodId: string | null; geoStreetId: string | null; explicit: boolean }
++
++/**
++ * Validate the geo reference fields of a customer write.
++ *
++ *  - neither field sent            → { skip } (caller leaves values alone)
++ *  - any field present             → both are resolved:
++ *      null/''  → explicit clear
++ *      id       → must exist, be ACTIVE, and be of type neighborhood /
++ *                 street respectively (a zone id is NOT accepted as a
++ *                 neighborhood — the admin UI picks leaf nodes only)
++ *  - a street, when set, may belong to any city (no cross-check against
++ *    the neighborhood — streets are city-level in the seed, and the
++ *    reverse geocoder's street suggestions are best-effort labels).
++ */
++export async function resolveGeoRefs(
++  body: Record<string, unknown> | null | undefined,
++): Promise<GeoRefsResolution> {
++  const b = body ?? {}
++  const hasNeighborhood = 'geoNeighborhoodId' in b
++  const hasStreet = 'geoStreetId' in b
++  if (!hasNeighborhood && !hasStreet) return { skip: true }
++
++  const parse = (v: unknown): string | null | 'invalid' => {
++    if (v === null || v === undefined || v === '') return null
++    if (typeof v !== 'string' || !v.trim()) return 'invalid'
++    return v.trim()
++  }
++  const nh = parse(b.geoNeighborhoodId)
++  const st = parse(b.geoStreetId)
++  if (nh === 'invalid') return { error: 'شناسهٔ محله نامعتبر است' }
++  if (st === 'invalid') return { error: 'شناسهٔ خیابان نامعتبر است' }
++
++  if (nh) {
++    const node = await db.geoArea.findUnique({ where: { id: nh } })
++    if (!node || !node.active) return { error: 'محلهٔ انتخابی موجود یا فعال نیست' }
++    if (node.type !== 'neighborhood') return { error: 'گرهٔ انتخاب‌شده محله نیست' }
++  }
++  if (st) {
++    const node = await db.geoArea.findUnique({ where: { id: st } })
++    if (!node || !node.active) return { error: 'خیابان انتخابی موجود یا فعال نیست' }
++    if (node.type !== 'street') return { error: 'گرهٔ انتخاب‌شده خیابان نیست' }
++  }
++  return { geoNeighborhoodId: nh, geoStreetId: st, explicit: true }
++}
++
++export interface NearestHit {
++  id: string
++  name: string
++  zoneId: string | null
++  zoneName: string | null
++  distanceM: number
++}
++
++/**
++ * «تشخیص خودکار از مختصات» — nearest ACTIVE neighborhood centroid of the
++ * SAME city within GEO_DETECT_RADIUS_M. Loads only that city's
++ * neighborhoods-with-coords (a few hundred rows, cached per call).
++ */
++export async function nearestNeighborhood(
++  cityName: string,
++  lat: number,
++  lng: number,
++): Promise<NearestHit | null> {
++  if (!isValidLatLng(lat, lng)) return null
++  // find the city node (active) whose name matches the customer's city
++  const cityKey = normalizeFa(cityName)
++  const cities = await db.geoArea.findMany({ where: { type: 'city', active: true } })
++  const cityNode = cities.find((c) => normalizeFa(c.name) === cityKey)
++  if (!cityNode) return null
++  const nodes = await db.geoArea.findMany({
++    where: { type: 'neighborhood', active: true, lat: { not: null }, lng: { not: null } },
++    select: { id: true, name: true, parentId: true, lat: true, lng: true },
++  })
++  // only neighborhoods of THIS city's subtree: zone children of the city,
++  // or neighborhoods parented directly to the city
++  const zoneIds = new Set(
++    (
++      await db.geoArea.findMany({
++        where: { type: 'zone', parentId: cityNode.id },
++        select: { id: true },
++      })
++    ).map((z) => z.id),
++  )
++  let best: NearestHit | null = null
++  for (const n of nodes) {
++    if (n.parentId !== cityNode.id && !zoneIds.has(n.parentId ?? '')) continue
++    const d = distanceMeters(lat, lng, n.lat as number, n.lng as number)
++    if (d > GEO_DETECT_RADIUS_M) continue
++    if (!best || d < best.distanceM) best = { id: n.id, name: n.name, zoneId: n.parentId && zoneIds.has(n.parentId) ? n.parentId : null, zoneName: null, distanceM: Math.round(d) }
++  }
++  if (best?.zoneId) {
++    const z = await db.geoArea.findUnique({ where: { id: best.zoneId }, select: { name: true } })
++    best.zoneName = z?.name ?? null
++  }
++  return best
++}
++
++/** The assignment gate. Returns the Persian error for the FIRST incomplete customer, else null. */
++export function geoIncompleteError(names: string[]): string | null {
++  if (!names.length) return null
++  const shown = names.slice(0, 3).join('، ')
++  const more = names.length > 3 ? ` و ${names.length - 3} مورد دیگر` : ''
++  return `اطلاعات جغرافیایی این مشتری ناقص ثبت شده است (ثبت موقت در انتظار تکمیل): ${shown}${more} — ابتدا از تب «جغرافیا» بخش «در انتظار تکمیل»، محله و خیابان را تأیید کنید`
++}
++
++/**
++ * Gate: every customer id must NOT be geoStatus='incomplete' (NULL/complete
++ * pass). Legacy rows (NULL) are deliberately exempt — the phase must never
++ * retroactively block existing customers.
++ */
++export async function assertCustomersGeoComplete(customerIds: string[]): Promise<string | null> {
++  if (!customerIds.length) return null
++  const blocked = await db.customer.findMany({
++    where: { id: { in: customerIds }, geoStatus: 'incomplete' },
++    select: { name: true },
++  })
++  return geoIncompleteError(blocked.map((c) => c.name))
++}
++
++/**
++ * Create-time geo resolution (shared by the panel POST and the app create
++ * path — the SAME server-side policy, no UI trust):
++ *
++ *  - explicit refs (panel form pick)        → complete / admin
++ *  - no refs, city HAS structured geo data  → «ثبت موقت نیازمند تکمیل»:
++ *      nearest centroid attached when within GEO_DETECT_RADIUS_M, status
++ *      incomplete / source auto — final assignment stays blocked until an
++ *      admin completes the record
++ *  - no refs, city has NO geo data          → untouched (null) — a city
++ *      outside the dataset keeps 100% legacy behavior (no gating)
++ */
++export async function geoOnCreate(
++  cityName: string | null,
++  lat: number,
++  lng: number,
++  explicit: { geoNeighborhoodId: string | null; geoStreetId: string | null } | null,
++): Promise<{ geoNeighborhoodId?: string | null; geoStreetId?: string | null; geoStatus?: string | null; geoSource?: string | null }> {
++  if (explicit) {
++    return { ...explicit, geoStatus: 'complete', geoSource: 'admin' }
++  }
++  if (!cityName) return {}
++  const cityHasGeo = await cityHasNeighborhoods(cityName)
++  if (!cityHasGeo) return {}
++  const hit = await nearestNeighborhood(cityName, lat, lng)
++  return {
++    geoNeighborhoodId: hit?.id ?? null,
++    geoStreetId: null,
++    geoStatus: 'incomplete',
++    geoSource: 'auto',
++  }
++}
++
++/** Does this city have structured neighborhood data (active)? */
++export async function cityHasNeighborhoods(cityName: string): Promise<boolean> {
++  const cityKey = normalizeFa(cityName)
++  const cities = await db.geoArea.findMany({ where: { type: 'city', active: true }, select: { id: true, name: true } })
++  const city = cities.find((c) => normalizeFa(c.name) === cityKey)
++  if (!city) return false
++  const zones = await db.geoArea.findMany({ where: { type: 'zone', parentId: city.id, active: true }, select: { id: true } })
++  const zoneIds = zones.map((z) => z.id)
++  const direct = await db.geoArea.count({ where: { type: 'neighborhood', parentId: city.id, active: true } })
++  if (direct > 0) return true
++  if (!zoneIds.length) return false
++  const underZones = await db.geoArea.count({ where: { type: 'neighborhood', parentId: { in: zoneIds }, active: true } })
++  return underZones > 0
++}
+diff -ruN '--exclude=node_modules' '--exclude=dev.db' '--exclude=build-time.db' '--exclude=.next' '--exclude=x.db' /tmp/pristine/src/lib/geo-mashhad.ts panel-build/src/src/lib/geo-mashhad.ts
+--- a/src/lib/geo-mashhad.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/lib/geo-mashhad.ts	2026-11-18 07:18:05.551246953 +0000
+@@ -0,0 +1,760 @@
++/**
++ * Mashhad structured geography — GENERATED SEED DATASET (Phase 5 / فاز پنج).
++ *
++ * DO NOT HAND-EDIT — regenerate with tools/geo-mashhad/build-dataset.py
++ * (raw Overpass extracts live in tools/geo-mashhad/raw/; the official
++ * 13-zone lists are embedded in that script, with sources).
++ *
++ * Sources (both DATED, recorded per node in the DB seed):
++ *  - zones & official neighborhood lists: مصوبه شورای اسلامی شهر مشهد ۱۹۶۶۳/۹۶/۵/ش — مرزبندی ۱۳گانه (mashhad-city.ir/mahale170، بازیابی ۱۴۰۵-۰۸-۲۷)
++ *  - coordinates & streets: © OpenStreetMap contributors (ODbL) — استخراج Overpass 2026-11-18
++ *
++ * Accuracy notes (deliberate, honest):
++ *  - neighborhood coordinates are place-node CENTROIDS, not boundaries;
++ *    «auto-detect from coordinates» = nearest centroid within a documented
++ *    radius — an approximation, labeled as such in the UI.
++ *  - OSM-only neighborhoods carry zone=null (no fabricated zone mapping);
++ *    they surface in reports under «بدون محدوده».
++ *  - streets are city-level (a street spans neighborhoods; no fake
++ *    street→neighborhood assignment is made).
++ */
++
++export interface GeoSeedZone {
++  name: string
++  code: string
++}
++
++export interface GeoSeedNeighborhood {
++  name: string
++  zone: string | null // null = OSM-only, no official zone mapping
++  lat?: number
++  lng?: number
++  src: 'official' | 'osm' | 'both' // provenance of THIS node
++}
++
++export interface GeoSeedStreet {
++  name: string
++  cls: 'primary' | 'primary_link' | 'secondary' | 'secondary_link'
++}
++
++export const MASHHAD_GEO: {
++  city: string
++  province: string
++  officialSource: string
++  osmSource: string
++  zones: GeoSeedZone[]
++  neighborhoods: GeoSeedNeighborhood[]
++  streets: GeoSeedStreet[]
++} = {
++  city: "مشهد",
++  province: "خراسان رضوی",
++  officialSource: "مصوبه شورای اسلامی شهر مشهد ۱۹۶۶۳/۹۶/۵/ش — مرزبندی ۱۳گانه (mashhad-city.ir/mahale170، بازیابی ۱۴۰۵-۰۸-۲۷)",
++  osmSource: "© OpenStreetMap contributors (ODbL) — استخراج Overpass — 2026-11-18",
++  zones: [
++    { name: "منطقه ۱", code: "MHD-1" },
++    { name: "منطقه ۲", code: "MHD-2" },
++    { name: "منطقه ۳", code: "MHD-3" },
++    { name: "منطقه ۴", code: "MHD-4" },
++    { name: "منطقه ۵", code: "MHD-5" },
++    { name: "منطقه ۶", code: "MHD-6" },
++    { name: "منطقه ۷", code: "MHD-7" },
++    { name: "منطقه ۸", code: "MHD-8" },
++    { name: "منطقه ۹", code: "MHD-9" },
++    { name: "منطقه ۱۰", code: "MHD-10" },
++    { name: "منطقه ۱۱", code: "MHD-11" },
++    { name: "منطقه ۱۲", code: "MHD-12" },
++    { name: "منطقه ثامن", code: "MHD-SAMEN" },
++  ],
++  neighborhoods: [
++    { name: "آبکوه", zone: "منطقه ۱", lat: 36.30929, lng: 59.5695, src: "both" },
++    { name: "ارشاد", zone: "منطقه ۱", lat: 36.3171, lng: 59.57071, src: "both" },
++    { name: "راهنمایی", zone: "منطقه ۱", lat: 36.30172, lng: 59.57024, src: "both" },
++    { name: "فلسطین", zone: "منطقه ۱", lat: 36.3071, lng: 59.56228, src: "both" },
++    { name: "کلاهدوز", zone: "منطقه ۱", lat: 36.3084, lng: 59.58371, src: "both" },
++    { name: "گوهرشاد", zone: "منطقه ۱", lat: 36.31268, lng: 59.57845, src: "both" },
++    { name: "استاد یوسفی", zone: "منطقه ۱۰", lat: 36.35633, lng: 59.51926, src: "both" },
++    { name: "امامیه", zone: "منطقه ۱۰", lat: 36.36821, lng: 59.50723, src: "both" },
++    { name: "ایثارگران", zone: "منطقه ۱۰", lat: 36.33047, lng: 59.61052, src: "both" },
++    { name: "حجاب", zone: "منطقه ۱۰", lat: 36.36965, lng: 59.51612, src: "both" },
++    { name: "رسالت", zone: "منطقه ۱۰", lat: 36.3127, lng: 59.64304, src: "both" },
++    { name: "شاهد", zone: "منطقه ۱۰", lat: 36.35309, lng: 59.50408, src: "both" },
++    { name: "فرهنگیان", zone: "منطقه ۱۰", lat: 36.35502, lng: 59.49588, src: "both" },
++    { name: "آزادشهر", zone: "منطقه ۱۱", lat: 36.32665, lng: 59.53524, src: "both" },
++    { name: "تربیت", zone: "منطقه ۱۱", lat: 36.34221, lng: 59.48886, src: "both" },
++    { name: "شهید رضوی", zone: "منطقه ۱۱", lat: 36.34168, lng: 59.5236, src: "both" },
++    { name: "الهیه", zone: "منطقه ۱۲", lat: 36.37443, lng: 59.47735, src: "both" },
++    { name: "امیریه", zone: "منطقه ۱۲", lat: 36.388, lng: 59.48685, src: "both" },
++    { name: "صادقیه", zone: "منطقه ۱۲", lat: 36.33758, lng: 59.60133, src: "both" },
++    { name: "فردوسی", zone: "منطقه ۱۲", lat: 36.32871, lng: 59.55625, src: "both" },
++    { name: "ایثارگران", zone: "منطقه ۲", lat: 36.33047, lng: 59.61052, src: "both" },
++    { name: "بهاران", zone: "منطقه ۲", lat: 36.34599, lng: 59.55818, src: "both" },
++    { name: "حجت", zone: "منطقه ۲", lat: 36.32031, lng: 59.5938, src: "both" },
++    { name: "سمزقند", zone: "منطقه ۲", lat: 36.31647, lng: 59.61418, src: "both" },
++    { name: "شفا", zone: "منطقه ۲", lat: 36.32722, lng: 59.61181, src: "both" },
++    { name: "شهید مطهری", zone: "منطقه ۲", lat: 36.31506, lng: 59.60125, src: "both" },
++    { name: "عامل", zone: "منطقه ۲", lat: 36.30901, lng: 59.59756, src: "both" },
++    { name: "فدک", zone: "منطقه ۲", lat: 36.34728, lng: 59.57291, src: "both" },
++    { name: "مشهدقلی", zone: "منطقه ۲", lat: 36.38704, lng: 59.53053, src: "both" },
++    { name: "نوده", zone: "منطقه ۲", lat: 36.3775, lng: 59.54798, src: "both" },
++    { name: "نوید", zone: "منطقه ۲", lat: 36.35837, lng: 59.57572, src: "both" },
++    { name: "هدایت", zone: "منطقه ۲", lat: 36.33493, lng: 59.59999, src: "both" },
++    { name: "بهمن", zone: "منطقه ۳", lat: 36.3451, lng: 59.62206, src: "both" },
++    { name: "خواجه ربیع", zone: "منطقه ۳", lat: 36.33948, lng: 59.62802, src: "both" },
++    { name: "خیرآباد", zone: "منطقه ۳", lat: 36.30738, lng: 59.63658, src: "both" },
++    { name: "رسالت", zone: "منطقه ۳", lat: 36.3127, lng: 59.64304, src: "both" },
++    { name: "طبرسی شمالی", zone: "منطقه ۳", lat: 36.32694, lng: 59.67046, src: "both" },
++    { name: "فاطمیه", zone: "منطقه ۳", lat: 36.31454, lng: 59.62595, src: "both" },
++    { name: "گاز", zone: "منطقه ۳", lat: 36.31957, lng: 59.63057, src: "both" },
++    { name: "ایثار", zone: "منطقه ۴", lat: 36.29562, lng: 59.64042, src: "both" },
++    { name: "تلگرد", zone: "منطقه ۴", lat: 36.29986, lng: 59.65778, src: "both" },
++    { name: "رده", zone: "منطقه ۴", lat: 36.31359, lng: 59.66396, src: "both" },
++    { name: "شهید قربانی", zone: "منطقه ۴", lat: 36.32235, lng: 59.68353, src: "both" },
++    { name: "طلاب", zone: "منطقه ۴", lat: 36.30185, lng: 59.64322, src: "both" },
++    { name: "وحید", zone: "منطقه ۴", lat: 36.30441, lng: 59.65499, src: "both" },
++    { name: "پنج‌تن", zone: "منطقه ۴", lat: 36.309, lng: 59.66942, src: "both" },
++    { name: "گلشور", zone: "منطقه ۴", lat: 36.29399, lng: 59.65268, src: "both" },
++    { name: "ثامن", zone: "منطقه ۵", lat: 36.28628, lng: 59.67228, src: "both" },
++    { name: "جلالیه", zone: "منطقه ۵", lat: 36.28254, lng: 59.63001, src: "both" },
++    { name: "سجادیه", zone: "منطقه ۵", lat: 36.28625, lng: 59.63937, src: "both" },
++    { name: "شهید آوینی", zone: "منطقه ۵", lat: 36.2979, lng: 59.66754, src: "both" },
++    { name: "مهرآباد", zone: "منطقه ۵", lat: 36.2803, lng: 59.66145, src: "both" },
++    { name: "نیزه", zone: "منطقه ۵", lat: 36.30285, lng: 59.68434, src: "both" },
++    { name: "اروند", zone: "منطقه ۶", lat: 36.26431, lng: 59.6823, src: "both" },
++    { name: "انصار", zone: "منطقه ۶", lat: 36.26427, lng: 59.69012, src: "both" },
++    { name: "شهرک شیرین", zone: "منطقه ۶", lat: 36.25389, lng: 59.6546, src: "both" },
++    { name: "شهید معقول", zone: "منطقه ۶", lat: 36.25979, lng: 59.66628, src: "both" },
++    { name: "شیرودی", zone: "منطقه ۶", lat: 36.27086, lng: 59.63016, src: "both" },
++    { name: "پورسینا", zone: "منطقه ۶", lat: 36.27315, lng: 59.67501, src: "both" },
++    { name: "چهنو", zone: "منطقه ۶", lat: 36.27573, lng: 59.62479, src: "both" },
++    { name: "کارمندان اول", zone: "منطقه ۶", lat: 36.27712, lng: 59.63254, src: "both" },
++    { name: "کارمندان دوم", zone: "منطقه ۶", lat: 36.26785, lng: 59.64486, src: "both" },
++    { name: "کشاورز", zone: "منطقه ۶", lat: 36.25627, lng: 59.67488, src: "both" },
++    { name: "ابوذر", zone: "منطقه ۷", lat: 36.30762, lng: 59.65177, src: "both" },
++    { name: "انقلاب", zone: "منطقه ۷", lat: 36.23034, lng: 59.61866, src: "both" },
++    { name: "بهارستان", zone: "منطقه ۷", lat: 36.27966, lng: 59.54397, src: "both" },
++    { name: "عنصری", zone: "منطقه ۷", lat: 36.27562, lng: 59.61102, src: "both" },
++    { name: "قائم", zone: "منطقه ۷", lat: 36.32455, lng: 59.63658, src: "both" },
++    { name: "مقدم", zone: "منطقه ۷", lat: 36.26187, lng: 59.60979, src: "both" },
++    { name: "پروین اعتصامی", zone: "منطقه ۷", lat: 36.2586, lng: 59.61368, src: "both" },
++    { name: "کارگران", zone: "منطقه ۷", lat: 36.26426, lng: 59.62486, src: "both" },
++    { name: "کوشش", zone: "منطقه ۷", lat: 36.26474, lng: 59.60289, src: "both" },
++    { name: "کوی پلیس", zone: "منطقه ۷", lat: 36.25511, lng: 59.60324, src: "both" },
++    { name: "امام خمینی", zone: "منطقه ۸", lat: 36.27332, lng: 59.58858, src: "both" },
++    { name: "جنت", zone: "منطقه ۸", lat: 36.28952, lng: 59.59616, src: "both" },
++    { name: "آب و برق", zone: "منطقه ۹", lat: 36.31794, lng: 59.48359, src: "both" },
++    { name: "اقبال", zone: "منطقه ۹", lat: 36.33338, lng: 59.46977, src: "both" },
++    { name: "رضاشهر", zone: "منطقه ۹", lat: 36.29179, lng: 59.54102, src: "both" },
++    { name: "زکریا", zone: "منطقه ۹", lat: 36.27573, lng: 59.52457, src: "both" },
++    { name: "سرافرازان", zone: "منطقه ۹", lat: 36.29498, lng: 59.51063, src: "both" },
++    { name: "نوفل لوشاتو", zone: "منطقه ۹", lat: 36.2941, lng: 59.54869, src: "both" },
++    { name: "نیروی هوایی", zone: "منطقه ۹", lat: 36.30525, lng: 59.48971, src: "both" },
++    { name: "هنرستان", zone: "منطقه ۹", lat: 36.31972, lng: 59.50449, src: "both" },
++    { name: "ولیعصر", zone: "منطقه ۹", lat: 36.35009, lng: 59.52184, src: "both" },
++    { name: "چهارچشمه", zone: "منطقه ۹", lat: 36.30047, lng: 59.50125, src: "both" },
++    { name: "کوثر", zone: "منطقه ۹", lat: 36.31809, lng: 59.51665, src: "both" },
++    { name: "بالاخیابان", zone: "منطقه ثامن", src: "official" },
++    { name: "پایین‌خیابان", zone: "منطقه ثامن", src: "official" },
++    { name: "احمدآباد", zone: "منطقه ۱", src: "official" },
++    { name: "سجاد", zone: "منطقه ۱", src: "official" },
++    { name: "سعدآباد", zone: "منطقه ۱", src: "official" },
++    { name: "صاحب‌الزمان", zone: "منطقه ۱", src: "official" },
++    { name: "کوی دکتری", zone: "منطقه ۱", src: "official" },
++    { name: "امام هادی", zone: "منطقه ۱۰", src: "official" },
++    { name: "خاتم الانبیاء", zone: "منطقه ۱۰", src: "official" },
++    { name: "رازی", zone: "منطقه ۱۰", src: "official" },
++    { name: "شریعتی", zone: "منطقه ۱۰", src: "official" },
++    { name: "لشگر", zone: "منطقه ۱۰", src: "official" },
++    { name: "دانشجو شریف", zone: "منطقه ۱۱", src: "official" },
++    { name: "دانش‌آموز", zone: "منطقه ۱۱", src: "official" },
++    { name: "زیباشهر", zone: "منطقه ۱۱", src: "official" },
++    { name: "سیدرضی", zone: "منطقه ۱۱", src: "official" },
++    { name: "فارغ‌التحصیلان", zone: "منطقه ۱۱", src: "official" },
++    { name: "جاهدشهر", zone: "منطقه ۱۲", src: "official" },
++    { name: "رحمانیه", zone: "منطقه ۱۲", src: "official" },
++    { name: "صفی‌آباد", zone: "منطقه ۱۲", src: "official" },
++    { name: "مجیدیه", zone: "منطقه ۱۲", src: "official" },
++    { name: "نقویه", zone: "منطقه ۱۲", src: "official" },
++    { name: "نمایشگاه", zone: "منطقه ۱۲", src: "official" },
++    { name: "وکیل‌آباد", zone: "منطقه ۱۲", src: "official" },
++    { name: "چهاربرج", zone: "منطقه ۱۲", src: "official" },
++    { name: "کلاته برفی", zone: "منطقه ۱۲", src: "official" },
++    { name: "آیت‌الله عبادی", zone: "منطقه ۲", src: "official" },
++    { name: "اسماعیل‌آباد", zone: "منطقه ۲", src: "official" },
++    { name: "حسین باشی", zone: "منطقه ۲", src: "official" },
++    { name: "حضرت ابوطالب", zone: "منطقه ۲", src: "official" },
++    { name: "حضرت عبدالمطلب", zone: "منطقه ۲", src: "official" },
++    { name: "خین عرب", zone: "منطقه ۲", src: "official" },
++    { name: "زرکش", zone: "منطقه ۲", src: "official" },
++    { name: "شهید هنرور", zone: "منطقه ۲", src: "official" },
++    { name: "فرامرز عباسی", zone: "منطقه ۲", src: "official" },
++    { name: "قدس", zone: "منطقه ۲", src: "official" },
++    { name: "کارخانه قند", zone: "منطقه ۲", src: "official" },
++    { name: "کاشانی", zone: "منطقه ۲", src: "official" },
++    { name: "کوی امیرالمؤمنین", zone: "منطقه ۲", src: "official" },
++    { name: "بیلان", zone: "منطقه ۳", src: "official" },
++    { name: "دروی", zone: "منطقه ۳", src: "official" },
++    { name: "راه‌آهن", zone: "منطقه ۳", src: "official" },
++    { name: "سیس‌آباد", zone: "منطقه ۳", src: "official" },
++    { name: "عباس‌آباد", zone: "منطقه ۳", src: "official" },
++    { name: "قرقی", zone: "منطقه ۳", src: "official" },
++    { name: "مسلم", zone: "منطقه ۳", src: "official" },
++    { name: "مهر مادر", zone: "منطقه ۳", src: "official" },
++    { name: "مهر مادر شمالی ۱", zone: "منطقه ۳", src: "official" },
++    { name: "مهرگان", zone: "منطقه ۳", src: "official" },
++    { name: "التیمور", zone: "منطقه ۴", src: "official" },
++    { name: "فجر", zone: "منطقه ۴", src: "official" },
++    { name: "کوی مهدی", zone: "منطقه ۴", src: "official" },
++    { name: "امیرالمؤمنین", zone: "منطقه ۵", src: "official" },
++    { name: "حسین‌آباد", zone: "منطقه ۵", src: "official" },
++    { name: "رضائیه", zone: "منطقه ۵", src: "official" },
++    { name: "مهدی‌آباد", zone: "منطقه ۵", src: "official" },
++    { name: "کوی سلمان", zone: "منطقه ۵", src: "official" },
++    { name: "آقا مصطفی خمینی", zone: "منطقه ۶", src: "official" },
++    { name: "امیرآباد", zone: "منطقه ۶", src: "official" },
++    { name: "شهید باهنر", zone: "منطقه ۶", src: "official" },
++    { name: "شهید بسک‌آبادی", zone: "منطقه ۶", src: "official" },
++    { name: "شهید رجایی", zone: "منطقه ۶", src: "official" },
++    { name: "شهید رستمی", zone: "منطقه ۶", src: "official" },
++    { name: "مصلی", zone: "منطقه ۶", src: "official" },
++    { name: "کنه بیست", zone: "منطقه ۶", src: "official" },
++    { name: "کوی ۲۲ بهمن", zone: "منطقه ۶", src: "official" },
++    { name: "المهدی", zone: "منطقه ۷", src: "official" },
++    { name: "خلج", zone: "منطقه ۷", src: "official" },
++    { name: "زارعین", zone: "منطقه ۷", src: "official" },
++    { name: "سیدی", zone: "منطقه ۷", src: "official" },
++    { name: "طرق ۲", zone: "منطقه ۷", src: "official" },
++    { name: "عسکریه", zone: "منطقه ۷", src: "official" },
++    { name: "۱۷ شهریور", zone: "منطقه ۷", src: "official" },
++    { name: "آبشار", zone: "منطقه ۸", src: "official" },
++    { name: "امام رضا", zone: "منطقه ۸", src: "official" },
++    { name: "بهشتی", zone: "منطقه ۸", src: "official" },
++    { name: "سرشور", zone: "منطقه ۸", src: "official" },
++    { name: "شقایق ۱", zone: "منطقه ۹", src: "official" },
++    { name: "شقایق ۲", zone: "منطقه ۹", src: "official" },
++    { name: "طالقانی", zone: "منطقه ۹", src: "official" },
++    { name: "لادن", zone: "منطقه ۹", src: "official" },
++    { name: "هاشمیه", zone: "منطقه ۹", src: "official" },
++    { name: "گلدیس", zone: "منطقه ۹", src: "official" },
++    { name: "آبادگران", zone: null, lat: 36.27026, lng: 59.55058, src: "osm" },
++    { name: "آپارتمان های مرتفع", zone: null, lat: 36.32762, lng: 59.5747, src: "osm" },
++    { name: "آیت الله خامنه ای", zone: null, lat: 36.28695, lng: 59.60705, src: "osm" },
++    { name: "آیت الله عبادی", zone: null, lat: 36.3108, lng: 59.60602, src: "osm" },
++    { name: "آیت الله کاشانی", zone: null, lat: 36.30371, lng: 59.61415, src: "osm" },
++    { name: "احمد آباد", zone: null, lat: 36.29176, lng: 59.57089, src: "osm" },
++    { name: "ادیب نیشابوری", zone: null, lat: 36.36395, lng: 59.52086, src: "osm" },
++    { name: "ارمغان", zone: null, lat: 36.34736, lng: 59.46807, src: "osm" },
++    { name: "امام رضا (ع)", zone: null, lat: 36.27464, lng: 59.59772, src: "osm" },
++    { name: "امیر", zone: null, lat: 36.34148, lng: 59.58045, src: "osm" },
++    { name: "امیر آباد", zone: null, lat: 36.26486, lng: 59.65692, src: "osm" },
++    { name: "امیر المومنین", zone: null, lat: 36.29401, lng: 59.68191, src: "osm" },
++    { name: "اکبرآباد", zone: null, lat: 36.43339, lng: 59.45968, src: "osm" },
++    { name: "ایمان", zone: null, lat: 36.25156, lng: 59.59177, src: "osm" },
++    { name: "ایوان", zone: null, lat: 36.20021, lng: 59.65138, src: "osm" },
++    { name: "بالا خیابان", zone: null, lat: 36.29401, lng: 59.61397, src: "osm" },
++    { name: "بلال", zone: null, lat: 36.32843, lng: 59.62885, src: "osm" },
++    { name: "ترمینال مسافربری امام رضا", zone: null, lat: 36.26001, lng: 59.59099, src: "osm" },
++    { name: "توس", zone: null, lat: 36.38405, lng: 59.53392, src: "osm" },
++    { name: "جانباز", zone: null, lat: 36.33175, lng: 59.56094, src: "osm" },
++    { name: "جاهد شهر", zone: null, lat: 36.36117, lng: 59.46809, src: "osm" },
++    { name: "جوادیه", zone: null, lat: 36.29206, lng: 59.62697, src: "osm" },
++    { name: "حافظ", zone: null, lat: 36.32527, lng: 59.49215, src: "osm" },
++    { name: "حرم مطهر رضوی", zone: null, lat: 36.28827, lng: 59.61499, src: "osm" },
++    { name: "حسابی جنوبی", zone: null, lat: 36.34965, lng: 59.49564, src: "osm" },
++    { name: "حسین آباد", zone: null, lat: 36.28499, lng: 59.64833, src: "osm" },
++    { name: "حضرت حجت", zone: null, lat: 36.36331, lng: 59.55964, src: "osm" },
++    { name: "خاتم الانبیا", zone: null, lat: 36.32021, lng: 59.58612, src: "osm" },
++    { name: "خرمشهر", zone: null, lat: 36.26831, lng: 59.59278, src: "osm" },
++    { name: "دانش", zone: null, lat: 36.28268, lng: 59.60496, src: "osm" },
++    { name: "دانشجو", zone: null, lat: 36.33171, lng: 59.50366, src: "osm" },
++    { name: "دانشگاه", zone: null, lat: 36.3135, lng: 59.53169, src: "osm" },
++    { name: "دریادل", zone: null, lat: 36.29927, lng: 59.62234, src: "osm" },
++    { name: "دندانپزشکان", zone: null, lat: 36.3398, lng: 59.4742, src: "osm" },
++    { name: "ده دی", zone: null, lat: 36.28612, lng: 59.59614, src: "osm" },
++    { name: "رئوف", zone: null, lat: 36.31997, lng: 59.59826, src: "osm" },
++    { name: "راه آهن", zone: null, lat: 36.30579, lng: 59.62254, src: "osm" },
++    { name: "رباط", zone: null, lat: 36.20224, lng: 59.63016, src: "osm" },
++    { name: "رضاییه", zone: null, lat: 36.28582, lng: 59.63437, src: "osm" },
++    { name: "زمانه", zone: null, lat: 36.33535, lng: 59.55464, src: "osm" },
++    { name: "زمرد", zone: null, lat: 36.33967, lng: 59.59182, src: "osm" },
++    { name: "زیبا شهر", zone: null, lat: 36.34101, lng: 59.53783, src: "osm" },
++    { name: "سجاد شهر", zone: null, lat: 36.31845, lng: 59.55103, src: "osm" },
++    { name: "سراب", zone: null, lat: 36.2934, lng: 59.60442, src: "osm" },
++    { name: "سعد آباد", zone: null, lat: 36.30403, lng: 59.59563, src: "osm" },
++    { name: "سلام", zone: null, lat: 36.27851, lng: 59.60271, src: "osm" },
++    { name: "سناباد", zone: null, lat: 36.29845, lng: 59.59086, src: "osm" },
++    { name: "سید رضی", zone: null, lat: 36.33547, lng: 59.5219, src: "osm" },
++    { name: "سیس آباد", zone: null, lat: 36.33766, lng: 59.65393, src: "osm" },
++    { name: "سیلو", zone: null, lat: 36.30368, lng: 59.6301, src: "osm" },
++    { name: "شادکان", zone: null, lat: 36.29736, lng: 59.63908, src: "osm" },
++    { name: "شریف", zone: null, lat: 36.33738, lng: 59.48279, src: "osm" },
++    { name: "شهرآرا", zone: null, lat: 36.32164, lng: 59.46722, src: "osm" },
++    { name: "شهرک ابوذر", zone: null, lat: 36.21397, lng: 59.61945, src: "osm" },
++    { name: "شهرک امام هادی", zone: null, lat: 36.35908, lng: 59.54693, src: "osm" },
++    { name: "شهرک بهارستان", zone: null, lat: 36.22339, lng: 59.61019, src: "osm" },
++    { name: "شهرک رازی", zone: null, lat: 36.35748, lng: 59.53754, src: "osm" },
++    { name: "شهرک شادیلون", zone: null, lat: 36.28779, lng: 59.53151, src: "osm" },
++    { name: "شهرک شهید باهنر", zone: null, lat: 36.24985, lng: 59.71607, src: "osm" },
++    { name: "شهرک طرق", zone: null, lat: 36.20409, lng: 59.66379, src: "osm" },
++    { name: "شهرک عرب ها", zone: null, lat: 36.25984, lng: 59.63814, src: "osm" },
++    { name: "شهرک قدس", zone: null, lat: 36.34033, lng: 59.60514, src: "osm" },
++    { name: "شهرک لشکر", zone: null, lat: 36.36217, lng: 59.49196, src: "osm" },
++    { name: "شهرک مسکونی الماس", zone: null, lat: 36.35037, lng: 59.5998, src: "osm" },
++    { name: "شهرک مطهری", zone: null, lat: 36.35258, lng: 59.47693, src: "osm" },
++    { name: "شهرک مهر آباد", zone: null, lat: 36.27905, lng: 59.66395, src: "osm" },
++    { name: "شهرک مهرگان", zone: null, lat: 36.40418, lng: 59.66948, src: "osm" },
++    { name: "شهرک نفت", zone: null, lat: 36.29168, lng: 59.53255, src: "osm" },
++    { name: "شهرک نوید", zone: null, lat: 36.35168, lng: 59.56758, src: "osm" },
++    { name: "شهرک پاچنار", zone: null, lat: 36.32874, lng: 59.46588, src: "osm" },
++    { name: "شهید احمدی روشن", zone: null, lat: 36.37626, lng: 59.67117, src: "osm" },
++    { name: "شهید بصیر", zone: null, lat: 36.3936, lng: 59.52219, src: "osm" },
++    { name: "شهید بهشتی", zone: null, lat: 36.28024, lng: 59.57206, src: "osm" },
++    { name: "شهید شهریاری", zone: null, lat: 36.40011, lng: 59.67602, src: "osm" },
++    { name: "شهید علی محمدی", zone: null, lat: 36.38918, lng: 59.67366, src: "osm" },
++    { name: "شهید فرامرز عباسی", zone: null, lat: 36.33229, lng: 59.54992, src: "osm" },
++    { name: "شهید هاشمی نژاد", zone: null, lat: 36.30024, lng: 59.61338, src: "osm" },
++    { name: "صیاد شیرازی", zone: null, lat: 36.32964, lng: 59.47983, src: "osm" },
++    { name: "طرق", zone: null, lat: 36.2093, lng: 59.66483, src: "osm" },
++    { name: "عبادی", zone: null, lat: 36.30986, lng: 59.60666, src: "osm" },
++    { name: "عباس آباد", zone: null, lat: 36.31869, lng: 59.65568, src: "osm" },
++    { name: "عسگریه", zone: null, lat: 36.23327, lng: 59.62863, src: "osm" },
++    { name: "عیدگاه", zone: null, lat: 36.28255, lng: 59.61649, src: "osm" },
++    { name: "فارغ التحصیلان", zone: null, lat: 36.34213, lng: 59.46942, src: "osm" },
++    { name: "فتح المبین", zone: null, lat: 36.32512, lng: 59.584, src: "osm" },
++    { name: "فرهنگ", zone: null, lat: 36.32671, lng: 59.5184, src: "osm" },
++    { name: "قاسم آباد", zone: null, lat: 36.36013, lng: 59.51424, src: "osm" },
++    { name: "مجتمع آفتاب", zone: null, lat: 36.3751, lng: 59.52478, src: "osm" },
++    { name: "مجتمع فجر۴", zone: null, lat: 36.34751, lng: 59.49354, src: "osm" },
++    { name: "مجتمع مسکونی آبی و قرمز", zone: null, lat: 36.37477, lng: 59.50961, src: "osm" },
++    { name: "مجتمع مسکونی آثار طوس", zone: null, lat: 36.36536, lng: 59.46578, src: "osm" },
++    { name: "مجتمع مسکونی آناهید", zone: null, lat: 36.38247, lng: 59.48967, src: "osm" },
++    { name: "مجتمع مسکونی الماس", zone: null, lat: 36.2936, lng: 59.52045, src: "osm" },
++    { name: "مجتمع مسکونی برج های ‌آسمان", zone: null, lat: 36.26591, lng: 59.53961, src: "osm" },
++    { name: "مجتمع مسکونی تجاری آرمس", zone: null, lat: 36.36464, lng: 59.46488, src: "osm" },
++    { name: "مجتمع مسکونی تک مشهد", zone: null, lat: 36.29051, lng: 59.55952, src: "osm" },
++    { name: "مجتمع مسکونی میثاق", zone: null, lat: 36.37764, lng: 59.51121, src: "osm" },
++    { name: "مجتمع مسکونی نسیم", zone: null, lat: 36.38255, lng: 59.48922, src: "osm" },
++    { name: "مجتمع مسکونی ولیعصر", zone: null, lat: 36.32068, lng: 59.46862, src: "osm" },
++    { name: "محمد آباد", zone: null, lat: 36.26411, lng: 59.63807, src: "osm" },
++    { name: "مصطفی خمینی", zone: null, lat: 36.2575, lng: 59.63678, src: "osm" },
++    { name: "ملک آباد", zone: null, lat: 36.3124, lng: 59.54883, src: "osm" },
++    { name: "مهدی آباد", zone: null, lat: 36.27705, lng: 59.69572, src: "osm" },
++    { name: "مهران", zone: null, lat: 36.33678, lng: 59.50971, src: "osm" },
++    { name: "موسوی قوچانی", zone: null, lat: 36.33286, lng: 59.59548, src: "osm" },
++    { name: "موعود", zone: null, lat: 36.26618, lng: 59.679, src: "osm" },
++    { name: "میعاد", zone: null, lat: 36.35461, lng: 59.48178, src: "osm" },
++    { name: "ناحیه ۱ منطقه ۱۰", zone: null, lat: 36.36505, lng: 59.45581, src: "osm" },
++    { name: "ناحیه ۱ منطقه ۱۱", zone: null, lat: 36.33017, lng: 59.52825, src: "osm" },
++    { name: "ناحیه ۱ منطقه ۲", zone: null, lat: 36.3207, lng: 59.597, src: "osm" },
++    { name: "ناحیه ۱ منطقه ۳", zone: null, lat: 36.31068, lng: 59.62291, src: "osm" },
++    { name: "ناحیه ۱ منطقه ۴", zone: null, lat: 36.29742, lng: 59.64432, src: "osm" },
++    { name: "ناحیه ۱ منطقه ۷", zone: null, lat: 36.25898, lng: 59.61236, src: "osm" },
++    { name: "ناحیه ۱ منطقه ۸", zone: null, lat: 36.28581, lng: 59.59909, src: "osm" },
++    { name: "ناحیه ۱ منطقه ۹", zone: null, lat: 36.29536, lng: 59.52509, src: "osm" },
++    { name: "ناحیه ۲ منطقه ۱۱", zone: null, lat: 36.33815, lng: 59.48786, src: "osm" },
++    { name: "ناحیه ۲ منطقه ۱۲", zone: null, lat: 36.38371, lng: 59.4842, src: "osm" },
++    { name: "ناحیه ۲ منطقه ۲", zone: null, lat: 36.35594, lng: 59.58527, src: "osm" },
++    { name: "ناحیه ۲ منطقه ۳", zone: null, lat: 36.32781, lng: 59.65906, src: "osm" },
++    { name: "ناحیه ۲ منطقه ۴", zone: null, lat: 36.30313, lng: 59.65509, src: "osm" },
++    { name: "ناحیه ۲ منطقه ۵", zone: null, lat: 36.29216, lng: 59.68106, src: "osm" },
++    { name: "ناحیه ۲ منطقه ۷", zone: null, lat: 36.22798, lng: 59.60707, src: "osm" },
++    { name: "ناحیه ۲ منطقه ۸", zone: null, lat: 36.27158, lng: 59.56546, src: "osm" },
++    { name: "ناحیه ۲ منطقه ۹", zone: null, lat: 36.31696, lng: 59.47582, src: "osm" },
++    { name: "ناحیه ۳ منطقه ۱۰", zone: null, lat: 36.37252, lng: 59.525, src: "osm" },
++    { name: "ناحیه ۳ منطقه ۱۲", zone: null, lat: 36.46069, lng: 59.49595, src: "osm" },
++    { name: "ناحیه ۳ منطقه ۲", zone: null, lat: 36.37691, lng: 59.54199, src: "osm" },
++    { name: "ناحیه ۳ منطقه ۳", zone: null, lat: 36.34203, lng: 59.62621, src: "osm" },
++    { name: "ناحیه ۳ منطقه ۴", zone: null, lat: 36.31462, lng: 59.6791, src: "osm" },
++    { name: "ناحیه ۳ منطقه ۷", zone: null, lat: 36.20564, lng: 59.6487, src: "osm" },
++    { name: "ناحیه ۴ منطقه ۲", zone: null, lat: 36.337, lng: 59.56691, src: "osm" },
++    { name: "ناحیه ۴ منطقه ۳", zone: null, lat: 36.40063, lng: 59.67218, src: "osm" },
++    { name: "ناحیه۱ منطقه ۱", zone: null, lat: 36.30473, lng: 59.56327, src: "osm" },
++    { name: "ناحیه۲ منطقه ۱", zone: null, lat: 36.30734, lng: 59.58909, src: "osm" },
++    { name: "نرگس", zone: null, lat: 36.34953, lng: 59.48425, src: "osm" },
++    { name: "نه دره", zone: null, lat: 36.30772, lng: 59.47663, src: "osm" },
++    { name: "نوغان", zone: null, lat: 36.29348, lng: 59.61876, src: "osm" },
++    { name: "نکاح", zone: null, lat: 36.32012, lng: 59.59939, src: "osm" },
++    { name: "هفده شهریور", zone: null, lat: 36.26949, lng: 59.6154, src: "osm" },
++    { name: "هنرور", zone: null, lat: 36.32264, lng: 59.60823, src: "osm" },
++    { name: "وحدت", zone: null, lat: 36.36086, lng: 59.60486, src: "osm" },
++    { name: "وکیل آباد", zone: null, lat: 36.34558, lng: 59.45397, src: "osm" },
++    { name: "پایین خیابان", zone: null, lat: 36.28818, lng: 59.62201, src: "osm" },
++    { name: "پنجتن آل عبا", zone: null, lat: 36.31889, lng: 59.68788, src: "osm" },
++    { name: "چهار چشمه", zone: null, lat: 36.29359, lng: 59.48972, src: "osm" },
++    { name: "چهارباغ", zone: null, lat: 36.29092, lng: 59.60963, src: "osm" },
++    { name: "کریم آباد", zone: null, lat: 36.28616, lng: 59.69513, src: "osm" },
++    { name: "کوهستان پارک", zone: null, lat: 36.33587, lng: 59.44522, src: "osm" },
++    { name: "کوهسنگی", zone: null, lat: 36.28458, lng: 59.56985, src: "osm" },
++    { name: "کوی آلاله", zone: null, lat: 36.34225, lng: 59.55158, src: "osm" },
++    { name: "کوی المهدی", zone: null, lat: 36.24851, lng: 59.59816, src: "osm" },
++    { name: "کوی دروی", zone: null, lat: 36.32335, lng: 59.64724, src: "osm" },
++    { name: "کوی راد", zone: null, lat: 36.2868, lng: 59.62538, src: "osm" },
++    { name: "کوی سیدی", zone: null, lat: 36.2432, lng: 59.61065, src: "osm" },
++    { name: "کوی طلاب", zone: null, lat: 36.30239, lng: 59.64315, src: "osm" },
++    { name: "کوی ولیعصر", zone: null, lat: 36.23878, lng: 59.59306, src: "osm" },
++    { name: "گلبرگ شمالی", zone: null, lat: 36.32861, lng: 59.59525, src: "osm" },
++    { name: "یاس", zone: null, lat: 36.32654, lng: 59.60006, src: "osm" },
++    { name: "یوسفیه", zone: null, lat: 36.35029, lng: 59.47337, src: "osm" },
++  ],
++  streets: [
++    { name: "آیت الله شیرازی", cls: "primary" },
++    { name: "آیت الله عبادی", cls: "primary" },
++    { name: "آیت بیت الله", cls: "secondary" },
++    { name: "ادیب نیشابوری", cls: "secondary" },
++    { name: "ادیب نیشابوری جنوبی", cls: "secondary" },
++    { name: "استقلال به امامت", cls: "secondary_link" },
++    { name: "اقبال لاهوری", cls: "secondary_link" },
++    { name: "امام خمینی", cls: "primary" },
++    { name: "امام خمینی - رسالت ۱۳۶", cls: "secondary" },
++    { name: "امام هادی", cls: "secondary" },
++    { name: "امامت به استقلال", cls: "secondary_link" },
++    { name: "برونسی به وکیل آباد", cls: "primary" },
++    { name: "بلوار  عباسی", cls: "secondary" },
++    { name: "بلوار امام جواد", cls: "primary" },
++    { name: "بلوار توس", cls: "primary" },
++    { name: "بلوار جمهوری اسلامی", cls: "primary" },
++    { name: "بلوار حر", cls: "primary" },
++    { name: "بلوار خیام", cls: "primary" },
++    { name: "بلوار ساجدی", cls: "secondary" },
++    { name: "بلوار شاهد", cls: "primary" },
++    { name: "بلوار شریعتی", cls: "secondary" },
++    { name: "بلوار شهید اصلانی", cls: "secondary" },
++    { name: "بلوار طبرسی جنوبی", cls: "primary" },
++    { name: "بلوار غیور اصلی", cls: "secondary" },
++    { name: "بلوار فداییان اسلام", cls: "secondary" },
++    { name: "بلوار قمر بنی هاشم", cls: "secondary" },
++    { name: "بلوار مصلی", cls: "secondary" },
++    { name: "بلوار ملا صدرا", cls: "secondary" },
++    { name: "بلوار هفده شهریور", cls: "primary" },
++    { name: "بلوار هفده شهریور جنوبی", cls: "primary" },
++    { name: "بلوار هنرستان", cls: "secondary" },
++    { name: "بلوار پنج تن", cls: "secondary" },
++    { name: "بلوار کشاورز", cls: "secondary" },
++    { name: "بلوار کوشش", cls: "primary" },
++    { name: "بلوارهنرستان", cls: "secondary" },
++    { name: "به سمت ابن سینا", cls: "secondary_link" },
++    { name: "بولوار آموزگار", cls: "secondary" },
++    { name: "بولوار آیت الله عبادی", cls: "primary" },
++    { name: "بولوار ابوطالب", cls: "secondary" },
++    { name: "بولوار احمدآباد", cls: "primary" },
++    { name: "بولوار ارشاد", cls: "secondary" },
++    { name: "بولوار استقلال", cls: "secondary" },
++    { name: "بولوار اقبال لاهوری", cls: "secondary" },
++    { name: "بولوار امام خمینی", cls: "primary" },
++    { name: "بولوار امامت", cls: "primary_link" },
++    { name: "بولوار امامیه", cls: "primary" },
++    { name: "بولوار امت", cls: "primary_link" },
++    { name: "بولوار امیرالمومنین", cls: "primary_link" },
++    { name: "بولوار امیریه", cls: "secondary" },
++    { name: "بولوار اندیشه", cls: "secondary" },
++    { name: "بولوار بعثت", cls: "primary_link" },
++    { name: "بولوار بهار", cls: "primary" },
++    { name: "بولوار توس", cls: "primary" },
++    { name: "بولوار جانباز", cls: "secondary" },
++    { name: "بولوار جلال آل احمد", cls: "secondary" },
++    { name: "بولوار حجاب", cls: "secondary" },
++    { name: "بولوار حر", cls: "primary" },
++    { name: "بولوار حرعاملی", cls: "secondary" },
++    { name: "بولوار خرمشهر", cls: "secondary" },
++    { name: "بولوار خواجه ربیع", cls: "primary" },
++    { name: "بولوار دانش آموز", cls: "secondary" },
++    { name: "بولوار دانشجو", cls: "secondary" },
++    { name: "بولوار دندانپزشکان", cls: "secondary" },
++    { name: "بولوار دکتر حسابی", cls: "secondary" },
++    { name: "بولوار رسالت", cls: "primary" },
++    { name: "بولوار ساجدی", cls: "secondary" },
++    { name: "بولوار سجاد", cls: "secondary" },
++    { name: "بولوار سرافرازان", cls: "secondary" },
++    { name: "بولوار سپهبد قرنی", cls: "primary" },
++    { name: "بولوار سید رضی", cls: "primary" },
++    { name: "بولوار شارستان رضوی", cls: "primary_link" },
++    { name: "بولوار شاهد", cls: "primary" },
++    { name: "بولوار شریعتی", cls: "secondary" },
++    { name: "بولوار شهید آوینی", cls: "secondary" },
++    { name: "بولوار شهید آیت الله دستغیب", cls: "secondary" },
++    { name: "بولوار شهید استکی", cls: "secondary" },
++    { name: "بولوار شهید برونسی", cls: "primary" },
++    { name: "بولوار شهید جواد اسماعیل پور طرقی", cls: "secondary" },
++    { name: "بولوار شهید دستغیب", cls: "primary" },
++    { name: "بولوار شهید دکتر مفتح", cls: "secondary" },
++    { name: "بولوار شهید رستمی", cls: "secondary" },
++    { name: "بولوار شهید صادقی", cls: "secondary" },
++    { name: "بولوار شهید صارمی", cls: "secondary" },
++    { name: "بولوار شهید عباسپور", cls: "secondary" },
++    { name: "بولوار شهید علی شکری", cls: "secondary" },
++    { name: "بولوار شهید فرامرز عباسی", cls: "secondary" },
++    { name: "بولوار شهید فلاحی", cls: "secondary" },
++    { name: "بولوار شهید فکوری", cls: "primary" },
++    { name: "بولوار شهید قانع", cls: "primary" },
++    { name: "بولوار شهید قرنی", cls: "primary" },
++    { name: "بولوار شهید محمد منتظری", cls: "primary" },
++    { name: "بولوار شهید ناصری", cls: "secondary" },
++    { name: "بولوار شهید هنرور", cls: "secondary" },
++    { name: "بولوار شهید کامیاب", cls: "primary" },
++    { name: "بولوار شهید کاوه", cls: "primary" },
++    { name: "بولوار شهید کریمی", cls: "secondary" },
++    { name: "بولوار شهید کلاهدوز", cls: "secondary" },
++    { name: "بولوار شیخ صدوق", cls: "secondary" },
++    { name: "بولوار شیرودی", cls: "secondary" },
++    { name: "بولوار صادقی", cls: "secondary" },
++    { name: "بولوار صدر", cls: "secondary" },
++    { name: "بولوار صیاد شیرازی", cls: "primary" },
++    { name: "بولوار طبرسی شمالی", cls: "secondary" },
++    { name: "بولوار عبدالمطلب", cls: "primary" },
++    { name: "بولوار فارغ التحصیلان", cls: "secondary" },
++    { name: "بولوار فدائیان اسلام", cls: "secondary" },
++    { name: "بولوار فردوسی", cls: "primary" },
++    { name: "بولوار فرودگاه", cls: "secondary" },
++    { name: "بولوار فلسطین", cls: "secondary" },
++    { name: "بولوار قاضی طباطبائی", cls: "secondary" },
++    { name: "بولوار لادن", cls: "secondary" },
++    { name: "بولوار مجد", cls: "secondary" },
++    { name: "بولوار مجلسی شرقی", cls: "secondary" },
++    { name: "بولوار مجلسی غربی", cls: "secondary" },
++    { name: "بولوار مدرس", cls: "secondary" },
++    { name: "بولوار مسلم جنوبی", cls: "secondary" },
++    { name: "بولوار مسلم شمالی", cls: "secondary" },
++    { name: "بولوار مصلی", cls: "primary" },
++    { name: "بولوار مطهری جنوبی", cls: "secondary" },
++    { name: "بولوار مطهری شمالی", cls: "secondary" },
++    { name: "بولوار معلم", cls: "primary" },
++    { name: "بولوار مفتح", cls: "secondary" },
++    { name: "بولوار مفتح شرقی", cls: "secondary" },
++    { name: "بولوار مفتح غربی", cls: "secondary" },
++    { name: "بولوار مقداد", cls: "secondary" },
++    { name: "بولوار ملا صدرا", cls: "secondary" },
++    { name: "بولوار ملک آباد", cls: "primary" },
++    { name: "بولوار ملک الشعرای بهار", cls: "primary" },
++    { name: "بولوار موسوی قوچانی", cls: "secondary" },
++    { name: "بولوار میامی", cls: "secondary" },
++    { name: "بولوار میرزا کوچک خان", cls: "secondary" },
++    { name: "بولوار نبوت", cls: "secondary" },
++    { name: "بولوار نماز", cls: "secondary" },
++    { name: "بولوار نماز - هاشمیه ۹۱", cls: "secondary" },
++    { name: "بولوار هاشمیه", cls: "primary" },
++    { name: "بولوار هدایت شرقی", cls: "secondary" },
++    { name: "بولوار هدایت غربی", cls: "secondary" },
++    { name: "بولوار هفت تیر", cls: "secondary" },
++    { name: "بولوار وحدت", cls: "primary" },
++    { name: "بولوار ولایت", cls: "secondary" },
++    { name: "بولوار پیروزی", cls: "primary" },
++    { name: "بولوار چمن", cls: "secondary" },
++    { name: "بولوار کشاورز", cls: "secondary" },
++    { name: "بولوار گاز", cls: "secondary" },
++    { name: "بولوار یوسف زاده", cls: "secondary" },
++    { name: "بولوار ۲۲ بهمن", cls: "primary" },
++    { name: "بولوارچمن", cls: "secondary" },
++    { name: "توحید", cls: "primary" },
++    { name: "توس ۲۸", cls: "secondary" },
++    { name: "توس ۶۹", cls: "secondary" },
++    { name: "توس ۹۰", cls: "secondary" },
++    { name: "تونل شرقی", cls: "primary" },
++    { name: "تونل غربی", cls: "primary" },
++    { name: "جاده سیمان", cls: "primary" },
++    { name: "جاده شترک", cls: "secondary" },
++    { name: "جاده مشهد - کلات", cls: "primary" },
++    { name: "جاده مشهد کلات", cls: "primary" },
++    { name: "حاج حسنی کارگر", cls: "primary_link" },
++    { name: "حر عاملی", cls: "secondary" },
++    { name: "خروجی بهجت", cls: "secondary_link" },
++    { name: "خروجی صاحب الزمان", cls: "secondary" },
++    { name: "خروجی هاشمی نژاد", cls: "primary_link" },
++    { name: "خروجی کاشانی", cls: "secondary_link" },
++    { name: "خیابان آبکوه", cls: "secondary" },
++    { name: "خیابان آخوند خراسانی", cls: "secondary" },
++    { name: "خیابان آیت الله بهجت", cls: "secondary" },
++    { name: "خیابان آیت الله خزعلی", cls: "secondary" },
++    { name: "خیابان آیت الله شیرازی", cls: "primary" },
++    { name: "خیابان آیت الله عبادی", cls: "primary" },
++    { name: "خیابان آیت الله کاشانی", cls: "secondary" },
++    { name: "خیابان ابن سینا", cls: "secondary" },
++    { name: "خیابان اسدالله زاده", cls: "secondary" },
++    { name: "خیابان امام خمینی", cls: "primary" },
++    { name: "خیابان امام رضا", cls: "primary" },
++    { name: "خیابان امام رضا علیه السلام", cls: "primary" },
++    { name: "خیابان امام هادی", cls: "secondary" },
++    { name: "خیابان دانشگاه", cls: "primary" },
++    { name: "خیابان دکتر چمران", cls: "secondary" },
++    { name: "خیابان رازی", cls: "secondary" },
++    { name: "خیابان رازی غربی", cls: "secondary" },
++    { name: "خیابان رسالت", cls: "secondary" },
++    { name: "خیابان سعدی", cls: "secondary" },
++    { name: "خیابان سناباد", cls: "secondary" },
++    { name: "خیابان شهید اندرزگو", cls: "secondary" },
++    { name: "خیابان شهید دیالمه", cls: "secondary" },
++    { name: "خیابان شهید رئیسی (توحید)", cls: "primary" },
++    { name: "خیابان شهید محمد علی حنایی", cls: "secondary" },
++    { name: "خیابان شهید محمدعلی حنایی", cls: "primary" },
++    { name: "خیابان شهید نواب صفوی", cls: "primary" },
++    { name: "خیابان شهید هاشمی نژاد", cls: "primary" },
++    { name: "خیابان صاحب الزمان", cls: "secondary" },
++    { name: "خیابان صدر شمالی", cls: "secondary" },
++    { name: "خیابان صدف", cls: "primary_link" },
++    { name: "خیابان طبرسی جنوبی", cls: "primary" },
++    { name: "خیابان هفده شهریور", cls: "primary" },
++    { name: "خیابان پروین اعتصامی", cls: "secondary" },
++    { name: "خیابان کوهسنگی", cls: "secondary" },
++    { name: "خیام شمالی به فردوسی", cls: "primary_link" },
++    { name: "دانشگاه", cls: "primary" },
++    { name: "دوربرگردان بلوار حر", cls: "primary_link" },
++    { name: "دوربرگردان شهید عباسپور", cls: "secondary_link" },
++    { name: "دوربرگردان نواب", cls: "primary_link" },
++    { name: "رازی", cls: "secondary" },
++    { name: "راهنمایی", cls: "secondary" },
++    { name: "رسالت", cls: "secondary" },
++    { name: "رستگاری به امامیه", cls: "primary_link" },
++    { name: "روگذر طبرسی", cls: "primary_link" },
++    { name: "روگذرنواب صفوی", cls: "primary_link" },
++    { name: "زیرگذر تقاطع شهید گمنام", cls: "primary" },
++    { name: "زیرگذر حرم مطهر", cls: "primary" },
++    { name: "سرافرازان ۵۵", cls: "secondary" },
++    { name: "سرخس ۲۸", cls: "secondary_link" },
++    { name: "سناباد", cls: "secondary" },
++    { name: "شاهد به فلاحی جنوب", cls: "primary_link" },
++    { name: "شهدای ارتش", cls: "secondary" },
++    { name: "شهدای فاطمیون", cls: "secondary" },
++    { name: "شهید امام دوست", cls: "secondary" },
++    { name: "شهید دیالمه", cls: "secondary" },
++    { name: "شهید محسن کاشانی", cls: "secondary" },
++    { name: "شهید محمدعلی حنایی18", cls: "primary" },
++    { name: "شهید نواب صفوی", cls: "primary_link" },
++    { name: "شهید هاشمی نژاد", cls: "primary" },
++    { name: "شهید کاوه", cls: "primary" },
++    { name: "شهید کشمیری (جاده سیمان)", cls: "primary" },
++    { name: "شهیدحقی", cls: "secondary" },
++    { name: "شوشتری", cls: "secondary" },
++    { name: "شیرازی", cls: "primary" },
++    { name: "صدر به چمن", cls: "secondary" },
++    { name: "صیاد شیرازی", cls: "primary" },
++    { name: "صیاد شیرازی ۸", cls: "secondary" },
++    { name: "طبرسی", cls: "primary" },
++    { name: "عبادی", cls: "primary" },
++    { name: "عبادی به مجلسی", cls: "secondary_link" },
++    { name: "عبدالمطلب به موسوی", cls: "primary_link" },
++    { name: "فدک", cls: "secondary" },
++    { name: "فدک - چراغچی ۶۲", cls: "secondary" },
++    { name: "فردوسی به خیام شمالی", cls: "primary_link" },
++    { name: "قرنی به مجد شمال", cls: "primary_link" },
++    { name: "مجد به قرنی غرب", cls: "primary_link" },
++    { name: "مجلسی به عبادی", cls: "primary_link" },
++    { name: "مصباح یزدی", cls: "secondary" },
++    { name: "ملا صدرا", cls: "secondary" },
++    { name: "منتظری به کاوه", cls: "primary" },
++    { name: "منفرد", cls: "primary_link" },
++    { name: "مهدی", cls: "secondary" },
++    { name: "موسوی به عبدالمطلب", cls: "primary_link" },
++    { name: "میدان ابوطالب", cls: "secondary" },
++    { name: "میدان استقلال", cls: "primary" },
++    { name: "میدان اقبال", cls: "primary" },
++    { name: "میدان امام حسین", cls: "primary" },
++    { name: "میدان امام خمینی", cls: "primary" },
++    { name: "میدان امام رضا", cls: "secondary" },
++    { name: "میدان امامیه", cls: "primary" },
++    { name: "میدان امت", cls: "secondary" },
++    { name: "میدان امیر سرتیپ شهید محمد رضا ریحانی یساولی (یادگاران)", cls: "secondary" },
++    { name: "میدان انقلاب اسلامی", cls: "primary" },
++    { name: "میدان اول هنرستان", cls: "secondary" },
++    { name: "میدان برادران شهید فلاح", cls: "primary" },
++    { name: "میدان بسیج", cls: "primary" },
++    { name: "میدان بوعلی", cls: "primary" },
++    { name: "میدان بیت المقدس", cls: "primary" },
++    { name: "میدان تختی", cls: "secondary" },
++    { name: "میدان تربیت", cls: "primary" },
++    { name: "میدان جانباز", cls: "primary" },
++    { name: "میدان جمهوری اسلامی", cls: "primary" },
++    { name: "میدان حافظ", cls: "primary" },
++    { name: "میدان حر", cls: "primary" },
++    { name: "میدان حکمت", cls: "primary" },
++    { name: "میدان دانش", cls: "primary" },
++    { name: "میدان دانش آموز", cls: "secondary" },
++    { name: "میدان دانشجو", cls: "secondary" },
++    { name: "میدان دلاوران", cls: "secondary" },
++    { name: "میدان ده دی", cls: "primary" },
++    { name: "میدان راهنمایی", cls: "secondary" },
++    { name: "میدان سرافرازان", cls: "secondary" },
++    { name: "میدان سردار شهید ناصری", cls: "secondary" },
++    { name: "میدان سعدی", cls: "secondary" },
++    { name: "میدان سیدعلی آل شهیدی", cls: "secondary" },
++    { name: "میدان شریعتی", cls: "primary" },
++    { name: "میدان شهدا", cls: "primary" },
++    { name: "میدان شهدای غواص", cls: "primary" },
++    { name: "میدان شهدای مسجد گوهرشاد", cls: "primary" },
++    { name: "میدان شهید اسماعیل زاده", cls: "secondary" },
++    { name: "میدان شهید اصلانی", cls: "secondary" },
++    { name: "میدان شهید جوان", cls: "primary" },
++    { name: "میدان شهید رئیسی (توحید)", cls: "primary" },
++    { name: "میدان شهید علی مهدوی", cls: "primary" },
++    { name: "میدان شهید فهمیده", cls: "primary" },
++    { name: "میدان شهید قاسمی دانا", cls: "secondary" },
++    { name: "میدان شهید مفتح", cls: "secondary" },
++    { name: "میدان شهیدان سلطانی", cls: "secondary" },
++    { name: "میدان صاحب الزمان", cls: "secondary" },
++    { name: "میدان طبرسی", cls: "primary" },
++    { name: "میدان عدالت", cls: "primary_link" },
++    { name: "میدان عسکریه", cls: "secondary" },
++    { name: "میدان غدیر", cls: "primary" },
++    { name: "میدان غلامرضا قدسی مشهدی", cls: "secondary" },
++    { name: "میدان فجر", cls: "primary" },
++    { name: "میدان فردوسی", cls: "primary" },
++    { name: "میدان فرهنگ", cls: "primary" },
++    { name: "میدان فلسطین", cls: "primary" },
++    { name: "میدان لادن", cls: "primary" },
++    { name: "میدان لاله", cls: "primary" },
++    { name: "میدان مادر", cls: "primary" },
++    { name: "میدان معراج", cls: "primary" },
++    { name: "میدان معلم", cls: "primary" },
++    { name: "میدان میرزاکوچک خان", cls: "secondary" },
++    { name: "میدان نبوت", cls: "secondary" },
++    { name: "میدان هاشمیه", cls: "primary" },
++    { name: "میدان هشت شهریور", cls: "secondary" },
++    { name: "میدان هفت تیر", cls: "secondary" },
++    { name: "میدان هفده شهریور", cls: "primary" },
++    { name: "میدان هنرستان", cls: "primary" },
++    { name: "میدان ولایت", cls: "secondary" },
++    { name: "میدان پانزده خرداد", cls: "primary" },
++    { name: "میدان پنجراه", cls: "primary" },
++    { name: "میدان کوثر", cls: "secondary" },
++    { name: "میدان گنبد سبز", cls: "secondary" },
++    { name: "میدان ۸۰۰", cls: "secondary_link" },
++    { name: "هفده شهریور", cls: "primary_link" },
++    { name: "وحید۱۸", cls: "secondary" },
++    { name: "ورودی به بزرگراه بسیج", cls: "secondary_link" },
++    { name: "ورودی به بولوار شهید عباسپور", cls: "secondary_link" },
++    { name: "ورودی خیابان دانشگاه", cls: "primary_link" },
++    { name: "ورودی خیابان هاشمی نژاد", cls: "primary_link" },
++    { name: "ورودی رسالت", cls: "secondary" },
++    { name: "ورودی صاحب الزمان", cls: "secondary" },
++    { name: "ورودی میدان شهدا", cls: "primary" },
++    { name: "ورودی هاشمی نژاد", cls: "primary_link" },
++    { name: "ورودی کلاهدوز", cls: "primary_link" },
++    { name: "وصال", cls: "primary" },
++    { name: "وکیل آباد به برونسی", cls: "primary" },
++    { name: "پل آموزگار", cls: "secondary" },
++    { name: "پل ابوطالب", cls: "secondary" },
++    { name: "پل امام حسین", cls: "primary" },
++    { name: "پل اندیشه", cls: "secondary" },
++    { name: "پل دهرود", cls: "primary" },
++    { name: "پل رسالت", cls: "primary" },
++    { name: "پل سرخس", cls: "secondary" },
++    { name: "پل صیاد شیرازی", cls: "primary" },
++    { name: "پل هاشمیه", cls: "primary" },
++    { name: "پل هفت تیر", cls: "secondary" },
++    { name: "پنجراه سناباد", cls: "secondary" },
++    { name: "پیامبر اعظم ۷۱", cls: "secondary" },
++    { name: "چمن", cls: "secondary" },
++    { name: "چهار راه میلاد", cls: "secondary" },
++    { name: "چهاررراه میلاد", cls: "secondary" },
++    { name: "کاشانی ۳۹", cls: "primary_link" },
++    { name: "کاشانی ۴۱ - حجت ۹", cls: "secondary_link" },
++    { name: "کاوه به منتظری", cls: "primary" },
++    { name: "کنار گذر چراغچی", cls: "secondary" },
++    { name: "کنارگذر بابانظر", cls: "secondary" },
++    { name: "کنارگذر بزرگراه شهید قاسم سلیمانی", cls: "primary" },
++    { name: "کنارگذر بزرگراه شهید چراغچی", cls: "secondary" },
++    { name: "کنارگذر میرزایی", cls: "secondary" },
++    { name: "کنارگذر چراغچی", cls: "secondary" },
++    { name: "کنارگذربزرگراه بسیج", cls: "secondary" },
++    { name: "کنتارگذر بابانظر", cls: "secondary" },
++    { name: "کوشش34", cls: "secondary" },
++    { name: "گرجی علیا", cls: "secondary" },
++  ],
++}
+diff -ruN '--exclude=node_modules' '--exclude=dev.db' '--exclude=build-time.db' '--exclude=.next' '--exclude=x.db' /tmp/pristine/src/lib/geo-seed.ts panel-build/src/src/lib/geo-seed.ts
+--- a/src/lib/geo-seed.ts	1970-01-01 00:00:00.000000000 +0000
++++ b/src/lib/geo-seed.ts	2026-11-18 07:18:20.811238207 +0000
+@@ -0,0 +1,147 @@
++import { db } from '@/lib/db'
++import { normalizeFa } from './iran-cities'
++import { MASHHAD_GEO } from './geo-mashhad'
++
++/**
++ * Phase 5 (geo) — boot seeder for the GeoArea tree.
++ *
++ * Idempotent UPSERT by (parentId, normalizedName): provinces/city/zones/
++ * neighborhoods/streets from the packaged dataset (see lib/geo-mashhad.ts
++ * for sources & dates — every node records WHERE its data came from).
++ *
++ * Policies (documented in schema.prisma, enforced here):
++ *  - NO-DELETE: absence from the dataset is NEVER a delete. Re-seeding
++ *    refreshes coordinates / source / sortOrder and reactivates nodes the
++ *    dataset still knows; admin-created or admin-renamed nodes are never
++ *    touched by a re-seed unless their (parent, normalized name) collides
++ *    with a dataset entry (in which case the dataset refreshes only the
++ *    seed-owned attributes: coords/source/order/active — never the admin's
++ *    display name).
++ *  - The whole seed runs in ONE boot pass wrapped by the caller's
++ *    try/catch — a failure must never block the server (geo features
++ *    degrade to "no data" honestly, exactly like the Holoo integration).
++ */
++
++export interface SeedStats {
++  created: number
++  updated: number
++  unchanged: number
++  total: number
++}
++
++async function upsertNode(opts: {
++  type: string
++  parentId: string | null
++  name: string
++  code?: string
++  lat?: number
++  lng?: number
++  source: string
++  sourceDate: string
++  sortOrder?: number
++  stats: SeedStats
++}): Promise<string> {
++  const normalizedName = normalizeFa(opts.name)
++  // find by (parent, normalized name); provinces (parentId NULL) are
++  // seed-only and unique by construction — matched by (type, normalized)
++  const existing = opts.parentId
++    ? await db.geoArea.findFirst({
++        where: { parentId: opts.parentId, type: opts.type, normalizedName },
++        select: { id: true, lat: true, lng: true, source: true, sourceDate: true, active: true, sortOrder: true },
++      })
++    : await db.geoArea.findFirst({
++        where: { type: opts.type, normalizedName, parentId: null },
++        select: { id: true, lat: true, lng: true, source: true, sourceDate: true, active: true, sortOrder: true },
++      })
++  const coords: { lat?: number; lng?: number } = {}
++  if (typeof opts.lat === 'number' && typeof opts.lng === 'number') {
++    coords.lat = opts.lat
++    coords.lng = opts.lng
++  }
++  if (existing) {
++    const changed =
++      existing.lat !== (coords.lat ?? null) ||
++      existing.lng !== (coords.lng ?? null) ||
++      existing.sourceDate !== opts.sourceDate ||
++      existing.active === false ||
++      existing.sortOrder !== (opts.sortOrder ?? null)
++    if (changed) {
++      await db.geoArea.update({
++        where: { id: existing.id },
++        data: { ...coords, source: opts.source, sourceDate: opts.sourceDate, active: true, sortOrder: opts.sortOrder ?? null },
++      })
++      opts.stats.updated++
++    } else {
++      opts.stats.unchanged++
++    }
++    return existing.id
++  }
++  const row = await db.geoArea.create({
++    data: {
++      type: opts.type,
++      parentId: opts.parentId,
++      name: opts.name,
++      normalizedName,
++      code: opts.code,
++      ...coords,
++      source: opts.source,
++      sourceDate: opts.sourceDate,
++      sortOrder: opts.sortOrder ?? null,
++    },
++    select: { id: true },
++  })
++  opts.stats.created++
++  return row.id
++}
++
++export async function seedGeoAreas(): Promise<SeedStats> {
++  const stats: SeedStats = { created: 0, updated: 0, unchanged: 0, total: 0 }
++  const { city, province, officialSource, osmSource, zones, neighborhoods, streets } = MASHHAD_GEO
++  const osmDate = '2026-11-18'
++
++  const provinceId = await upsertNode({
++    type: 'province', parentId: null, name: province,
++    source: 'Iran cities offline dataset (package 8)', sourceDate: osmDate, stats,
++  })
++  const cityId = await upsertNode({
++    type: 'city', parentId: provinceId, name: city, code: 'MHD',
++    source: officialSource, sourceDate: osmDate, sortOrder: 0, stats,
++  })
++
++  const zoneIds = new Map<string, string>()
++  let z = 0
++  for (const zone of zones) {
++    const id = await upsertNode({
++      type: 'zone', parentId: cityId, name: zone.name, code: zone.code,
++      source: officialSource, sourceDate: osmDate, sortOrder: ++z, stats,
++    })
++    zoneIds.set(zone.name, id)
++  }
++
++  let n = 0
++  for (const nh of neighborhoods) {
++    const parent = nh.zone ? (zoneIds.get(nh.zone) ?? cityId) : cityId
++    const source =
++      nh.src === 'both'
++        ? `${officialSource} + ${osmSource}`
++        : nh.src === 'osm'
++          ? osmSource
++          : officialSource
++    await upsertNode({
++      type: 'neighborhood', parentId: parent, name: nh.name,
++      lat: nh.lat, lng: nh.lng,
++      source, sourceDate: osmDate, sortOrder: ++n, stats,
++    })
++  }
++
++  let s = 0
++  for (const st of streets) {
++    await upsertNode({
++      type: 'street', parentId: cityId, name: st.name,
++      source: osmSource, sourceDate: osmDate, sortOrder: ++s, stats,
++    })
++  }
++
++  stats.total = 1 + 1 + zones.length + neighborhoods.length + streets.length
++  return stats
++}

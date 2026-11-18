@@ -56,7 +56,16 @@
 #           fields); 'unrecognized' bodies are honest sync errors (partial)
 #           while valid empty lists stay SUCCESS; probes report elapsed/
 #           timeout/wrapper/count and Invoice/Invoice gets its own
-#           diagnostic timeout — last)
+#           diagnostic timeout — last) →
+#           phase13-geo-mashhad (Task 70 / Phase 5, Nov 2026: structured
+#           Mashhad geography — GeoArea tree (province←city←zone←neighborhood
+#           ←street) with the dual-sourced seed dataset (City-Council
+#           13-region resolution + OpenStreetMap centroids, both dated),
+#           boot seeder, shared geo gatekeepers, 5 admin /api/panel/geo/*
+#           routes, geo refs on the customer write paths + the app mirror,
+#           the assignment «تکمیل» gate, the «جغرافیا و محلات» tab with the
+#           completion worklist + geographic reports, and the CustomersTab
+#           structured pickers — last)
 #
 # This script performs the WHOLE reproducible pipeline and verifies it:
 #   1. fresh extraction of the base source (git archive)
@@ -92,7 +101,7 @@ set -euo pipefail
 REPO_ROOT="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
 WORK="${2:-$REPO_ROOT/panel-build}"
 BASE_REF="bd9c80b:medpad-full-1.9/inst-stage/panel-src"
-CHAIN="phase1-task1 phase2-remediation phase2-task1 phase2-task2 phase2-dev2-fixes phase2-package4 phase2-madrep phase2-package6 phase2-package7 phase2-package9 phase2-package5 phase2-package13 phase3-package14 phase4-package15 phase5-package16 phase6-customer360 phase7-central-settings phase8-owner-fixes phase9-holoo phase10-holoo-hardening phase11-holoo-secret-encryption phase12-holoo-extraction"
+CHAIN="phase1-task1 phase2-remediation phase2-task1 phase2-task2 phase2-dev2-fixes phase2-package4 phase2-madrep phase2-package6 phase2-package7 phase2-package9 phase2-package5 phase2-package13 phase3-package14 phase4-package15 phase5-package16 phase6-customer360 phase7-central-settings phase8-owner-fixes phase9-holoo phase10-holoo-hardening phase11-holoo-secret-encryption phase12-holoo-extraction phase13-geo-mashhad"
 
 # RESUME mode (sandbox convenience): with MEDPAD_BUILD_RESUME=1 an existing
 # $WORK/src with node_modules (from an interrupted run — e.g. a sandbox that
@@ -177,6 +186,15 @@ grep -q "invoiceProbeTimeoutMs" "$WORK/src/src/app/api/admin/holoo/test/route.ts
   || die "phase12 missing: invoice diagnostic timeout in the test route"
 grep -q "firstRecordKeys" "$WORK/src/src/components/panel/HolooTab.tsx" \
   || die "phase12 missing: probe diagnostics columns in the tab"
+# phase 13 markers (Task 70 — structured Mashhad geography)
+[ -f "$WORK/src/src/lib/geo-mashhad.ts" ] || die "patch chain did not produce src/lib/geo-mashhad.ts"
+[ -f "$WORK/src/src/lib/geo-seed.ts" ] || die "patch chain did not produce src/lib/geo-seed.ts"
+[ -f "$WORK/src/src/lib/geo-areas.ts" ] || die "patch chain did not produce src/lib/geo-areas.ts"
+[ -f "$WORK/src/src/components/panel/GeoTab.tsx" ] || die "patch chain did not produce GeoTab.tsx"
+grep -q "GEO_AREA_DDL" "$WORK/src/src/instrumentation.ts" \
+  || die "phase13 missing: GEO_AREA_DDL in instrumentation"
+grep -q "seedGeoAreas" "$WORK/src/src/instrumentation.ts" \
+  || die "phase13 missing: boot seed call"
 cd "$WORK/src"
 
 # ── 3. npm install ──────────────────────────────────────────────────────────
@@ -295,7 +313,17 @@ chk "holoo unrecognized error text"  "grep -rq 'ساختار شناسایی‌ش
 chk "holoo probe elapsed/timeout"    "grep -rq 'elapsedMs' .next/server --include='*.js' && grep -rq 'timeoutMs' .next/server --include='*.js'"
 chk "holoo extraction diag keys"     "grep -rq 'firstRecordKeys' .next/server --include='*.js'"
 chk "holoo tab probe table upgrade"  "grep -rq 'مهلت تشخیصی' --include='*.js' . && grep -rq 'نمونه فیلدها' --include='*.js' ."
-echo "   hardening: PASS=$P FAIL=$F / 54"
+# phase 13 (Task 70 — structured geography): the geo API surfaces, the
+# gate text and the geo tab UI must ship in the built bundle
+chk "api: panel geo tree"          "[ -f .next/server/app/api/panel/geo/tree/route.js ]"
+chk "api: panel geo resolve"       "[ -f .next/server/app/api/panel/geo/resolve/route.js ]"
+chk "api: panel geo report"        "[ -f .next/server/app/api/panel/geo/report/route.js ]"
+chk "api: panel geo nodes"         "[ -f .next/server/app/api/panel/geo/nodes/route.js ]"
+chk "geo seed dataset in server"   "grep -rq 'منطقه ثامن' .next/server --include='*.js'"
+chk "geo dedup normalization"      "grep -rq 'normalizedName' .next/server --include='*.js'"
+chk "geo tab UI chunks"            "grep -rq 'در انتظار تکمیل اطلاعات جغرافیایی' --include='*.js' ."
+chk "geo gate text in server"      "grep -rq 'ثبت موقت در انتظار تکمیل' .next/server --include='*.js'"
+echo "   hardening: PASS=$P FAIL=$F / 62"
 LAST_HARDENING="$P/$F PASS"
 [ "$F" -eq 0 ] || die "hardening checks failed"
 

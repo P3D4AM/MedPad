@@ -1,0 +1,5006 @@
+{
+  "version": 0.6,
+  "generator": "Overpass API 0.7.62.4 2390de5a",
+  "osm3s": {
+    "timestamp_osm_base": "2026-11-18T06:26:51Z",
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+
+{
+  "type": "way",
+  "id": 23992951,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار دانشجو",
+    "name:en": "Daneshjoo Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 24029580,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "امام هادی",
+    "name:en": "Imam Hadi street",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 24037302,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار دانشجو",
+    "name:en": "Daneshjoo Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 24043074,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار دانشجو",
+    "name:en": "Daneshjoo Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 24043083,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار دانشجو",
+    "name:en": "Daneshjoo Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 24043193,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار سید رضی",
+    "name:en": "Seyed Razi Boulevard",
+    "oneway": "yes",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "sidewalk": "right",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 24433401,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان معراج",
+    "name:en": "Meraj square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 24433411,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "توس ۲۸",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 24433415,
+  "tags": {
+    "highway": "primary",
+    "lanes": "2",
+    "maxspeed": "60",
+    "name": "بولوار توس",
+    "name:en": "Tus Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 24433419,
+  "tags": {
+    "highway": "primary",
+    "lanes": "3",
+    "maxspeed": "60",
+    "name": "بلوار توس",
+    "name:en": "Toos Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 24478298,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار سید رضی",
+    "name:en": "Seyed Razi Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 24478313,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار سید رضی",
+    "name:en": "Seyed Razi Boulevard",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 24478314,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار سید رضی",
+    "name:en": "Seyed Razi Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 24478332,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "maxspeed": "60",
+    "name": "بولوار امامت",
+    "name:en": "Emamat Boulevard",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 24481690,
+  "tags": {
+    "alt_name": "شاهنامه ۹",
+    "highway": "primary",
+    "lanes": "2",
+    "maxspeed": "60",
+    "name": "بولوار توس",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 24481691,
+  "tags": {
+    "bridge": "yes",
+    "highway": "primary",
+    "lanes": "2",
+    "layer": "1",
+    "maxspeed": "60",
+    "name": "بولوار توس",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 24517933,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار دانش آموز",
+    "name:en": "Danesh Amooz Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 24694519,
+  "tags": {
+    "highway": "primary",
+    "junction": "circular",
+    "maxspeed": "30",
+    "name": "میدان بوعلی",
+    "name:en": "Bu'Ali Square",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 25121142,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار آموزگار",
+    "name:en": "Amoozegar Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 25121187,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار جلال آل احمد",
+    "oneway": "yes",
+    "sidewalk": "right",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 25121208,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "maxspeed": "50",
+    "name": "بولوار جلال آل احمد",
+    "name:en": "Jalale Ale Ahmad Boulevard",
+    "oneway": "yes",
+    "sidewalk": "right",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 25529379,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار شاهد",
+    "name:en": "Shahed Boulevard",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 25529866,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان مادر",
+    "name:en": "Mother Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 25529931,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "ادیب نیشابوری",
+    "name:en": "Adib-e Neishaboori",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 25529941,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "ادیب نیشابوری",
+    "name:en": "Adib-e Neishaboori",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 25530036,
+  "tags": {
+    "highway": "primary",
+    "lanes": "3",
+    "maxspeed": "60",
+    "name": "بلوار شاهد",
+    "name:en": "Shahed Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 25530060,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بلوار شاهد",
+    "name:en": "Shahed Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 25530674,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "lit": "yes",
+    "maxheight": "4.5",
+    "maxspeed": "50",
+    "name": "بولوار اندیشه",
+    "name:en": "Andisheh Boulevard",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 25530695,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "maxspeed": "50",
+    "name": "بولوار اندیشه",
+    "name:en": "Andisheh Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 25530855,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بولوار شریعتی",
+    "name:en": "Shari'ati Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt",
+    "width": "12"
+  }
+},
+{
+  "type": "way",
+  "id": 25573654,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "lanes": "3",
+    "maxspeed": "30",
+    "name": "میدان امامیه",
+    "name:en": "Emamiyeh square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 25850067,
+  "tags": {
+    "highway": "primary",
+    "lanes": "4",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بولوار امامیه",
+    "name:en": "Emamiyeh boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 25850073,
+  "tags": {
+    "highway": "primary",
+    "lanes": "4",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بولوار امامیه",
+    "name:en": "Emamiyeh boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 25850098,
+  "tags": {
+    "highway": "secondary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان شهید قاسمی دانا",
+    "name:en": "Shahid Ghasemi Dana Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 26224096,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "فدک - چراغچی ۶۲",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 26224104,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "فدک",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 26235811,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار حجاب",
+    "name:en": "Hijab Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 26257141,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "ادیب نیشابوری",
+    "name:en": "Adib-e Neishaboori",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 26257147,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "ادیب نیشابوری",
+    "name:en": "Adib-e Neishaboori",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 43271525,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار جلال آل احمد",
+    "name:en": "Jalale Ale Ahmad Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 45877814,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "maxspeed": "50",
+    "name": "کنار گذر چراغچی",
+    "name:en": "Cheraghchi Local lane",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 45877819,
+  "tags": {
+    "alt_name": "توس",
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار توس",
+    "name:en": "Tus Bvd",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 45877825,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان شهید فهمیده",
+    "name:en": "Shahid Fahmideh Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 45877826,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان شهید فهمیده",
+    "name:en": "Shahid Fahmideh Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 45877830,
+  "tags": {
+    "bridge": "yes",
+    "highway": "primary",
+    "junction": "roundabout",
+    "layer": "1",
+    "maxspeed": "30",
+    "name": "میدان شهید فهمیده",
+    "name:en": "Shahid Fahmideh Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 45877831,
+  "tags": {
+    "bridge": "yes",
+    "highway": "primary",
+    "junction": "roundabout",
+    "layer": "1",
+    "maxspeed": "30",
+    "name": "میدان شهید فهمیده",
+    "name:en": "Shahid Fahmideh Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 45881162,
+  "tags": {
+    "highway": "primary",
+    "lanes": "3",
+    "maxspeed": "60",
+    "name": "بلوار توس",
+    "name:en": "Toos Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 45881175,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "maxspeed": "50",
+    "name": "کنار گذر چراغچی",
+    "name:en": "chraghchi Local Lane",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 51077571,
+  "tags": {
+    "alt_name": "توس",
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار توس",
+    "name:en": "Tus Bvd",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 52299747,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار شهید علی شکری",
+    "name:en": "Shahid Ali Shokri Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 52299748,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار شهید علی شکری",
+    "name:en": "Shahid Ali Shokri Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 52370967,
+  "tags": {
+    "embankment": "yes",
+    "highway": "secondary",
+    "lanes": "2",
+    "maxspeed": "50",
+    "name": "پل اندیشه",
+    "name:en": "Andisheh bridge",
+    "name:fa": "پل اندیشه",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 52510911,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار سید رضی",
+    "name:en": "Seyed Razi Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 52510912,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار سید رضی",
+    "name:en": "Seyed Razi Boulevard",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 52510917,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان برادران شهید فلاح",
+    "name:en": "Shahid Fallah Brothers Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 52566462,
+  "tags": {
+    "highway": "secondary",
+    "name": "پیامبر اعظم ۷۱",
+    "name:en": "Payambar Azam 71",
+    "old_name": "آزادی ۱۲۵",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 52577463,
+  "tags": {
+    "highway": "secondary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان غلامرضا قدسی مشهدی",
+    "name:en": "Gholamreza Ghodsi Mashhadi Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 52613530,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار شهید فلاحی",
+    "name:en": "Shahid Fallahi Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 52613531,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار شهید فلاحی",
+    "name:en": "Shahid Fallahi Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 52613533,
+  "tags": {
+    "highway": "primary",
+    "lanes": "2",
+    "maxspeed": "60",
+    "name": "بولوار امامیه",
+    "name:en": "Emamiyeh boulevard",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 52613535,
+  "tags": {
+    "highway": "primary",
+    "maxheight": "4.5",
+    "maxspeed": "60",
+    "name": "بولوار امامیه",
+    "name:en": "Emamieh Boulevard",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 52831249,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار جلال آل احمد",
+    "name:en": "Jalale Ale Ahmad Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 53603660,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "40",
+    "name": "بولوار ساجدی",
+    "name:en": "Sajedi Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 53609939,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار معلم",
+    "name:en": "Moallem Boulevard",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "sidewalk": "right",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 54864317,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار حجاب",
+    "name:en": "Hijab Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 54864347,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار حجاب",
+    "name:en": "Hijab Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 54864356,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار حجاب",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 54864360,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار حجاب",
+    "name:en": "Hijab Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 54903020,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بلوار ساجدی",
+    "name:en": "Sajedi Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 55179459,
+  "tags": {
+    "full_name": "بولوار شهید فرامرز عباسی",
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بلوار  عباسی",
+    "name:en": "Shahid Faramarz-e Abasi Boulevard",
+    "oneway": "yes",
+    "sidewalk": "right",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 55283964,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "lit": "yes",
+    "maxspeed": "50",
+    "name": "بولوار اندیشه",
+    "name:en": "Andisheh Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 55360936,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار دانشجو",
+    "name:en": "Daneshjoo Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 55360940,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار دانشجو",
+    "name:en": "Daneshjoo Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 56752270,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بلوار کشاورز",
+    "name:en": "Keshavarz Blvd",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 58283114,
+  "tags": {
+    "bridge": "yes",
+    "highway": "primary",
+    "lanes": "2",
+    "layer": "1",
+    "maxspeed": "80",
+    "name": "بولوار توس",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 60313511,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار آموزگار",
+    "name:en": "Amoozegar Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 65411109,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "40",
+    "name": "بولوار دکتر حسابی",
+    "name:en": "Dr. Hesabi Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 84894282,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "40",
+    "name": "بولوار دکتر حسابی",
+    "name:en": "Dr. Hesabi Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 84908054,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار دانش آموز",
+    "name:en": "Danesh Amooz Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 84908058,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار دانش آموز",
+    "name:en": "Danesh Amooz Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 84908678,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار دانش آموز",
+    "name:en": "Danesh Amooz Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 84908682,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار دانش آموز",
+    "name:en": "Danesh Amooz Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 88742967,
+  "tags": {
+    "highway": "secondary",
+    "junction": "circular",
+    "maxspeed": "30",
+    "name": "میدان دانشجو",
+    "name:en": "Daneshjoo Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 93337057,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار دانش آموز",
+    "name:en": "Danesh Amooz Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 107702124,
+  "tags": {
+    "highway": "primary_link",
+    "name": "رستگاری به امامیه",
+    "oneway": "yes",
+    "surface": "asphalt",
+    "turn": "reverse"
+  }
+},
+{
+  "type": "way",
+  "id": 206231652,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "فدک",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 238479738,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار آموزگار",
+    "name:en": "Amoozegar Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 238479740,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار آموزگار",
+    "name:en": "Amoozegar Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 238479741,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار آموزگار",
+    "name:en": "Amoozegar Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 238479747,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "maxspeed": "50",
+    "name": "بولوار جانباز",
+    "name:en": "Janbaz Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 238479756,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "maxspeed": "50",
+    "name": "بولوار آموزگار",
+    "name:en": "Amoozegar Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt",
+    "turn:lanes": "through|through|slight_right"
+  }
+},
+{
+  "type": "way",
+  "id": 258285429,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "30",
+    "name": "توس ۶۹",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 266419927,
+  "tags": {
+    "alt_name": "شاهنامه ۹",
+    "highway": "primary",
+    "lanes": "2",
+    "maxspeed": "60",
+    "name": "بولوار توس",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 266419953,
+  "tags": {
+    "highway": "primary",
+    "lanes": "2",
+    "maxspeed": "60",
+    "name": "بولوار توس",
+    "name:en": "Tus Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 294304939,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار آموزگار",
+    "name:en": "Amoozegar Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 307772901,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "maxspeed": "30",
+    "name": "بولوار جانباز",
+    "name:en": "Janbaz Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 381886213,
+  "tags": {
+    "highway": "primary_link",
+    "lanes": "2",
+    "name": "شاهد به فلاحی جنوب",
+    "oneway": "yes",
+    "smoothness": "good",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 382629774,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان شهید فهمیده",
+    "name:en": "Shahid Fahmideh Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 382629775,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان شهید فهمیده",
+    "name:en": "Shahid Fahmideh Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 382629776,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان شهید فهمیده",
+    "name:en": "Shahid Fahmideh Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 382629777,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان شهید فهمیده",
+    "name:en": "Shahid Fahmideh Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 382629788,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان مادر",
+    "name:en": "Mother Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 382629789,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان مادر",
+    "name:en": "Mother Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 382629790,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان مادر",
+    "name:en": "Mother Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 382629792,
+  "tags": {
+    "highway": "primary",
+    "lanes": "3",
+    "maxspeed": "60",
+    "name": "بلوار شاهد",
+    "name:en": "Shahed Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 382629795,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بولوار شریعتی",
+    "name:en": "Shari'ati Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt",
+    "width": "12"
+  }
+},
+{
+  "type": "way",
+  "id": 382629796,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بلوار شاهد",
+    "name:en": "Shahed Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 385028044,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بولوار شریعتی",
+    "name:en": "Shari'ati Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt",
+    "width": "12"
+  }
+},
+{
+  "type": "way",
+  "id": 385028048,
+  "tags": {
+    "highway": "primary",
+    "lanes": "2",
+    "maxspeed": "60",
+    "name": "بولوار امامیه",
+    "name:en": "Emamiyeh boulevard",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 385028054,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بولوار شریعتی",
+    "name:en": "Shari'ati Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt",
+    "width": "12"
+  }
+},
+{
+  "type": "way",
+  "id": 385028056,
+  "tags": {
+    "highway": "primary",
+    "maxheight": "4.5",
+    "maxspeed": "60",
+    "name": "بولوار امامیه",
+    "name:en": "Emamieh Boulevard",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 387107522,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "maxspeed": "60",
+    "name": "بولوار امامت",
+    "name:en": "Emamat Boulevard",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 387565618,
+  "tags": {
+    "highway": "primary",
+    "lanes": "3",
+    "maxspeed": "60",
+    "name": "بلوار خیام",
+    "name:en": "Khayam Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 389504638,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "motor_vehicle": "yes",
+    "name": "بلوار توس",
+    "name:en": "Toos Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 389504646,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بولوار ساجدی",
+    "name:en": "Sajedi Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 389504647,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بلوار ساجدی",
+    "name:en": "Sajedi Boulevard",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 389504648,
+  "tags": {
+    "alt_name": "توس",
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار توس",
+    "name:en": "Tus Bvd",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 389504649,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بلوار ساجدی",
+    "name:en": "Sajedi Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 389504651,
+  "tags": {
+    "alt_name": "توس",
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار توس",
+    "name:en": "Tus Bvd",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 389504652,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار شهید فرامرز عباسی",
+    "name:en": "Shahid Faramarz-e Abasi Boulevard",
+    "oneway": "yes",
+    "sidewalk": "right",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 389504660,
+  "tags": {
+    "highway": "primary",
+    "lanes": "3",
+    "maxspeed": "60",
+    "name": "بلوار خیام",
+    "name:en": "Khayam Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 389504784,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان شهید فهمیده",
+    "name:en": "Shahid Fahmideh Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 389504790,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان شهید فهمیده",
+    "name:en": "Shahid Fahmideh Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 389504792,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان شهید فهمیده",
+    "name:en": "Shahid Fahmideh Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 389504802,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان شهید فهمیده",
+    "name:en": "Shahid Fahmideh Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 466033875,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "40",
+    "name": "شهید امام دوست",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 466033876,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "40",
+    "name": "شهید امام دوست",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 466362333,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار شاهد",
+    "name:en": "Shahed Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 468882815,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار شاهد",
+    "name:en": "Shahed Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 468882818,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار شاهد",
+    "name:en": "Shahed Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 493997284,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "maxheight": "4.5",
+    "maxspeed": "50",
+    "name": "بولوار آموزگار",
+    "name:en": "Amoozegar Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt",
+    "turn:lanes": "through|through|through;right"
+  }
+},
+{
+  "type": "way",
+  "id": 493997286,
+  "tags": {
+    "embankment": "yes",
+    "highway": "secondary",
+    "lanes": "2",
+    "maxheight": "4.5",
+    "maxspeed": "50",
+    "name": "بولوار آموزگار",
+    "name:en": "Amoozegar Boulevard",
+    "oneway": "yes",
+    "overtaking": "no",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 493997287,
+  "tags": {
+    "embankment": "yes",
+    "highway": "secondary",
+    "lanes": "2",
+    "maxspeed": "50",
+    "name": "بولوار آموزگار",
+    "name:en": "Amoozegar Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 493997288,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "maxspeed": "60",
+    "name": "بولوار امامت",
+    "name:en": "Emamat Boulevard",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 493997289,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "maxspeed": "50",
+    "name": "بولوار آموزگار",
+    "name:en": "Amoozegar Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt",
+    "turn:lanes": "through|through|through"
+  }
+},
+{
+  "type": "way",
+  "id": 493997290,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "maxspeed": "50",
+    "name": "بولوار آموزگار",
+    "name:en": "Amoozegar Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 493997295,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "maxspeed": "50",
+    "name": "بولوار اندیشه",
+    "name:en": "Andisheh Boulevard",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "surface": "asphalt",
+    "turn:lanes": "through|through|slight_right"
+  }
+},
+{
+  "type": "way",
+  "id": 493997296,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "maxspeed": "50",
+    "name": "بولوار اندیشه",
+    "name:en": "Andisheh Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 493997297,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "maxspeed": "50",
+    "name": "بولوار اندیشه",
+    "name:en": "Andisheh Boulevard",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 494449668,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "40",
+    "name": "بولوار دکتر حسابی",
+    "name:en": "Dr. Hesabi Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt",
+    "turn:lanes": "left|through|through"
+  }
+},
+{
+  "type": "way",
+  "id": 494449669,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "lit": "yes",
+    "maxspeed": "40",
+    "name": "بولوار دکتر حسابی",
+    "name:en": "Dr. Hesabi Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 494449671,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "lit": "yes",
+    "maxspeed": "40",
+    "name": "بولوار دکتر حسابی",
+    "name:en": "Dr. Hesabi Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 494449672,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "50",
+    "name": "بولوار اندیشه",
+    "name:en": "Andisheh Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt",
+    "turn:lanes": "left|through|through;right"
+  }
+},
+{
+  "type": "way",
+  "id": 494449673,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "lit": "yes",
+    "maxspeed": "50",
+    "name": "بولوار اندیشه",
+    "name:en": "Andisheh Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 494449674,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "50",
+    "name": "بولوار اندیشه",
+    "name:en": "Andisheh Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt",
+    "turn:lanes": "left|through|through"
+  }
+},
+{
+  "type": "way",
+  "id": 494449675,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "lit": "yes",
+    "maxspeed": "50",
+    "name": "بولوار اندیشه",
+    "name:en": "Andisheh Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 494449678,
+  "tags": {
+    "hgv": "no",
+    "highway": "secondary",
+    "lanes": "2",
+    "lit": "yes",
+    "maxspeed": "50",
+    "name": "بولوار اندیشه",
+    "name:en": "Andisheh Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 494449679,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار حجاب",
+    "name:en": "Hijab Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 503206845,
+  "tags": {
+    "bridge": "yes",
+    "highway": "secondary",
+    "lanes": "2",
+    "layer": "1",
+    "maxspeed": "50",
+    "name": "پل آموزگار",
+    "oneway": "yes",
+    "overtaking": "no",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 503206846,
+  "tags": {
+    "bridge": "yes",
+    "highway": "secondary",
+    "lanes": "2",
+    "layer": "1",
+    "maxspeed": "50",
+    "name": "پل آموزگار",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 530892846,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "40",
+    "name": "فدک",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 590888191,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "خیابان امام هادی",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 614448071,
+  "tags": {
+    "highway": "secondary",
+    "name": "پیامبر اعظم ۷۱",
+    "name:en": "Payambar Azam 71",
+    "old_name": "آزادی ۱۲۵",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 614448080,
+  "tags": {
+    "highway": "secondary",
+    "name": "توس ۹۰",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 660982798,
+  "tags": {
+    "highway": "secondary",
+    "name": "توس ۹۰",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 708960190,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار حجاب",
+    "name:en": "Hijab Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 724414189,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار کشاورز",
+    "name:en": "Keshavarz Blvd",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 731553656,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار کشاورز",
+    "name:en": "Keshavarz Blvd",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 842368020,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان معراج",
+    "name:en": "Meraj square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 842368021,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان معراج",
+    "name:en": "Meraj square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 842368638,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "امام هادی",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 842369758,
+  "tags": {
+    "highway": "secondary_link",
+    "maxspeed": "50",
+    "name": "بلوار کشاورز",
+    "name:en": "Keshavarz Blvd",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 843498578,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بلوار کشاورز",
+    "name:en": "Keshavarz Blvd",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 880319340,
+  "tags": {
+    "highway": "primary",
+    "lanes": "3",
+    "maxspeed": "70",
+    "name": "بولوار معلم",
+    "name:en": "Moallem Boulevard",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "sidewalk": "right",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 888424999,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "maxspeed": "50",
+    "name": "کنار گذر چراغچی",
+    "name:en": "Cheraghchi Local lane",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 890055289,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "40",
+    "name": "بولوار ساجدی",
+    "name:en": "Sajedi Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 890055290,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "40",
+    "name": "بولوار ساجدی",
+    "name:en": "Sajedi Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 890055292,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "40",
+    "name": "شهیدحقی",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 891064995,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "maxspeed": "30",
+    "name": "بولوار جانباز",
+    "name:en": "Janbaz Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 913985966,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "30",
+    "name": "توس ۶۹",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 913985968,
+  "tags": {
+    "highway": "primary",
+    "lanes": "2",
+    "maxspeed": "60",
+    "name": "بولوار توس",
+    "name:en": "Tus Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 916739546,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "ادیب نیشابوری جنوبی",
+    "name:en": "South Adib-e Neishaboori",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 916739547,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "ادیب نیشابوری جنوبی",
+    "name:en": "South Adib-e Neishaboori",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 943360568,
+  "tags": {
+    "alt_name": "شاهنامه ۹",
+    "highway": "primary",
+    "lanes": "2",
+    "maxspeed": "60",
+    "name": "بولوار توس",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 943360569,
+  "tags": {
+    "alt_name": "شاهنامه ۹",
+    "highway": "primary",
+    "lanes": "2",
+    "maxspeed": "60",
+    "name": "بولوار توس",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 947384162,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار توس",
+    "name:en": "Toos boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 951295605,
+  "tags": {
+    "bus": "no",
+    "hgv": "no",
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار حجاب",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 951295611,
+  "tags": {
+    "bus": "no",
+    "hgv": "no",
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "ادیب نیشابوری جنوبی",
+    "name:en": "South Adib-e Neishaboori",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 951295613,
+  "tags": {
+    "bus": "no",
+    "hgv": "no",
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار شهید فلاحی",
+    "name:en": "Shahid Fallahi Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 951295614,
+  "tags": {
+    "hgv": "no",
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار دانشجو",
+    "name:en": "Daneshjoo Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 951295615,
+  "tags": {
+    "highway": "primary",
+    "lanes": "2",
+    "maxspeed": "60",
+    "name": "بولوار شاهد",
+    "name:en": "Shahed Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 951295616,
+  "tags": {
+    "highway": "primary",
+    "lanes": "2",
+    "maxspeed": "60",
+    "name": "بولوار شاهد",
+    "name:en": "Shahed Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 958823757,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان معراج",
+    "name:en": "Meraj square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 958823758,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان معراج",
+    "name:en": "Meraj square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 958823764,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان معراج",
+    "name:en": "Meraj square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 960710459,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "lit": "yes",
+    "maxspeed": "50",
+    "name": "بولوار اندیشه",
+    "name:en": "Andisheh Boulevard",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 960710460,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "lit": "yes",
+    "maxspeed": "50",
+    "name": "بولوار اندیشه",
+    "name:en": "Andisheh Boulevard",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 960710461,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار حجاب",
+    "name:en": "Hijab Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 960710463,
+  "tags": {
+    "highway": "secondary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان شهید قاسمی دانا",
+    "name:en": "Shahid Ghasemi Dana Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 960710464,
+  "tags": {
+    "highway": "secondary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان شهید قاسمی دانا",
+    "name:en": "Shahid Ghasemi Dana Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 960710465,
+  "tags": {
+    "highway": "secondary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان شهید قاسمی دانا",
+    "name:en": "Shahid Ghasemi Dana Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 963401368,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "maxspeed": "30",
+    "name": "بولوار جانباز",
+    "name:en": "Janbaz Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 963401373,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان معراج",
+    "name:en": "Meraj square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 963401376,
+  "tags": {
+    "alt_name": "توس",
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار توس",
+    "name:en": "Tus Bvd",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 963401377,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "maxspeed": "50",
+    "name": "بولوار جانباز",
+    "name:en": "Janbaz Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 963401378,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "maxspeed": "50",
+    "name": "بولوار جانباز",
+    "name:en": "Janbaz Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 963401379,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "40",
+    "name": "بولوار ساجدی",
+    "name:en": "Sajedi Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 963401380,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "maxspeed": "30",
+    "name": "بولوار جانباز",
+    "name:en": "Janbaz Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 963401381,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "maxspeed": "30",
+    "name": "بولوار جانباز",
+    "name:en": "Janbaz Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 963401382,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار شهید فرامرز عباسی",
+    "name:en": "Shahid Faramarz-e Abasi Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 963712544,
+  "tags": {
+    "alt_name": "توس",
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار توس",
+    "name:en": "Tus Bvd",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 963712545,
+  "tags": {
+    "highway": "primary",
+    "lanes": "3",
+    "maxspeed": "60",
+    "name": "بلوار خیام",
+    "name:en": "Khayam Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 963712546,
+  "tags": {
+    "alt_name": "توس",
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار توس",
+    "name:en": "Tus Bvd",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 963712555,
+  "tags": {
+    "highway": "primary",
+    "junction": "circular",
+    "maxspeed": "30",
+    "name": "میدان بوعلی",
+    "name:en": "Bu'Ali Square",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 963712556,
+  "tags": {
+    "alt_name": "توس",
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار توس",
+    "name:en": "Tus Bvd",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 963712557,
+  "tags": {
+    "highway": "primary",
+    "lanes": "3",
+    "maxspeed": "60",
+    "name": "بلوار خیام",
+    "name:en": "Khayam Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 964338557,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار حجاب",
+    "name:en": "Hijab Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 964338559,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "ادیب نیشابوری",
+    "name:en": "Adib-e Neishaboori",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 964338560,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بلوار شریعتی",
+    "name:en": "Shari'ati Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt",
+    "width": "12"
+  }
+},
+{
+  "type": "way",
+  "id": 964338561,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بلوار شریعتی",
+    "name:en": "Shari'ati Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt",
+    "width": "12"
+  }
+},
+{
+  "type": "way",
+  "id": 964338562,
+  "tags": {
+    "highway": "primary",
+    "lanes": "3",
+    "maxspeed": "60",
+    "name": "بلوار شاهد",
+    "name:en": "Shahed Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 964338567,
+  "tags": {
+    "embankment": "yes",
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار دانشجو",
+    "name:en": "Daneshjoo Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 964338598,
+  "tags": {
+    "highway": "secondary",
+    "junction": "circular",
+    "maxspeed": "30",
+    "name": "میدان دانشجو",
+    "name:en": "Daneshjoo Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 964338599,
+  "tags": {
+    "highway": "secondary",
+    "junction": "circular",
+    "maxspeed": "30",
+    "name": "میدان دانشجو",
+    "name:en": "Daneshjoo Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 964338600,
+  "tags": {
+    "highway": "secondary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان دانشجو",
+    "name:en": "Daneshjoo Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 964338608,
+  "tags": {
+    "highway": "primary",
+    "lanes": "3",
+    "maxspeed": "60",
+    "name": "بلوار شاهد",
+    "name:en": "Shahed Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 964338609,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بلوار شریعتی",
+    "name:en": "Shari'ati Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt",
+    "width": "12"
+  }
+},
+{
+  "type": "way",
+  "id": 964338610,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بلوار شریعتی",
+    "name:en": "Shari'ati Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt",
+    "width": "12"
+  }
+},
+{
+  "type": "way",
+  "id": 964338611,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار شهید فلاحی",
+    "name:en": "Shahid Fallahi Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 964338612,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار شهید فلاحی",
+    "name:en": "Shahid Fallahi Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 964338614,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان مادر",
+    "name:en": "Mother Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 964338615,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان مادر",
+    "name:en": "Mother Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 964338616,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "ادیب نیشابوری",
+    "name:en": "Adib-e Neishaboori",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 964338617,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "ادیب نیشابوری",
+    "name:en": "Adib-e Neishaboori",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 964338619,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار حجاب",
+    "name:en": "Hijab Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 965659235,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "30",
+    "name": "بولوار سید رضی",
+    "name:en": "Seyed Razi Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 965864636,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار شهید فلاحی",
+    "name:en": "Shahid Fallahi Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 965864637,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار شاهد",
+    "name:en": "Shahed Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 965864638,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار شاهد",
+    "name:en": "Shahed Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 965864639,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "lit": "yes",
+    "maxspeed": "50",
+    "name": "بولوار اندیشه",
+    "name:en": "Andisheh Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 965864644,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "lit": "yes",
+    "maxspeed": "50",
+    "name": "بولوار اندیشه",
+    "name:en": "Andisheh Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 965864645,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار شاهد",
+    "name:en": "Shahed Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 965864646,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار شاهد",
+    "name:en": "Shahed Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 965864647,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار شهید فلاحی",
+    "name:en": "Shahid Fallahi Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 967197968,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "70",
+    "name": "بولوار معلم",
+    "name:en": "Moallem Boulevard",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "sidewalk": "right",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 967197969,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار دانشجو",
+    "name:en": "Daneshjoo Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 967197973,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار شهید فلاحی",
+    "name:en": "Shahid Fallahi Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 967197982,
+  "tags": {
+    "highway": "primary",
+    "lanes": "4",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بولوار امامیه",
+    "name:en": "Emamiyeh boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 967197986,
+  "tags": {
+    "highway": "primary",
+    "lanes": "4",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بولوار امامیه",
+    "name:en": "Emamiyeh boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 967197991,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار شهید فلاحی",
+    "name:en": "Shahid Fallahi Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 967197992,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار شهید فلاحی",
+    "name:en": "Shahid Fallahi Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 967197993,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بولوار شریعتی",
+    "name:en": "Shari'ati Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt",
+    "width": "12"
+  }
+},
+{
+  "type": "way",
+  "id": 967197994,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار معلم",
+    "name:en": "Moallem Boulevard",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "sidewalk": "right",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 967197995,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار دانشجو",
+    "name:en": "Daneshjoo Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 967486228,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار امیریه",
+    "name:en": "Amiriyeh Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 967570992,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "lanes": "3",
+    "maxspeed": "30",
+    "name": "میدان امامیه",
+    "name:en": "Emamiyeh square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 967570993,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "lanes": "3",
+    "maxspeed": "30",
+    "name": "میدان امامیه",
+    "name:en": "Emamiyeh square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 967570994,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "lanes": "3",
+    "maxspeed": "30",
+    "name": "میدان امامیه",
+    "name:en": "Emamiyeh square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 968402296,
+  "tags": {
+    "highway": "primary",
+    "lanes": "3",
+    "maxspeed": "60",
+    "name": "بلوار شاهد",
+    "name:en": "Shahed Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 968402297,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بلوار شریعتی",
+    "name:en": "Shariati Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt",
+    "width": "12"
+  }
+},
+{
+  "type": "way",
+  "id": 968402298,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار شهید فلاحی",
+    "name:en": "Shahid Fallahi Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 968402299,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "40",
+    "name": "بولوار دکتر حسابی",
+    "name:en": "Dr. Hesabi Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 968402300,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "40",
+    "name": "بولوار دکتر حسابی",
+    "name:en": "Dr. Hesabi Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 968402301,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار حجاب",
+    "name:en": "Hijab Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 968402302,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار حجاب",
+    "name:en": "Hijab Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 968402303,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "40",
+    "name": "بولوار دکتر حسابی",
+    "name:en": "Dr. Hesabi Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt",
+    "turn:lanes": "left|through|through;right"
+  }
+},
+{
+  "type": "way",
+  "id": 968402304,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار شهید فلاحی",
+    "name:en": "Shahid Fallahi Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 968402305,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بلوار شریعتی",
+    "name:en": "Shari'ati Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt",
+    "width": "12"
+  }
+},
+{
+  "type": "way",
+  "id": 968402306,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بلوار شاهد",
+    "name:en": "Shahed Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 968701844,
+  "tags": {
+    "highway": "primary",
+    "lanes": "4",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بولوار امامیه",
+    "name:en": "Emamiyeh boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 968701845,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "40",
+    "name": "بولوار دکتر حسابی",
+    "name:en": "Dr. Hesabi Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 968701846,
+  "tags": {
+    "highway": "primary",
+    "lanes": "4",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بولوار امامیه",
+    "name:en": "Emamiyeh boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 968701847,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "40",
+    "name": "بولوار دکتر حسابی",
+    "name:en": "Dr. Hesabi Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 968794510,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار شاهد",
+    "name:en": "Shahed Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 968794519,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار دانشجو",
+    "name:en": "Daneshjoo Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 968794520,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار شاهد",
+    "name:en": "Shahed Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 968794521,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار شاهد",
+    "name:en": "Shahed Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 968794524,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان برادران شهید فلاح",
+    "name:en": "Shahid Fallah Brothers Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 968794525,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان برادران شهید فلاح",
+    "name:en": "Shahid Fallah Brothers Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 968794526,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان برادران شهید فلاح",
+    "name:en": "Shahid Fallah Brothers Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 968794529,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار دانشجو",
+    "name:en": "Daneshjoo Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 969484724,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار آموزگار",
+    "name:en": "Amoozegar Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 969484725,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بلوار شریعتی",
+    "name:en": "Shariati Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt",
+    "width": "12"
+  }
+},
+{
+  "type": "way",
+  "id": 969484726,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "40",
+    "name": "بولوار دکتر حسابی",
+    "name:en": "Dr. Hesabi Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 969484737,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "lit": "yes",
+    "maxspeed": "40",
+    "name": "بولوار دکتر حسابی",
+    "name:en": "Dr. Hesabi Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 969484738,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بلوار شریعتی",
+    "name:en": "Shariati Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt",
+    "width": "12"
+  }
+},
+{
+  "type": "way",
+  "id": 969484739,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار آموزگار",
+    "name:en": "Amoozegar Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 970332006,
+  "tags": {
+    "highway": "secondary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان غلامرضا قدسی مشهدی",
+    "name:en": "Gholamreza Ghodsi Mashhadi Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 970332010,
+  "tags": {
+    "highway": "secondary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان غلامرضا قدسی مشهدی",
+    "name:en": "Gholamreza Ghodsi Mashhadi Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 970332015,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار امامیه",
+    "name:en": "Emamieh Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 970332016,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بولوار شریعتی",
+    "name:en": "Shari'ati Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt",
+    "width": "12"
+  }
+},
+{
+  "type": "way",
+  "id": 970332017,
+  "tags": {
+    "highway": "primary",
+    "lanes": "3",
+    "maxspeed": "60",
+    "name": "بلوار شاهد",
+    "name:en": "Shahed Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 970332018,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بلوار شریعتی",
+    "name:en": "Shariati Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt",
+    "width": "12"
+  }
+},
+{
+  "type": "way",
+  "id": 970332019,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار شاهد",
+    "name:en": "Shahed Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 970332020,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بولوار شریعتی",
+    "name:en": "Shari'ati Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt",
+    "width": "12"
+  }
+},
+{
+  "type": "way",
+  "id": 970332021,
+  "tags": {
+    "highway": "primary",
+    "lanes": "2",
+    "maxspeed": "60",
+    "name": "بولوار امامیه",
+    "name:en": "Emamiyeh boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 970332022,
+  "tags": {
+    "highway": "secondary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان غلامرضا قدسی مشهدی",
+    "name:en": "Gholamreza Ghodsi Mashhadi Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 970332023,
+  "tags": {
+    "highway": "secondary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان غلامرضا قدسی مشهدی",
+    "name:en": "Gholamreza Ghodsi Mashhadi Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 970332024,
+  "tags": {
+    "highway": "secondary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان غلامرضا قدسی مشهدی",
+    "name:en": "Gholamreza Ghodsi Mashhadi Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 970332025,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار جلال آل احمد",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 970332026,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "lit": "yes",
+    "maxspeed": "50",
+    "name": "بولوار جلال آل احمد",
+    "name:en": "Jalale Ale Ahmad Boulevard",
+    "oneway": "yes",
+    "sidewalk": "right",
+    "sidewalk:right:surface": "paving_stones",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 970332027,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار جلال آل احمد",
+    "name:en": "Jalale Ale Ahmad Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 970831839,
+  "tags": {
+    "highway": "primary",
+    "lanes": "3",
+    "maxspeed": "60",
+    "name": "بلوار خیام",
+    "name:en": "Khayam Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 970831840,
+  "tags": {
+    "alt_name": "توس",
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار توس",
+    "name:en": "Tus Bvd",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 970831841,
+  "tags": {
+    "alt_name": "توس",
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار توس",
+    "name:en": "Tus Bvd",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 970831843,
+  "tags": {
+    "alt_name": "توس",
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار توس",
+    "name:en": "Tus Bvd",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 971151450,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "lit": "yes",
+    "maxspeed": "50",
+    "name": "بولوار اندیشه",
+    "name:en": "Andisheh Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 971151464,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "lit": "yes",
+    "maxspeed": "50",
+    "name": "بولوار اندیشه",
+    "name:en": "Andisheh Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 971151465,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "40",
+    "name": "شهید امام دوست",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 971151466,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "lit": "yes",
+    "maxspeed": "40",
+    "name": "بولوار دکتر حسابی",
+    "name:en": "Dr. Hesabi Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 971151467,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "40",
+    "name": "شهید امام دوست",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 971151468,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "40",
+    "name": "شهید امام دوست",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 971151469,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "40",
+    "name": "شهید امام دوست",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 971151470,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "40",
+    "name": "شهید امام دوست",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 971151471,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "40",
+    "name": "شهید امام دوست",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 971151472,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "lanes": "3",
+    "maxspeed": "30",
+    "name": "میدان امامیه",
+    "name:en": "Emamiyeh square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 971151473,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "lanes": "3",
+    "maxspeed": "30",
+    "name": "میدان امامیه",
+    "name:en": "Emamiyeh square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 971151474,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "lanes": "3",
+    "maxspeed": "30",
+    "name": "میدان امامیه",
+    "name:en": "Emamiyeh square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 971151475,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "lanes": "3",
+    "maxspeed": "30",
+    "name": "میدان امامیه",
+    "name:en": "Emamiyeh square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 971151476,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان مادر",
+    "name:en": "Mother Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 971151477,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان مادر",
+    "name:en": "Mother Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 972263853,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "lit": "yes",
+    "maxspeed": "50",
+    "name": "بولوار اندیشه",
+    "name:en": "Andisheh Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 972263854,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار شاهد",
+    "name:en": "Shahed Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 972263855,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بلوار شاهد",
+    "name:en": "Shahed Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 972263856,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بلوار شریعتی",
+    "name:en": "Shari'ati Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt",
+    "width": "12"
+  }
+},
+{
+  "type": "way",
+  "id": 972263857,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان برادران شهید فلاح",
+    "name:en": "Shahid Fallah Brothers Square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 972263885,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار امامیه",
+    "name:en": "Emamieh Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 972263886,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بولوار شریعتی",
+    "name:en": "Shari'ati Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt",
+    "width": "12"
+  }
+},
+{
+  "type": "way",
+  "id": 972263887,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار شاهد",
+    "name:en": "Shahed Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 972263888,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "lit": "yes",
+    "maxspeed": "50",
+    "name": "بولوار اندیشه",
+    "name:en": "Andisheh Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 973918744,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان معراج",
+    "name:en": "Meraj square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 973918747,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان معراج",
+    "name:en": "Meraj square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 974213494,
+  "tags": {
+    "highway": "primary",
+    "junction": "roundabout",
+    "maxspeed": "30",
+    "name": "میدان معراج",
+    "name:en": "Meraj square",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 974231923,
+  "tags": {
+    "highway": "primary",
+    "lanes": "2",
+    "maxspeed": "60",
+    "name": "بولوار توس",
+    "name:en": "Tus Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 974950968,
+  "tags": {
+    "embankment": "yes",
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار دانشجو",
+    "name:en": "Daneshjoo Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 975579432,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "70",
+    "name": "بولوار معلم",
+    "name:en": "Moallem Boulevard",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "sidewalk": "right",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 975579433,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار سید رضی",
+    "name:en": "Seyed Razi Boulevard",
+    "oneway": "yes",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "sidewalk": "right",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 975579434,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار امامیه",
+    "name:en": "Emamieh Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 975579435,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بولوار شریعتی",
+    "name:en": "Shari'ati Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt",
+    "width": "12"
+  }
+},
+{
+  "type": "way",
+  "id": 975579436,
+  "tags": {
+    "cutting": "yes",
+    "highway": "secondary",
+    "lanes": "3",
+    "layer": "1",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بولوار شریعتی",
+    "name:en": "Shari'ati Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt",
+    "width": "12"
+  }
+},
+{
+  "type": "way",
+  "id": 975579437,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار حجاب",
+    "name:en": "Hijab Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 975579438,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار حجاب",
+    "name:en": "Hijab Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 975579439,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار حجاب",
+    "name:en": "Hijab Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 975579440,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار حجاب",
+    "name:en": "Hijab Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 975579441,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "بولوار حجاب",
+    "name:en": "Hijab Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 975579442,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بولوار شریعتی",
+    "name:en": "Shari'ati Boulevard",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt",
+    "width": "12"
+  }
+},
+{
+  "type": "way",
+  "id": 975579443,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بولوار شریعتی",
+    "name:en": "Shari'ati Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt",
+    "width": "12"
+  }
+},
+{
+  "type": "way",
+  "id": 975579444,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار امامیه",
+    "name:en": "Emamieh Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 975579445,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار سید رضی",
+    "name:en": "Seyed Razi Boulevard",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 975579446,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار معلم",
+    "name:en": "Moallem Boulevard",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "sidewalk": "right",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 976994857,
+  "tags": {
+    "highway": "primary",
+    "lanes": "2",
+    "maxspeed": "60",
+    "name": "بولوار امامیه",
+    "name:en": "Emamiyeh boulevard",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 976994858,
+  "tags": {
+    "highway": "primary",
+    "lanes": "2",
+    "maxspeed": "60",
+    "name": "بولوار امامیه",
+    "name:en": "Emamiyeh boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 976994859,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بولوار شریعتی",
+    "name:en": "Shari'ati Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt",
+    "width": "12"
+  }
+},
+{
+  "type": "way",
+  "id": 976994860,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "3",
+    "lit": "yes",
+    "maxspeed": "60",
+    "name": "بولوار شریعتی",
+    "name:en": "Shari'ati Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "smoothness": "good",
+    "surface": "asphalt",
+    "width": "12"
+  }
+},
+{
+  "type": "way",
+  "id": 976994861,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "lit": "yes",
+    "maxspeed": "50",
+    "name": "بولوار اندیشه",
+    "name:en": "Andisheh Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 976994862,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "lit": "yes",
+    "maxspeed": "50",
+    "name": "بولوار اندیشه",
+    "name:en": "Andisheh Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 976994863,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار شاهد",
+    "name:en": "Shahed Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 976994864,
+  "tags": {
+    "highway": "primary",
+    "lanes": "2",
+    "maxspeed": "60",
+    "name": "بولوار توس",
+    "name:en": "Tus Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 976994873,
+  "tags": {
+    "highway": "primary",
+    "lanes": "2",
+    "maxspeed": "60",
+    "name": "بولوار توس",
+    "name:en": "Tus Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 976994877,
+  "tags": {
+    "highway": "primary",
+    "maxspeed": "60",
+    "name": "بولوار شاهد",
+    "name:en": "Shahed Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 976994878,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "lit": "yes",
+    "maxspeed": "50",
+    "name": "بولوار اندیشه",
+    "name:en": "Andisheh Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 976994879,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "lit": "yes",
+    "maxheight": "4.5",
+    "maxspeed": "50",
+    "name": "بولوار اندیشه",
+    "name:en": "Andisheh Boulevard",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 976994880,
+  "tags": {
+    "highway": "primary",
+    "lanes": "2",
+    "maxspeed": "60",
+    "name": "بولوار امامیه",
+    "name:en": "Emamiyeh boulevard",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 976994882,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "ادیب نیشابوری",
+    "name:en": "Adib-e Neishaboori",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 976994883,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "ادیب نیشابوری",
+    "name:en": "Adib-e Neishaboori",
+    "oneway": "yes",
+    "parking:left": "no",
+    "parking:right": "lane",
+    "parking:right:orientation": "parallel",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 977490337,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "lit": "yes",
+    "maxspeed": "40",
+    "name": "بولوار دکتر حسابی",
+    "name:en": "Dr. Hesabi Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 977490344,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "lit": "yes",
+    "maxspeed": "50",
+    "name": "بولوار اندیشه",
+    "name:en": "Andisheh Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 981520397,
+  "tags": {
+    "highway": "primary",
+    "lanes": "2",
+    "maxspeed": "60",
+    "name": "بولوار توس",
+    "name:en": "Tus Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 981520403,
+  "tags": {
+    "highway": "primary",
+    "lanes": "2",
+    "maxspeed": "60",
+    "name": "بولوار توس",
+    "name:en": "Tus Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 981520404,
+  "tags": {
+    "highway": "primary",
+    "lanes": "2",
+    "maxspeed": "60",
+    "name": "بولوار توس",
+    "name:en": "Tus Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 981520405,
+  "tags": {
+    "highway": "primary",
+    "lanes": "2",
+    "maxspeed": "60",
+    "name": "بولوار توس",
+    "name:en": "Tus Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 981520406,
+  "tags": {
+    "highway": "primary",
+    "lanes": "2",
+    "maxspeed": "60",
+    "name": "بولوار توس",
+    "name:en": "Tus Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 988013358,
+  "tags": {
+    "highway": "secondary",
+    "junction": "circular",
+    "maxspeed": "30",
+    "name": "میدان شهید اسماعیل زاده",
+    "name:en": "Shahid Esmaeilzadeh square",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 988804886,
+  "tags": {
+    "highway": "secondary",
+    "junction": "circular",
+    "maxspeed": "30",
+    "name": "میدان شهید اسماعیل زاده",
+    "name:en": "Shahid Esmaeilzadeh square",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 988804887,
+  "tags": {
+    "highway": "secondary",
+    "junction": "circular",
+    "maxspeed": "30",
+    "name": "میدان شهید اسماعیل زاده",
+    "name:en": "Shahid Esmaeilzadeh square",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 988804888,
+  "tags": {
+    "highway": "secondary",
+    "junction": "circular",
+    "maxspeed": "30",
+    "name": "میدان شهید اسماعیل زاده",
+    "name:en": "Shahid Esmaeilzadeh square",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 1009500973,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "40",
+    "name": "بولوار امامت",
+    "name:en": "Emamat Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 1092521465,
+  "tags": {
+    "highway": "secondary",
+    "name": "بولوار کشاورز",
+    "name:en": "Keshavarz Blvd",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 1126533035,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "maxspeed": "50",
+    "name": "کنار گذر چراغچی",
+    "name:en": "chraghchi Local Lane",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 1156145541,
+  "tags": {
+    "highway": "secondary",
+    "maxspeed": "50",
+    "name": "خیابان امام هادی",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 1345142520,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "lit": "yes",
+    "maxspeed": "40",
+    "name": "بولوار دکتر حسابی",
+    "name:en": "Dr. Hesabi Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 1375609978,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "lit": "yes",
+    "maxspeed": "40",
+    "name": "بولوار دکتر حسابی",
+    "name:en": "Dr. Hesabi Boulevard",
+    "oneway": "yes",
+    "sidewalk": "both",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 1410312685,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "maxspeed": "50",
+    "name": "بولوار جانباز",
+    "name:en": "Janbaz Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+},
+{
+  "type": "way",
+  "id": 1410312686,
+  "tags": {
+    "highway": "secondary",
+    "lanes": "2",
+    "maxspeed": "30",
+    "name": "بولوار جانباز",
+    "name:en": "Janbaz Boulevard",
+    "oneway": "yes",
+    "surface": "asphalt"
+  }
+}
+
+  ]
+}

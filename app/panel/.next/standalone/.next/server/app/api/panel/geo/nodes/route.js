@@ -1,0 +1,10 @@
+var R=require("../../../../../chunks/[turbopack]_runtime.js")("server/app/api/panel/geo/nodes/route.js")
+R.c("server/chunks/[root-of-the-server]__1jq7_omy-kl_4._.js")
+R.c("server/chunks/_1w8jw781_w0g-._.js")
+R.c("server/chunks/src_lib_geo-areas_ts_0b70gz-g9mx5c._.js")
+R.c("server/chunks/src_lib_iran-cities_ts_1oooijdptramy._.js")
+R.c("server/chunks/[root-of-the-server]__1v1-l-83czzsr._.js")
+R.c("server/chunks/[root-of-the-server]__15ywnk3kjwjgv._.js")
+R.c("server/chunks/_next-internal_server_app_api_panel_geo_nodes_route_actions_06ltuxqzx0wta.js")
+R.m(83142)
+module.exports=R.m(83142).exports

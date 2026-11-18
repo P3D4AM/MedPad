@@ -112,6 +112,31 @@ model Customer {
   // (assignments, visits, notes, active, …) stays 100% MedPad-side.
   erpCode     String?  @unique
 
+  // ── Phase 5 (geo / فاز پنج جغرافیا) — structured geography.
+  // References into GeoArea (the province←city←zone←neighborhood←street
+  // tree). SCALAR columns with NO Prisma relation, exactly like erpCode:
+  // the boot migration path (ALTER TABLE on an existing Customer table)
+  // cannot attach SQLite FKs after the fact, so neither path declares one
+  // and the fresh-template vs boot-migrated layouts stay byte-identical.
+  // Referential integrity is enforced at the API layer (every write
+  // resolves the id against an ACTIVE node of the right type) and node
+  // deletion is guarded (a node referenced by customers cannot be
+  // deleted).
+  geoNeighborhoodId String?
+  geoStreetId       String?
+  // geoStatus lifecycle:
+  //   NULL          legacy row — created before Phase 5; NO gating, all
+  //                 old behavior applies (existing customers must never
+  //                 suddenly become unassignable).
+  //   'incomplete'  created (app or panel) with an AUTO-detected or absent
+  //                 neighborhood — «ثبت موقت نیازمند تکمیل اطلاعات
+  //                 جغرافیایی»: final assignment is BLOCKED until an
+  //                 admin completes the record.
+  //   'complete'    an admin (or an explicit structured pick in the panel
+  //                 form) has confirmed the geography.
+  geoStatus         String?
+  geoSource         String?   // 'auto' (nearest-centroid detect) | 'admin'
+
   checkins    Checkin[]
   visits      Visit[]
   assignments Assignment[]
@@ -121,6 +146,10 @@ model Customer {
   clinicLinks     CustomerLink[]     @relation("LinkClinic")
   physicianLinks  CustomerLink[]     @relation("LinkPhysician")
   purchases       Purchase[]
+
+  // geo report group-bys (neighborhood-first — the primary report axis)
+  @@index([geoNeighborhoodId])
+  @@index([geoStreetId])
 }
 
 // ── Customer 360 (phase 1) — physician↔clinic MANY-TO-MANY link ──
@@ -695,4 +724,49 @@ model HolooSyncLog {
   checkpoint  String?   // JSON watermark (last success time etc.)
 
   @@index([startedAt])
+}
+
+// ── Phase 5 (geo / فاز پنج) — the structured geography tree ─────────────
+//
+// ONE self-referencing table for the whole استان←شهر←محدوده←محله←خیابان
+// chain (type ∈ province | city | zone | neighborhood | street). The
+// hierarchy rules are enforced at the API layer (a zone's parent must be
+// a city, a neighborhood's parent a zone OR a city, a street's parent a
+// city OR a neighborhood) — keeping the table flat lets the boot DDL stay
+// a single idempotent CREATE TABLE and the reports walk the tree in
+// memory (the whole dataset is a few hundred rows).
+//
+// DEDUP (the «رکورد تکراری با املای متفاوت» requirement): normalizedName
+// mirrors lib/iran-cities.ts normalizeFa (ZWNJ strip, ي→ی, ك→ک, Persian
+// digits, whitespace collapse) and (parentId, normalizedName) is UNIQUE —
+// «کوی سلمان»، «کوي سلمان» and «کوی  سلمان» are one node. NULL parentId
+// (only the seeded province rows) is outside the unique index by SQLite
+// semantics — provinces/cities are SEED-ONLY (no admin API creates them),
+// so no duplicate can ever be written there.
+//
+// NO-DELETE policy: absence from the packaged dataset is NEVER a delete
+// (mirrors the Holoo policy) — re-seeding refreshes coordinates/source
+// and reactivates, it never removes. Admin deletion is guarded: a node
+// with children or customer references is refused with counts.
+model GeoArea {
+  id             String   @id @default(cuid())
+  type           String   // province | city | zone | neighborhood | street
+  parentId       String?
+  parent         GeoArea? @relation("GeoTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children       GeoArea[] @relation("GeoTree")
+  name           String   // display name (Persian, canonical)
+  normalizedName String   // dedup key — normalizeFa(name)
+  code           String?  @unique // stable slug, e.g. MHD-1 … MHD-SAMEN
+  lat            Float?   // centroid (neighborhoods with known coords)
+  lng            Float?
+  source         String?  // provenance (official resolution / OSM extract)
+  sourceDate     String?  // e.g. "2026-11-18"
+  active         Boolean  @default(true)
+  sortOrder      Int?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([parentId, type, normalizedName])
+  @@index([type])
+  @@index([parentId])
 }
