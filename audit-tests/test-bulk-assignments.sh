@@ -152,10 +152,14 @@ curl -s -H "X-Medpad-Token: $TOK2" "$BASE/api/app/notifications" -o $W/emp2notif
 N2B=$(py "import json;d=json.load(open('$W/emp2notifs2.json'));print(sum(1 for n in d['notifications'] if 'اختصاص داده شد' in n['body']))")
 chk "BA3 NO new rep notifications on retry" "[ '$N2B' = '3' ]"
 
-# ── BA4: admin bell summary (deterministic eventKey) ─────────
+# ── BA4: admin bell — RE-PINNED (phase 8 / Task 63, owner decision): the
+# admin-performed bulk operation no longer notifies the admin (notifyAdmin
+# was removed from BOTH assignment routes; the actor sees the exact
+# counters in the UI). The old expectation (exactly one «انتساب گروهی
+# انجام شد» bell entry) tested the pre-phase-8 behavior.
 curl -s -b $W/cj "$BASE/api/panel-notifications" -o $W/pn.json
 BULK_N=$(py "import json;d=json.load(open('$W/pn.json'));print(sum(1 for n in d['notifications'] if n['kind']=='assignment' and 'گروهی' in n['title']))")
-chk "BA4 one bulk summary in the bell" "[ '$BULK_N' = '1' ]"
+chk "BA4 NO bulk summary in the admin bell (removed by owner fix, phase 8)" "[ '$BULK_N' = '0' ]"
 
 # ── BA5: partial failure honesty ─────────────────────────────
 curl -s -b $W/cj -X POST $BASE/api/assignments/bulk -H 'content-type: application/json' \

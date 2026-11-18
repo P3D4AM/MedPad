@@ -206,6 +206,16 @@ SEED=$(curl -s -b $W/cj -X POST $BASE/api/customers -H 'content-type: applicatio
   -d '{"name":"داروخانه علي","type":"pharmacy","lat":36.31,"lng":59.54,"phone":"05138445566","city":"مشهد","province":"خراسان رضوی"}')
 SEED_ID=$(echo "$SEED" | py 'import json,sys;print(json.load(sys.stdin)["customer"]["id"])')
 chk "H3 pre-seeded same-name customer created" "[ -n '$SEED_ID' ]"
+# Phase 5 (geo / Task 70): a Mashhad customer created WITHOUT structured
+# geo lands in «ثبت موقت» (geoStatus=incomplete) and the FINAL assignment
+# gate refuses it — by design. The fixture follows the new workflow:
+# complete the geography (panel PUT with a tree neighborhood) BEFORE the
+# H4 assignment.
+GEO_HOOD=$(curl -s -b $W/cj "$BASE/api/panel/geo/tree" | py 'import json,sys;d=json.load(sys.stdin);print(d["zones"][0]["neighborhoods"][0]["id"])')
+curl -s -b $W/cj -X PUT "$BASE/api/customers/$SEED_ID" -H 'content-type: application/json' \
+  -d "{\"geoNeighborhoodId\":\"$GEO_HOOD\"}" > /dev/null
+chk "H3 seed customer geo completed (assignment gate lifted)" \
+  "py \"import sqlite3;c=sqlite3.connect('$DB');exit(0 if c.execute('select geoStatus from Customer where id=?',('$SEED_ID',)).fetchone()[0]=='complete' else 1)\""
 
 CODE=$(curl -s -b $W/cj -o $W/h_sync1.json -w '%{http_code}' -X POST $BASE/api/admin/holoo/sync)
 chk "H3 manual sync started (fire-and-forget)" "[ '$CODE' = '200' ]"

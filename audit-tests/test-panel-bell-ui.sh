@@ -178,7 +178,10 @@ with sync_playwright() as p:
                        return (el ? el.textContent : null) === v; }""",
             arg=str(expect), timeout=timeout)
         return True
-    step("bu2_badge_2_live", lambda: wait_badge(2))
+    # RE-PINNED (phase 8 / Task 63, owner decision): the admin-performed
+    # assignment no longer rings the ADMIN bell (notifyAdmin removed from
+    # the assignment routes) — only the check-in event arrives (+1).
+    step("bu2_badge_1_live", lambda: wait_badge(1))
 
     # BU3: popover list of 2, both unread
     page.click('[data-testid="bell-button"]')
@@ -194,7 +197,11 @@ with sync_playwright() as p:
     page.click('[data-testid="bell-button"]')
     page.wait_for_selector('[data-testid="bell-list"]')
     page.click(f'[data-testid="{marked_tid}"]')
-    step("bu4_badge_1", lambda: wait_badge(1))
+    # RE-PINNED (phase 8): with only the check-in notification, marking it
+    # takes the unread count to 0 — the badge ELEMENT disappears.
+    step("bu4_badge_gone", lambda: page.wait_for_function(
+        "() => !document.querySelector('[data-testid=\"bell-unread-count\"]')",
+        timeout=15000) and True)
     step("bu4_row_still_listed", lambda: page.locator(f'[data-testid="bell-item-{out["bu4_marked_id"]}"]').count() == 1)
     step("bu4_row_now_read", lambda: page.locator(f'[data-testid="bell-mark-one-{out["bu4_marked_id"]}"]').count() == 0)
     step("bu4_listed_rows", lambda: page.locator('[data-testid^="bell-item-"]').count())
@@ -207,7 +214,9 @@ with sync_playwright() as p:
     # mission item 7: the between-scenarios checkout itself is a real bell
     # event (+1) — the badge expectation includes it (2 read-state + close +
     # assign + checkin)
-    step("bu5_badge_3_live", lambda: wait_badge(4))
+    # RE-PINNED (phase 8): close (+1) and check-in (+1); the assignment
+    # adds NO admin bell any more.
+    step("bu5_badge_2_live", lambda: wait_badge(2))
 
     # BU6: mark-all -> badge disappears, rows stay listed and read
     page.click('[data-testid="bell-button"]')
@@ -221,7 +230,8 @@ with sync_playwright() as p:
         return True
     step("bu6_badge_gone", lambda: badge_gone())
     step("bu6_rows_still_listed", lambda: page.locator('[data-testid^="bell-item-"]').count())
-    step("bu6_rows_expect_4", lambda: page.locator('[data-testid^="bell-item-"]').count() == 5)
+    # RE-PINNED (phase 8): 1 BU2 check-in + 1 close + 1 BU5 check-in = 3 rows
+    step("bu6_rows_expect_4", lambda: page.locator('[data-testid^="bell-item-"]').count() == 3)
     step("bu6_no_mark_buttons", lambda: page.locator('[data-testid^="bell-mark-one-"]').count() == 0)
     step("bu6_not_empty_state", lambda: page.locator('[data-testid="bell-empty"]').count() == 0)
     page.keyboard.press("Escape")
@@ -258,22 +268,22 @@ PYBROWSER
     chk "BU2 in-page assignment -> 200" "[ \"\$(g bu2_assign_status)\" = '200' ]"
     BU2_CI=$(g bu2_checkin_status)
     chk "BU2 in-page check-in -> ok" "echo '$BU2_CI' | grep -q '200, True'"
-    chk "BU2 badge shows 2 LIVE (socket -> refetch, H4)" "[ \"\$(g bu2_badge_2_live)\" = 'True' ]"
-    chk "BU3 popover lists 2 notifications" "[ \"\$(g bu3_items_2)\" = '2' ]"
-    chk "BU3 both unread (2 mark-one buttons)" "[ \"\$(g bu3_unread_buttons_2)\" = '2' ]"
-    chk "BU4 mark-one: badge 2->1 (refetch, H1)" "[ \"\$(g bu4_badge_1)\" = 'True' ]"
+    chk "BU2 badge shows 1 LIVE (check-in only — assignment bell removed by owner fix, phase 8)" "[ \"\$(g bu2_badge_1_live)\" = 'True' ]"
+    chk "BU3 popover lists 1 notification (check-in only)" "[ \"\$(g bu3_items_2)\" = '1' ]"
+    chk "BU3 unread (1 mark-one button)" "[ \"\$(g bu3_unread_buttons_2)\" = '1' ]"
+    chk "BU4 mark-one: badge gone (0 unread — phase 8 counts)" "[ \"\$(g bu4_badge_gone)\" = 'True' ]"
     chk "BU4 marked row stays listed" "[ \"\$(g bu4_row_still_listed)\" = 'True' ]"
     chk "BU4 marked row is now read" "[ \"\$(g bu4_row_now_read)\" = 'True' ]"
-    chk "BU4 list still has 2 rows" "[ \"\$(g bu4_listed_rows)\" = '2' ]"
+    chk "BU4 list still has 1 row" "[ \"\$(g bu4_listed_rows)\" = '1' ]"
     chk "BU5 second assignment -> 200" "[ \"\$(g bu5_assign_status)\" = '200' ]"
     BU5_CI=$(g bu5_checkin_status)
     chk "BU5 second check-in -> ok" "echo '$BU5_CI' | grep -q '200, True'"
-    chk "BU5 badge shows 4 LIVE (H4 — includes the fixture-checkout event)" "[ \"\$(g bu5_badge_3_live)\" = 'True' ]"
+    chk "BU5 badge shows 2 LIVE (checkout + check-in; assignment bell removed, phase 8)" "[ \"\$(g bu5_badge_2_live)\" = 'True' ]"
     chk "BU6 mark-all: badge DISAPPEARS (refetch to 0, H1)" "[ \"\$(g bu6_badge_gone)\" = 'True' ]"
-    chk "BU6 all 5 rows stay listed (2 BU2 + close + 2 BU5, one already read)" "[ \"\$(g bu6_rows_expect_4)\" = 'True' ]"
+    chk "BU6 all 3 rows stay listed (1 BU2 + close + 1 BU5 — phase 8 counts)" "[ \"\$(g bu6_rows_expect_4)\" = 'True' ]"
     chk "BU6 no mark-one buttons left" "[ \"\$(g bu6_no_mark_buttons)\" = 'True' ]"
     chk "BU6 not the empty state" "[ \"\$(g bu6_not_empty_state)\" = 'True' ]"
-    chk "BU7 reopen: 5 read rows persist" "[ \"\$(g bu7_rows_persist)\" = '5' ]"
+    chk "BU7 reopen: 3 read rows persist" "[ \"\$(g bu7_rows_persist)\" = '3' ]"
     chk "BU8 session-expired state shown (H3)" "[ \"\$(g bu8_expired_state)\" = 'True' ]"
     chk "BU8 relogin returns to login screen" "[ \"\$(g bu8_back_to_login)\" = 'True' ]"
     N_ERR=$(py "import json;print(len(json.load(open('$W/bu.json')).get('errors',[])))")
