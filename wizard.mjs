@@ -43,7 +43,7 @@ import url from 'url'
 import { readConfig, openBrowser, portBusy } from './services.mjs'
 
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url))
-const WIZARD_VER = '1.9.16-dev.1'
+const WIZARD_VER = '1.9.16-dev.2'
 
 /** v1.9.13-dev.2: private IPv4 addresses of this machine (phone/app URL). */
 function lanAddresses() {

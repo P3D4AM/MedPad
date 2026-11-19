@@ -59,7 +59,7 @@ const cfg = readConfig(__dirname)
 const PANEL_PORT = Number(cfg.panelPort) || 3000
 const RT_PORT = Number(cfg.rtPort) || 3003
 const PANEL_URL = `http://localhost:${PANEL_PORT}`
-const MANAGER_VER = '1.9.16-dev.1'
+const MANAGER_VER = '1.9.16-dev.2'
 
 const say = (m) => console.log(m)
 const ok = (m) => console.log(`[OK] ${m}`)
