@@ -1,0 +1,1906 @@
+diff -ruN a/prisma/schema.prisma b/prisma/schema.prisma
+--- a/prisma/schema.prisma	2026-11-18 23:51:26.492369840 +0000
++++ b/prisma/schema.prisma	2026-11-19 00:05:19.731885689 +0000
+@@ -707,12 +707,15 @@
+ 
+ /// One row per sync run (initial | incremental | manual) — the panel's
+ /// «وضعیت سینک» view and the scheduler's watermark. `errors` is a JSON
+-/// array of SAFE strings (classified error kinds + counts — NEVER
+-/// credentials, tokens or raw password material).
++/// array of SAFE strings (capped at 20; `errorsTotal` counts every error
++/// so dropped ones are visible — NEVER credentials, tokens or raw
++/// password material). Phase 14 (Task 72): `sections` carries the
++/// per-source report JSON (status/received/valid/duplicates/…), and
++/// `heartbeatAt` is the liveness signal of an in-flight run.
+ model HolooSyncLog {
+   id          String    @id @default(cuid())
+   kind        String
+-  status      String    // running | success | error
++  status      String    // running | success | partial | error
+   startedAt   DateTime  @default(now())
+   finishedAt  DateTime?
+   checked     Int       @default(0)
+@@ -721,7 +724,10 @@
+   unchanged   Int       @default(0)
+   deactivated Int       @default(0)
+   errors      String?
+-  checkpoint  String?   // JSON watermark (last success time etc.)
++  errorsTotal Int?
++  heartbeatAt DateTime?
++  sections    String?   // JSON: per-source reports (Phase 14 v2 checkpoint)
++  checkpoint  String?   // JSON watermark (v2: durationMs + detail + sections + error accounting)
+ 
+   @@index([startedAt])
+ }
+diff -ruN a/src/app/api/admin/holoo/sync/route.ts b/src/app/api/admin/holoo/sync/route.ts
+--- a/src/app/api/admin/holoo/sync/route.ts	2026-11-18 23:51:26.493369840 +0000
++++ b/src/app/api/admin/holoo/sync/route.ts	2026-11-19 00:05:19.732885690 +0000
+@@ -24,15 +24,21 @@
+       { status: 400 },
+     )
+   }
++  // ── Phase 14 (Task 72): this check sits AFTER every await and is ATOMIC
++  // with the fire-and-forget below — there is NO await between the check
++  // and the call, and runHolooSync claims the guard SYNCHRONOUSLY at its
++  // entry. Two concurrent manual requests can therefore never both start
++  // a run: the loser transparently receives this 409 busy answer.
+   if (isSyncRunning()) {
+     return NextResponse.json({ ok: false, error: 'یک اجرای سینک هم‌اکنون در جریان است — وضعیت را از همین صفحه دنبال کنید' }, { status: 409 })
+   }
+-  await writeAudit({
++  // fire-and-forget: the promise resolves into the HolooSyncLog row
++  void runHolooSync('manual').catch(() => {})
++  // audited only when a run really fired (never blocks nor fails the start)
++  void writeAudit({
+     action: 'holoo.sync.manual',
+     targetType: 'holoo',
+     detail: 'سینک دستی هلو آغاز شد',
+-  })
+-  // fire-and-forget: the promise resolves into the HolooSyncLog row
+-  void runHolooSync('manual').catch(() => {})
++  }).catch(() => {})
+   return NextResponse.json({ ok: true, started: true })
+ }
+diff -ruN a/src/components/panel/HolooTab.tsx b/src/components/panel/HolooTab.tsx
+--- a/src/components/panel/HolooTab.tsx	2026-11-18 23:51:26.502369843 +0000
++++ b/src/components/panel/HolooTab.tsx	2026-11-19 00:05:19.736885693 +0000
+@@ -35,6 +35,35 @@
+   passwordError: string | null
+ }
+ 
++interface SectionView {
++  status: 'success' | 'partial' | 'error' | 'not_run'
++  note?: string
++  startedAt: string
++  finishedAt: string | null
++  fetchMs: number | null
++  httpStatus: number | null
++  received: number | null
++  valid: number | null
++  duplicates: number
++  checked: number
++  created: number
++  updated: number
++  unchanged: number
++  skipped: number
++  recordErrors: number
++  deactivated: number
++  pagination?: {
++    detected: boolean
++    signals: string[]
++    totalCount: number | null
++    limit: number | null
++    suspectedIncomplete: boolean
++    note: string
++  }
++  customers?: number
++  fetchErrors?: number
++}
++
+ interface SyncLogView {
+   id: string
+   kind: string
+@@ -47,6 +76,11 @@
+   unchanged: number
+   deactivated: number
+   errors: string[]
++  durationMs: number | null
++  errorsTotal: number | null
++  errorsDropped: number | null
++  heartbeatAt: string | null
++  sections: Record<string, SectionView> | null
+ }
+ 
+ interface SyncState {
+@@ -82,6 +116,14 @@
+   count?: number
+   firstRecordKeys?: string[]
+   errorKind?: string
++  pagination?: {
++    detected: boolean
++    signals: string[]
++    totalCount: number | null
++    limit: number | null
++    suspectedIncomplete: boolean
++    note: string
++  }
+   error?: string
+ }
+ 
+@@ -112,6 +154,23 @@
+   running: { label: 'در جریان', variant: 'secondary' },
+   error: { label: 'خطا', variant: 'destructive' },
+ }
++/** Phase 14 — per-source labels. */
++const SECTION_FA: Record<string, string> = {
++  customers: 'مشتریان',
++  products: 'کالاها',
++  invoices: 'فاکتورها',
++  payments: 'پرداخت‌ها و مانده‌ها',
++}
++const SECTION_STATUS_FA: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
++  success: { label: 'موفق', variant: 'default' },
++  partial: { label: 'ناقص', variant: 'outline' },
++  error: { label: 'ناموفق', variant: 'destructive' },
++  not_run: { label: 'اجرا نشده', variant: 'secondary' },
++}
++function SectionStatusBadge({ status }: { status: string }) {
++  const s = SECTION_STATUS_FA[status] ?? { label: status, variant: 'destructive' as const }
++  return <Badge variant={s.variant}>{s.label}</Badge>
++}
+ function StatusBadge({ status }: { status: string }) {
+   const s = STATUS_FA[status] ?? { label: status, variant: 'destructive' as const }
+   return <Badge variant={s.variant}>{s.label}</Badge>
+@@ -122,6 +181,12 @@
+   return new Intl.NumberFormat('fa-IR').format(n)
+ }
+ 
++function faDuration(ms: number | null | undefined): string {
++  if (ms === null || ms === undefined) return 'نامشخص'
++  if (ms < 1000) return `${faNum(ms)} میلی‌ثانیه`
++  return `${faNum(Math.round(ms / 100) / 10)} ثانیه`
++}
++
+ export default function HolooTab() {
+   const { toast } = useToast()
+   const [settings, setSettings] = useState<HolooSettingsPublic | null>(null)
+@@ -371,6 +436,7 @@
+                     <TableHead>شکل پاسخ</TableHead>
+                     <TableHead>Wrapper</TableHead>
+                     <TableHead>رکوردها</TableHead>
++                    <TableHead>صفحه‌بندی</TableHead>
+                     <TableHead>نمونه فیلدها</TableHead>
+                   </TableRow>
+                 </TableHeader>
+@@ -413,6 +479,21 @@
+                           '—'
+                         )}
+                       </TableCell>
++                      <TableCell className="max-w-56 text-[10px] leading-4">
++                        {p.ok ? (
++                          p.pagination?.detected ? (
++                            <span className={p.pagination.suspectedIncomplete ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}>
++                              {p.pagination.suspectedIncomplete ? 'احتمال ناقص بودن! ' : 'متادیتا: '}
++                              {p.pagination.signals.join('، ')}
++                              {p.pagination.totalCount !== null ? ` (کل: ${faNum(p.pagination.totalCount)})` : ''}
++                            </span>
++                          ) : (
++                            <span className="text-muted-foreground">نامشخص</span>
++                          )
++                        ) : (
++                          '—'
++                        )}
++                      </TableCell>
+                       <TableCell dir="ltr" className="max-w-64 truncate font-mono text-[10px] text-muted-foreground">
+                         {p.firstRecordKeys?.length ? p.firstRecordKeys.join(', ') : '—'}
+                       </TableCell>
+@@ -451,14 +532,94 @@
+             ))}
+           </div>
+           {sync?.lastRun && (
++            <div className="space-y-1">
++              <p className="text-xs text-muted-foreground">
++                آخرین اجرا ({KIND_FA[sync.lastRun.kind] ?? sync.lastRun.kind}): {faDateTime(sync.lastRun.startedAt)} —{' '}
++                <StatusBadge status={sync.lastRun.status} />{' '}
++                · مدت اجرا: {faDuration(sync.lastRun.durationMs)} · بررسی‌شده {faNum(sync.lastRun.checked)} · جدید{' '}
++                {faNum(sync.lastRun.created)} · ویرایش {faNum(sync.lastRun.updated)} · بدون تغییر {faNum(sync.lastRun.unchanged)}
++                {sync.lastRun.errorsTotal !== null && sync.lastRun.errorsTotal > 0 && (
++                  <> · کل خطاها {faNum(sync.lastRun.errorsTotal)}
++                  {sync.lastRun.errorsDropped !== null && sync.lastRun.errorsDropped > 0 && (
++                    <span className="text-amber-600 dark:text-amber-400"> ({faNum(sync.lastRun.errorsDropped)} خطا از فهرست خارج شده)</span>
++                  )}</>
++                )}
++                {sync.nextRunInSec !== null && <> · سینک بعدی تا ~{faNum(Math.ceil(sync.nextRunInSec / 60))} دقیقه</>}
++              </p>
++              {sync.running && sync.lastRun.status === 'running' && sync.lastRun.heartbeatAt && (
++                <p className="text-xs text-muted-foreground">آخرین فعالیت سینک در جریان: {faDateTime(sync.lastRun.heartbeatAt)}</p>
++              )}
++            </div>
++          )}
++          {/* ── Phase 14: per-source report of the last run ─────────────── */}
++          {sync?.lastRun?.sections ? (
++            <div className="space-y-1.5">
++              <p className="text-xs font-medium text-muted-foreground">نتیجهٔ هر منبع در آخرین اجرا:</p>
++              <Table>
++                <TableHeader>
++                  <TableRow>
++                    <TableHead>منبع</TableHead>
++                    <TableHead>وضعیت</TableHead>
++                    <TableHead>دریافتی</TableHead>
++                    <TableHead>معتبر</TableHead>
++                    <TableHead>تکراری</TableHead>
++                    <TableHead>بررسی</TableHead>
++                    <TableHead>جدید</TableHead>
++                    <TableHead>ویرایش</TableHead>
++                    <TableHead>بدون تغییر</TableHead>
++                    <TableHead>ردشده</TableHead>
++                    <TableHead>خطای رکورد</TableHead>
++                    <TableHead>دریافت (ms)</TableHead>
++                    <TableHead>HTTP</TableHead>
++                  </TableRow>
++                </TableHeader>
++                <TableBody>
++                  {Object.entries(sync.lastRun.sections).map(([key, s]) => (
++                    <TableRow key={key}>
++                      <TableCell className="text-xs font-medium">{SECTION_FA[key] ?? key}</TableCell>
++                      <TableCell>
++                        <div className="flex flex-col gap-0.5">
++                          <SectionStatusBadge status={s.status} />
++                          {s.note && <span className="max-w-56 text-[10px] leading-4 text-muted-foreground">{s.note}</span>}
++                        </div>
++                      </TableCell>
++                      <TableCell className="text-xs">{faNum(s.received)}</TableCell>
++                      <TableCell className="text-xs">{faNum(s.valid)}</TableCell>
++                      <TableCell className="text-xs">{s.duplicates > 0 ? <span className="text-amber-600 dark:text-amber-400">{faNum(s.duplicates)}</span> : faNum(0)}</TableCell>
++                      <TableCell className="text-xs">{faNum(s.checked)}</TableCell>
++                      <TableCell className="text-xs">{faNum(s.created)}</TableCell>
++                      <TableCell className="text-xs">{faNum(s.updated)}</TableCell>
++                      <TableCell className="text-xs">{faNum(s.unchanged)}</TableCell>
++                      <TableCell className="text-xs">{faNum(s.skipped)}</TableCell>
++                      <TableCell className="text-xs">{s.recordErrors > 0 ? <span className="font-medium text-red-700 dark:text-red-400">{faNum(s.recordErrors)}</span> : faNum(0)}</TableCell>
++                      <TableCell dir="ltr" className="text-xs">{faNum(s.fetchMs)}</TableCell>
++                      <TableCell dir="ltr" className="text-xs">{s.httpStatus !== null ? s.httpStatus : '—'}</TableCell>
++                    </TableRow>
++                  ))}
++                </TableBody>
++              </Table>
++              {/* pagination warnings — one per source with STRONG evidence */}
++              {Object.entries(sync.lastRun.sections)
++                .filter(([, s]) => s.pagination?.suspectedIncomplete)
++                .map(([key, s]) => (
++                  <div key={`pag-${key}`} className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
++                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
++                    <span>
++                      <b>{SECTION_FA[key] ?? key}:</b> {s.pagination?.note} (نشانه‌ها: {s.pagination?.signals.join('، ') || '—'})
++                    </span>
++                  </div>
++                ))}
++              {sync.lastRun.status === 'partial' && (
++                <p className="text-xs text-muted-foreground">
++                  این اجرا <b>ناقص</b> بوده است — دست‌کم یک منبع سالم کار کرده و داده‌های قبلی حفظ شده‌اند؛ جزئیات خطاها در جدول تاریخچه پایین است.
++                </p>
++              )}
++            </div>
++          ) : sync?.lastRun ? (
+             <p className="text-xs text-muted-foreground">
+-              آخرین اجرا ({KIND_FA[sync.lastRun.kind] ?? sync.lastRun.kind}): {faDateTime(sync.lastRun.startedAt)} —{' '}
+-              <StatusBadge status={sync.lastRun.status} />{' '}
+-              · بررسی‌شده {faNum(sync.lastRun.checked)} · جدید {faNum(sync.lastRun.created)} · ویرایش {faNum(sync.lastRun.updated)} · بدون تغییر{' '}
+-              {faNum(sync.lastRun.unchanged)}
+-              {sync.nextRunInSec !== null && <> · سینک بعدی تا ~{faNum(Math.ceil(sync.nextRunInSec / 60))} دقیقه</>}
++              گزارش این اجرا به تفکیک منبع ثبت نشده است (گزارش قدیمی) — آمار کلی همان ردیف بالا معتبر است.
+             </p>
+-          )}
++          ) : null}
+           {sync?.lastSuccess ? (
+             <p className="text-xs text-muted-foreground">
+               آخرین همگام‌سازی موفق: {faDateTime(sync.lastSuccess.startedAt)} · بررسی‌شده {faNum(sync.lastSuccess.checked)} · جدید{' '}
+@@ -475,6 +636,7 @@
+                   <TableHead>زمان</TableHead>
+                   <TableHead>نوع</TableHead>
+                   <TableHead>وضعیت</TableHead>
++                  <TableHead>مدت</TableHead>
+                   <TableHead>آمار</TableHead>
+                   <TableHead>خطاها</TableHead>
+                 </TableRow>
+@@ -487,11 +649,23 @@
+                     <TableCell>
+                       <StatusBadge status={l.status} />
+                     </TableCell>
++                    <TableCell className="text-xs">{faDuration(l.durationMs)}</TableCell>
+                     <TableCell className="text-xs">
+                       +{faNum(l.created)} / ~{faNum(l.updated)} / ={faNum(l.unchanged)}
+                     </TableCell>
+                     <TableCell className="max-w-80 text-xs text-muted-foreground">
+-                      {l.errors.length ? l.errors.join(' | ').slice(0, 200) : '—'}
++                      {l.errorsTotal !== null && l.errorsTotal > 0 ? (
++                        <>
++                          {l.errors.length ? l.errors.join(' | ').slice(0, 200) : '—'}
++                          {l.errorsTotal > l.errors.length && (
++                            <span className="text-amber-600 dark:text-amber-400"> (+{faNum(l.errorsTotal - l.errors.length)} خطای ثبت‌نشده در فهرست)</span>
++                          )}
++                        </>
++                      ) : l.errors.length ? (
++                        l.errors.join(' | ').slice(0, 200)
++                      ) : (
++                        '—'
++                      )}
+                     </TableCell>
+                   </TableRow>
+                 ))}
+diff -ruN a/src/instrumentation.ts b/src/instrumentation.ts
+--- a/src/instrumentation.ts	2026-11-18 23:51:26.506369844 +0000
++++ b/src/instrumentation.ts	2026-11-19 00:05:19.738885694 +0000
+@@ -462,10 +462,21 @@
+     "unchanged" INTEGER NOT NULL DEFAULT 0,
+     "deactivated" INTEGER NOT NULL DEFAULT 0,
+     "errors" TEXT,
++    "errorsTotal" INTEGER,
++    "heartbeatAt" DATETIME,
++    "sections" TEXT,
+     "checkpoint" TEXT
+ )`
+ const HOLOO_SYNC_LOG_TIME_INDEX_DDL =
+   'CREATE INDEX IF NOT EXISTS "HolooSyncLog_startedAt_idx" ON "HolooSyncLog"("startedAt")'
++// Phase 14 (Task 72): additive columns on EXISTING installs (the runner
++// tolerates "duplicate column name" — the fresh-install CREATE TABLE
++// above already includes them, and template.db is regenerated to match).
++const HOLOO_SYNC_LOG_PHASE14_DDL = [
++  'ALTER TABLE "HolooSyncLog" ADD COLUMN "errorsTotal" INTEGER',
++  'ALTER TABLE "HolooSyncLog" ADD COLUMN "heartbeatAt" DATETIME',
++  'ALTER TABLE "HolooSyncLog" ADD COLUMN "sections" TEXT',
++]
+ // 3) One-time cleanup: a "running" row left behind by a crash/server stop
+ //    (older than 30 min) is marked error so the status view never shows a
+ //    phantom in-flight sync. Idempotent by construction (status filter).
+@@ -528,7 +539,7 @@
+   // index is created (a violating legacy row would otherwise fail the
+   // index creation loudly); both are idempotent, so every boot just
+   // re-applies them as no-ops.
+-  for (const sql of [...MIGRATIONS, AUDIT_TABLE_DDL, PLANNED_VISIT_DDL, PLANNED_VISIT_INDEX_DDL, NOTIF_EVENTKEY_DDL, NOTIF_EVENTKEY_INDEX_DDL, PANEL_NOTIFICATION_DDL, PANEL_NOTIFICATION_INDEX_DDL, ASSIGNMENT_REQUEST_DDL, ASSIGNMENT_REQUEST_PENDING_INDEX_DDL, ...CUSTOMER_CITY_DDL, CHECKIN_NOTE_VERSION_DDL, CHECKIN_NOTE_VERSION_INDEX_DDL, LOCATION_PING_DDL, LOCATION_PING_LOCALID_INDEX_DDL, LOCATION_PING_ROUTE_INDEX_DDL, TRACK_STATUS_DDL, VISIT_ONE_OPEN_RECONCILE_DDL, VISIT_ONE_OPEN_INDEX_DDL, OP_EVENT_DDL, OP_EVENT_EMP_IDX_DDL, OP_EVENT_TYPE_IDX_DDL, OP_EVENT_TIME_IDX_DDL, OP_EVENT_REQUEST_ID_INDEX_DDL, VOICE_FILE_DDL, VOICE_FILE_PATH_INDEX_DDL, VOICE_FILE_CHECKIN_INDEX_DDL, VOICE_FILE_BACKFILL_SQL, ...CUSTOMER_360_DDL, CUSTOMER_APPLOCALID_INDEX_DDL, CUSTOMER_LINK_DDL, CUSTOMER_LINK_UNIQUE_DDL, CUSTOMER_LINK_PHYSICIAN_INDEX_DDL, PURCHASE_DDL, PURCHASE_CUSTOMER_DATE_INDEX_DDL, PURCHASE_EXTERNALID_INDEX_DDL, PURCHASE_EXTERNALID_UNIQUE_DDL, PURCHASE_ITEM_DDL, PURCHASE_ITEM_INDEX_DDL, ...TRACK_STATUS_ACK_DDL, PUSH_SUBSCRIPTION_DDL, ...HOLOO_CUSTOMER_DDL, HOLOO_CUSTOMER_ERPCODE_INDEX_DDL, ERP_CUSTOMER_DDL, ERP_CUSTOMER_UNIQUE_DDL, ERP_CUSTOMER_ACTIVE_INDEX_DDL, ERP_PRODUCT_DDL, ERP_PRODUCT_UNIQUE_DDL, ERP_PAYMENT_DDL, ERP_PAYMENT_UNIQUE_DDL, ERP_PAYMENT_CUSTOMER_INDEX_DDL, HOLOO_SYNC_LOG_DDL, HOLOO_SYNC_LOG_TIME_INDEX_DDL, HOLOO_SYNC_LOG_STALE_DDL, ...GEO_CUSTOMER_DDL, GEO_CUSTOMER_NH_INDEX_DDL, GEO_CUSTOMER_ST_INDEX_DDL, GEO_AREA_DDL, GEO_AREA_UNIQUE_DDL, GEO_AREA_CODE_UNIQUE_DDL, GEO_AREA_TYPE_INDEX_DDL, GEO_AREA_PARENT_INDEX_DDL]) {
++  for (const sql of [...MIGRATIONS, AUDIT_TABLE_DDL, PLANNED_VISIT_DDL, PLANNED_VISIT_INDEX_DDL, NOTIF_EVENTKEY_DDL, NOTIF_EVENTKEY_INDEX_DDL, PANEL_NOTIFICATION_DDL, PANEL_NOTIFICATION_INDEX_DDL, ASSIGNMENT_REQUEST_DDL, ASSIGNMENT_REQUEST_PENDING_INDEX_DDL, ...CUSTOMER_CITY_DDL, CHECKIN_NOTE_VERSION_DDL, CHECKIN_NOTE_VERSION_INDEX_DDL, LOCATION_PING_DDL, LOCATION_PING_LOCALID_INDEX_DDL, LOCATION_PING_ROUTE_INDEX_DDL, TRACK_STATUS_DDL, VISIT_ONE_OPEN_RECONCILE_DDL, VISIT_ONE_OPEN_INDEX_DDL, OP_EVENT_DDL, OP_EVENT_EMP_IDX_DDL, OP_EVENT_TYPE_IDX_DDL, OP_EVENT_TIME_IDX_DDL, OP_EVENT_REQUEST_ID_INDEX_DDL, VOICE_FILE_DDL, VOICE_FILE_PATH_INDEX_DDL, VOICE_FILE_CHECKIN_INDEX_DDL, VOICE_FILE_BACKFILL_SQL, ...CUSTOMER_360_DDL, CUSTOMER_APPLOCALID_INDEX_DDL, CUSTOMER_LINK_DDL, CUSTOMER_LINK_UNIQUE_DDL, CUSTOMER_LINK_PHYSICIAN_INDEX_DDL, PURCHASE_DDL, PURCHASE_CUSTOMER_DATE_INDEX_DDL, PURCHASE_EXTERNALID_INDEX_DDL, PURCHASE_EXTERNALID_UNIQUE_DDL, PURCHASE_ITEM_DDL, PURCHASE_ITEM_INDEX_DDL, ...TRACK_STATUS_ACK_DDL, PUSH_SUBSCRIPTION_DDL, ...HOLOO_CUSTOMER_DDL, HOLOO_CUSTOMER_ERPCODE_INDEX_DDL, ERP_CUSTOMER_DDL, ERP_CUSTOMER_UNIQUE_DDL, ERP_CUSTOMER_ACTIVE_INDEX_DDL, ERP_PRODUCT_DDL, ERP_PRODUCT_UNIQUE_DDL, ERP_PAYMENT_DDL, ERP_PAYMENT_UNIQUE_DDL, ERP_PAYMENT_CUSTOMER_INDEX_DDL, HOLOO_SYNC_LOG_DDL, HOLOO_SYNC_LOG_TIME_INDEX_DDL, ...HOLOO_SYNC_LOG_PHASE14_DDL, HOLOO_SYNC_LOG_STALE_DDL, ...GEO_CUSTOMER_DDL, GEO_CUSTOMER_NH_INDEX_DDL, GEO_CUSTOMER_ST_INDEX_DDL, GEO_AREA_DDL, GEO_AREA_UNIQUE_DDL, GEO_AREA_CODE_UNIQUE_DDL, GEO_AREA_TYPE_INDEX_DDL, GEO_AREA_PARENT_INDEX_DDL]) {
+     try {
+       await db.$executeRawUnsafe(sql)
+       applied++
+diff -ruN a/src/lib/holoo-sync.ts b/src/lib/holoo-sync.ts
+--- a/src/lib/holoo-sync.ts	2026-11-18 23:51:26.506369844 +0000
++++ b/src/lib/holoo-sync.ts	2026-11-19 00:05:19.738885694 +0000
+@@ -10,6 +10,7 @@
+   HolooClient,
+   HolooError,
+   type HolooListResult,
++  type HolooPaginationInfo,
+   fStr,
+   fNum,
+   fBool,
+@@ -18,7 +19,7 @@
+ } from './holoo'
+ 
+ /**
+- * Holoo integration (phase 1) — the sync orchestrator + scheduler.
++ * Holoo integration — the sync orchestrator + scheduler.
+  *
+  * MODE (per the phase-0 risk decision, sanctioned by the owner's
+  * instruction): PERIODIC FULL COMPARISON with contentHash. Every run pulls
+@@ -37,9 +38,30 @@
+  * NO-DELETE: absence from a response is NEVER a delete. `active=false` is
+  * only recorded when the API explicitly reports an inactive/blacklist flag.
+  *
+- * CONCURRENCY: a single in-process guard (globalThis) — one run at a time,
+- * shared by the scheduler AND the manual trigger. Crashed runs leave a
+- * 'running' row that boot-migration marks as error after 30 minutes.
++ * CONCURRENCY (Phase 14 / Task 72): the run guard is claimed
++ * SYNCHRONOUSLY at function entry — no `await` between the check and the
++ * claim, so two concurrent triggers can never both start a run (Node's
++ * single thread makes the check-and-set atomic). Every failure path after
++ * the claim (config read, HolooSyncLog create, the sync itself) releases
++ * the guard via `finally` — the lock can no longer leak. The panel runs as
++ * ONE Node process (Next standalone server); the realtime server never
++ * touches Holoo sync, so an in-process guard is the correct architecture —
++ * a crash mid-run is detected by the boot stale-row cleanup.
++ *
++ * SECTION ISOLATION (Phase 14 / Task 72): the four sections (customers,
++ * products, invoices, payments) each produce an INDEPENDENT report with
++ * its own status:
++ *   success — fetched and processed cleanly (a valid EMPTY list is success)
++ *   partial — fetched, but ≥1 record failed to process / per-customer
++ *             payment report failures / unextractable per-customer reports
++ *   error   — the section's data could not be fetched or extracted at all
++ *   not_run — skipped because a dependency failed (e.g. incremental
++ *             payments when the invoice section failed: the change set is
++ *             unknowable). A section that simply had no work (0 targets)
++ *             is success with a note — never `not_run`.
++ * The OVERALL run status is DERIVED from the section statuses:
++ *   all success → success · any failure + any useful work → partial ·
++ *   no useful work at all → error.
+  */
+ 
+ // ── tolerant field-name candidates (documented ASSUMPTIONs; the /test
+@@ -90,6 +112,8 @@
+ /** Hard cap of per-customer payment fetches in ONE run (initial sync of a
+  *  very large book must not hammer the service for hours). */
+ const PAYMENT_MAX_CUSTOMERS = 5000
++/** Heartbeat cadence inside the payments loop (liveness evidence). */
++const HEARTBEAT_EVERY = 20
+ 
+ // ── Jalali/Gregorian/epoch tolerant date parsing ─────────────────────
+ export function parseHolooDate(v: unknown, fallback: Date): Date {
+@@ -147,6 +171,92 @@
+   return guard.__medpadHolooRunning === true
+ }
+ 
++// ── Phase 14 (Task 72) — the per-section report ────────────────────────
++//
++// One report per source (customers / products / invoices / payments).
++// Counters have EXACT, disjoint meanings — a record is counted in ONE
++// category per section:
++//   received     records present in the response (raw array length;
++//                null = unknown — the structure was unrecognizable)
++//   valid        plain-object records the extractor could read
++//   duplicates   records whose business key was already seen IN THIS SAME
++//                response (processed too — last occurrence wins; the DB
++//                never gains duplicate rows because upserts are keyed)
++//   checked      records with a USABLE business key that entered the
++//                compare/upsert path (checked = created + updated +
++//                unchanged + deactivated is NOT guaranteed when a record
++//                errors after being counted — checked counts entries)
++//   created      new rows inserted
++//   updated      existing rows changed (contentHash differs)
++//   unchanged    existing rows byte-identical (only lastSyncedAt touched)
++//   deactivated  rows whose explicit Holoo inactivity flag turned them
++//                inactive (ONLY with an explicit report — never absence)
++//   skipped      valid records WITHOUT a usable key (no ErpCode / no
++//                invoice identity) — a data-quality skip, not an error
++//   recordErrors records whose processing THREW (or an invoice with no
++//                linkable MedPad customer) — never silently swallowed
++export interface HolooSectionReport {
++  status: 'success' | 'partial' | 'error' | 'not_run'
++  /** safe Persian note (why not_run / which invoice path answered / …) */
++  note?: string
++  startedAt: string
++  finishedAt: string | null
++  /** duration of the service fetch itself (null = not attempted/unknown) */
++  fetchMs: number | null
++  /** HTTP status of the fetch when available */
++  httpStatus: number | null
++  received: number | null
++  valid: number | null
++  duplicates: number
++  checked: number
++  created: number
++  updated: number
++  unchanged: number
++  skipped: number
++  recordErrors: number
++  deactivated: number
++  /** passive pagination evidence (Phase 14 stage 3) */
++  pagination?: HolooPaginationInfo
++  /** payments-only: per-customer report targets attempted */
++  customers?: number
++  /** payments-only: per-customer report fetches that failed */
++  fetchErrors?: number
++}
++
++type Sections = Record<'customers' | 'products' | 'invoices' | 'payments', HolooSectionReport>
++
++function z(): HolooSectionReport {
++  return {
++    status: 'success',
++    startedAt: new Date().toISOString(),
++    finishedAt: null,
++    fetchMs: null,
++    httpStatus: null,
++    received: null,
++    valid: null,
++    duplicates: 0,
++    checked: 0,
++    created: 0,
++    updated: 0,
++    unchanged: 0,
++    skipped: 0,
++    recordErrors: 0,
++    deactivated: 0,
++  }
++}
++
++/** Derive the OVERALL run status from the section statuses:
++ *  every expected section success → success; ≥1 failed section AND ≥1
++ *  useful section → partial; NO useful work at all → error. */
++function deriveRunStatus(sections: Sections): 'success' | 'partial' | 'error' {
++  const sts = Object.values(sections).map((s) => s.status)
++  const useful = sts.some((s) => s === 'success' || s === 'partial')
++  const failed = sts.some((s) => s === 'error' || s === 'not_run')
++  if (!useful && failed) return 'error'
++  if (failed || sts.some((s) => s === 'partial')) return 'partial'
++  return 'success'
++}
++
+ export interface HolooSyncSummary {
+   ok: boolean
+   skipped?: 'busy' | 'not-configured' | 'disabled'
+@@ -158,83 +268,139 @@
+   deactivated?: number
+   errors?: string[]
+   detail?: Record<string, { checked: number; created: number; updated: number; unchanged: number; deactivated: number; skipped: number }>
++  sections?: Sections
+ }
+ 
+ /** The sync itself. Never throws — failures land in the HolooSyncLog row. */
+ export async function runHolooSync(kind: 'initial' | 'incremental' | 'manual'): Promise<HolooSyncSummary> {
+-  if (isSyncRunning()) return { ok: false, skipped: 'busy' }
+-  const cfg = await getHolooConfig()
+-  // manual runs work even when the scheduler switch is OFF (first-time
+-  // setup: test → save → «سینک دستی» without enabling the timer);
+-  // scheduled runs require enabled=1 — enforced by the caller (tick).
+-  if (!isConfigured(cfg)) return { ok: false, skipped: 'not-configured' }
+-
++  // ── Phase 14: claim the guard SYNCHRONOUSLY, before ANY await. In
++  // Node's single thread this check-and-set is atomic — the old gap (an
++  // `await getHolooConfig()` between check and claim) is gone, so two
++  // concurrent triggers (manual+manual, manual+scheduled) can never both
++  // enter. The second caller transparently receives `busy`.
++  if (guard.__medpadHolooRunning === true) return { ok: false, skipped: 'busy' }
+   guard.__medpadHolooRunning = true
+-  const errors: string[] = []
+-  const addError = (e: unknown) => {
+-    if (errors.length < 20) errors.push(holooSafeError(e))
+-  }
+-  const log = await db.holooSyncLog.create({
+-    data: { kind, status: 'running', startedAt: new Date() },
+-  })
+-  const detail: Record<string, { checked: number; created: number; updated: number; unchanged: number; deactivated: number; skipped: number }> = {
+-    customers: z(), products: z(), invoices: z(), payments: z(),
+-  }
+-  const startedAt = Date.now()
+-
+   try {
+-    await doSync(cfg, kind, detail, addError)
+-    const checked = sum(detail, 'checked')
+-    const created = sum(detail, 'created')
+-    const updated = sum(detail, 'updated')
+-    const unchanged = sum(detail, 'unchanged')
+-    const deactivated = sum(detail, 'deactivated')
+-    await db.holooSyncLog.update({
+-      where: { id: log.id },
+-      data: {
+-        // spec §9 status vocabulary: موفق / ناقص / ناموفق — a run that
+-        // COMPLETED but recorded per-section/per-record errors is honestly
+-        // «partial» (the healthy sections' data is kept; errors are listed).
+-        status: errors.length ? 'partial' : 'success',
+-        finishedAt: new Date(),
+-        checked, created, updated, unchanged, deactivated,
+-        errors: errors.length ? JSON.stringify(errors) : null,
+-        checkpoint: JSON.stringify({
+-          // informational (spec §9 «آخرین نقطه موفق همگام‌سازی») — a partial
+-          // run completes but is NOT a clean success; status is the truth
+-          completedAt: new Date().toISOString(),
+-          durationMs: Date.now() - startedAt,
+-          detail,
+-        }),
+-      },
+-    })
+-    return { ok: true, logId: log.id, checked, created, updated, unchanged, deactivated, errors, detail }
+-  } catch (e) {
+-    addError(e)
+-    await db.holooSyncLog
+-      .update({
+-        where: { id: log.id },
++    const cfg = await getHolooConfig()
++    // manual runs work even when the scheduler switch is OFF (first-time
++    // setup: test → save → «سینک دستی» without enabling the timer);
++    // scheduled runs require enabled=1 — enforced by the caller (tick).
++    if (!isConfigured(cfg)) return { ok: false, skipped: 'not-configured' }
++
++    let logId: string
++    try {
++      const log = await db.holooSyncLog.create({
++        data: { kind, status: 'running', startedAt: new Date() },
++      })
++      logId = log.id
++    } catch (e) {
++      // cannot even open a log row — honest failure; the guard is still
++      // released by the outer finally (no leaked lock, ever)
++      return { ok: false, errors: [holooSafeError(e)] }
++    }
++
++    const sections: Sections = { customers: z(), products: z(), invoices: z(), payments: z() }
++    const errors: string[] = []
++    let errorsTotal = 0
++    const addError = (e: unknown) => {
++      errorsTotal++ // every error is COUNTED, cap or no cap
++      if (errors.length < 20) errors.push(holooSafeError(e))
++    }
++    const heartbeat = async () => {
++      try {
++        await db.holooSyncLog.update({ where: { id: logId }, data: { heartbeatAt: new Date() } })
++      } catch {
++        /* heartbeat is best-effort liveness evidence, never fatal */
++      }
++    }
++    const startedAt = Date.now()
++
++    try {
++      await doSync(cfg, kind, sections, addError, heartbeat)
++      const runStatus = deriveRunStatus(sections)
++      const checked = sumSec(sections, 'checked')
++      const created = sumSec(sections, 'created')
++      const updated = sumSec(sections, 'updated')
++      const unchanged = sumSec(sections, 'unchanged')
++      const deactivated = sumSec(sections, 'deactivated')
++      for (const s of Object.values(sections)) s.finishedAt = new Date().toISOString()
++      await db.holooSyncLog.update({
++        where: { id: logId },
+         data: {
+-          status: 'error',
++          status: runStatus,
+           finishedAt: new Date(),
+-          checked: sum(detail, 'checked'),
+-          created: sum(detail, 'created'),
+-          updated: sum(detail, 'updated'),
+-          unchanged: sum(detail, 'unchanged'),
+-          deactivated: sum(detail, 'deactivated'),
+-          errors: JSON.stringify(errors.length ? errors : [holooSafeError(e)]),
+-          checkpoint: JSON.stringify({ failedAt: new Date().toISOString(), detail }),
++          checked, created, updated, unchanged, deactivated,
++          errors: errors.length ? JSON.stringify(errors) : null,
++          errorsTotal,
++          sections: JSON.stringify(sections),
++          checkpoint: JSON.stringify({
++            // v2 (Phase 14): honest error accounting + duration. The
++            // per-section reports live in the dedicated `sections` column.
++            v: 2,
++            completedAt: new Date().toISOString(),
++            durationMs: Date.now() - startedAt,
++            detail: legacyDetail(sections),
++            errorsTotal,
++            errorsDropped: Math.max(0, errorsTotal - errors.length),
++          }),
+         },
+       })
+-      .catch(() => {})
+-    return { ok: false, logId: log.id, errors, detail }
++      return {
++        ok: true, logId, checked, created, updated, unchanged, deactivated,
++        errors, detail: legacyDetail(sections), sections,
++      }
++    } catch (e) {
++      addError(e)
++      for (const s of Object.values(sections)) s.finishedAt = new Date().toISOString()
++      await db.holooSyncLog
++        .update({
++          where: { id: logId },
++          data: {
++            status: 'error',
++            finishedAt: new Date(),
++            checked: sumSec(sections, 'checked'),
++            created: sumSec(sections, 'created'),
++            updated: sumSec(sections, 'updated'),
++            unchanged: sumSec(sections, 'unchanged'),
++            deactivated: sumSec(sections, 'deactivated'),
++            errors: JSON.stringify(errors.length ? errors : [holooSafeError(e)]),
++            errorsTotal: Math.max(errorsTotal, 1),
++            sections: JSON.stringify(sections),
++            checkpoint: JSON.stringify({
++              v: 2,
++              failedAt: new Date().toISOString(),
++              durationMs: Date.now() - startedAt,
++              detail: legacyDetail(sections),
++              errorsTotal: Math.max(errorsTotal, 1),
++              errorsDropped: Math.max(0, Math.max(errorsTotal, 1) - errors.length),
++            }),
++          },
++        })
++        .catch(() => {})
++      return { ok: false, logId, errors, detail: legacyDetail(sections), sections }
++    }
+   } finally {
++    // Phase 14: EVERY exit path (not-configured, log-create failure,
++    // sync error, sync success) releases the guard — no leaked lock.
+     guard.__medpadHolooRunning = false
+   }
+ }
+ 
+-function z() {
+-  return { checked: 0, created: 0, updated: 0, unchanged: 0, deactivated: 0, skipped: 0 }
++function legacyDetail(sections: Sections) {
++  const pick = (s: HolooSectionReport) => ({
++    checked: s.checked, created: s.created, updated: s.updated,
++    unchanged: s.unchanged, deactivated: s.deactivated, skipped: s.skipped,
++  })
++  return {
++    customers: pick(sections.customers),
++    products: pick(sections.products),
++    invoices: pick(sections.invoices),
++    payments: pick(sections.payments),
++  }
++}
++
++function sumSec(sections: Sections, k: 'checked' | 'created' | 'updated' | 'unchanged' | 'deactivated'): number {
++  return Object.values(sections).reduce((a, v) => a + v[k], 0)
+ }
+ 
+ /** Task 12.1: an UNEXTRACTABLE response is an honest error (run = partial) —
+@@ -246,304 +412,410 @@
+     : ''
+   return `پاسخ هلو برای ${section} ساختار شناسایی‌شده نداشت (شکل: ${r.extraction.shape}${keys}) — هیچ رکوردی استخراج نشد`
+ }
+-function sum(detail: Record<string, ReturnType<typeof z>>, k: 'checked' | 'created' | 'updated' | 'unchanged' | 'deactivated'): number {
+-  return Object.values(detail).reduce((a, v) => a + v[k], 0)
+-}
+ 
+ // ── the actual work ───────────────────────────────────────────────────
+ 
+ async function doSync(
+   cfg: HolooConfig,
+   kind: 'initial' | 'incremental' | 'manual',
+-  detail: Record<string, ReturnType<typeof z>>,
++  sections: Sections,
+   addError: (e: unknown) => void,
++  heartbeat: () => Promise<void>,
+ ): Promise<void> {
+   const client = new HolooClient(cfg)
+ 
+-  // 1) CUSTOMERS (طرف‌حساب) — full pull, idempotent upsert by ErpCode.
+-  //    Sets of erpCodes whose MedPad Customer must be (re)examined for
+-  //    linking feed steps 3-4.
+-  const customersRaw = await client.get('Customer')
+-  if (customersRaw.extraction.kind === 'unrecognized') {
+-    addError(unrecognizedResponseError('Customer', customersRaw))
+-  }
+-  const unlinkedMedpad = await db.customer.findMany({
+-    where: { erpCode: null },
+-    select: { id: true, name: true },
+-  })
+-  const byNormName = new Map<string, string[]>()
+-  for (const c of unlinkedMedpad) {
+-    const n = normalizeName(c.name)
+-    const arr = byNormName.get(n) ?? []
+-    arr.push(c.id)
+-    byNormName.set(n, arr)
+-  }
++  // shared bridge state (customers → invoices)
+   const customerErpToMedpadId = new Map<string, string>()
+-  for (const rec of customersRaw.items) {
++  // invoices → incremental payments (the change set)
++  const customersWithInvoiceChange = new Set<string>()
++
++  // 1) CUSTOMERS (طرف‌حساب) — full pull, idempotent upsert by ErpCode.
++  //    Phase 14: a fetch failure here is SECTION-scoped — products,
++  //    invoices and payments still run (their customer links resolve from
++  //    the durable DB bridge, not from this response).
++  {
++    const sec = sections.customers
++    const t0 = Date.now()
++    let customersRaw: HolooListResult | null = null
+     try {
+-      const erpCode = fStr(rec, K_ERP)
+-      if (!erpCode) {
+-        detail.customers.skipped++
+-        continue
+-      }
+-      detail.customers.checked++
+-      const hash = holooContentHash(rec)
+-      const existing = await db.erpCustomer.findUnique({ where: { erpCode } })
+-      const now = new Date()
+-      // explicit inactivity only (no-delete policy)
+-      const reportedActive = (() => {
+-        const act = fBool(rec, K_ACTIVE, true)
+-        const black = fBool(rec, K_BLACKLIST, false)
+-        return act && !black
+-      })()
+-      const mandeh = fNum(rec, K_MANDEH) ?? 0
+-      const credit = fNum(rec, K_CREDIT) ?? 0
+-      const data = {
+-        erpCode,
+-        code: fStr(rec, K_CODE),
+-        name: fStr(rec, K_NAME) ?? erpCode,
+-        mandeh,
+-        credit,
+-        nationalId: fStr(rec, K_NATIONAL),
+-        economicId: fStr(rec, K_ECONOMIC),
+-        tel: fStr(rec, K_TEL),
+-        mobile: fStr(rec, K_MOBILE),
+-        city: fStr(rec, K_CITY),
+-        ostan: fStr(rec, K_OSTAN),
+-        mantagheh: fStr(rec, K_MANTAGHEH),
+-        zipCode: fStr(rec, K_ZIP),
+-        address: fStr(rec, K_ADDRESS),
+-        job: fStr(rec, K_JOB),
+-        email: fStr(rec, K_EMAIL),
+-        active: reportedActive,
+-        contentHash: hash,
+-        lastSyncedAt: now,
+-      }
+-      if (!existing) {
+-        await db.erpCustomer.create({ data })
+-        detail.customers.created++
+-      } else if (existing.contentHash !== hash) {
+-        await db.erpCustomer.update({ where: { erpCode }, data })
+-        detail.customers.updated++
+-        if (existing.active && !reportedActive) detail.customers.deactivated++
+-      } else {
+-        // touch lastSyncedAt only (cheap, keeps the app-sync trigger honest)
+-        await db.erpCustomer.update({ where: { erpCode }, data: { lastSyncedAt: now } })
+-        detail.customers.unchanged++
+-      }
+-
+-      // ── MedPad bridge: link by erpCode, else by UNIQUE normalized name,
+-      //    else create an UNASSIGNED MedPad customer (no auto-assignment).
+-      let medpadId = customerErpToMedpadId.get(erpCode) ?? null
+-      if (!medpadId) {
+-        const linked = await db.customer.findFirst({ where: { erpCode }, select: { id: true } })
+-        if (linked) {
+-          medpadId = linked.id
+-        } else if (existing === null || existing.contentHash !== hash || kind !== 'incremental') {
+-          // name-match only for NEW records / non-incremental runs (stable,
+-          // cheap; avoids re-matching the whole book every 3 minutes)
+-          const norm = normalizeName(data.name)
+-          const candidates = byNormName.get(norm)
+-          if (candidates && candidates.length === 1) {
+-            await db.customer.update({ where: { id: candidates[0] }, data: { erpCode } })
+-            medpadId = candidates[0]
++      customersRaw = await client.get('Customer')
++      sec.fetchMs = Date.now() - t0
++      sec.httpStatus = customersRaw.status
++      sec.received = customersRaw.extraction.receivedCount
++      sec.valid = customersRaw.extraction.count
++      sec.pagination = customersRaw.extraction.pagination
++      if (customersRaw.extraction.kind === 'unrecognized') {
++        sec.status = 'error'
++        sec.note = 'ساختار پاسخ شناسایی نشد'
++        addError(unrecognizedResponseError('Customer', customersRaw))
++      }
++    } catch (e) {
++      sec.fetchMs = Date.now() - t0
++      sec.status = 'error'
++      sec.note = 'دریافت لیست مشتریان از سرویس هلو ناموفق بود'
++      const he = e instanceof HolooError ? e : null
++      sec.httpStatus = he?.status ?? null
++      addError(e)
++    }
++    const unlinkedMedpad = await db.customer.findMany({
++      where: { erpCode: null },
++      select: { id: true, name: true },
++    })
++    const byNormName = new Map<string, string[]>()
++    for (const c of unlinkedMedpad) {
++      const n = normalizeName(c.name)
++      const arr = byNormName.get(n) ?? []
++      arr.push(c.id)
++      byNormName.set(n, arr)
++    }
++    if (customersRaw) {
++      const seenKeys = new Set<string>()
++      for (const rec of customersRaw.items) {
++        try {
++          const erpCode = fStr(rec, K_ERP)
++          if (!erpCode) {
++            sec.skipped++
++            continue
++          }
++          if (seenKeys.has(erpCode)) sec.duplicates++
++          seenKeys.add(erpCode)
++          sec.checked++
++          const hash = holooContentHash(rec)
++          const existing = await db.erpCustomer.findUnique({ where: { erpCode } })
++          const now = new Date()
++          // explicit inactivity only (no-delete policy)
++          const reportedActive = (() => {
++            const act = fBool(rec, K_ACTIVE, true)
++            const black = fBool(rec, K_BLACKLIST, false)
++            return act && !black
++          })()
++          const mandeh = fNum(rec, K_MANDEH) ?? 0
++          const credit = fNum(rec, K_CREDIT) ?? 0
++          const data = {
++            erpCode,
++            code: fStr(rec, K_CODE),
++            name: fStr(rec, K_NAME) ?? erpCode,
++            mandeh,
++            credit,
++            nationalId: fStr(rec, K_NATIONAL),
++            economicId: fStr(rec, K_ECONOMIC),
++            tel: fStr(rec, K_TEL),
++            mobile: fStr(rec, K_MOBILE),
++            city: fStr(rec, K_CITY),
++            ostan: fStr(rec, K_OSTAN),
++            mantagheh: fStr(rec, K_MANTAGHEH),
++            zipCode: fStr(rec, K_ZIP),
++            address: fStr(rec, K_ADDRESS),
++            job: fStr(rec, K_JOB),
++            email: fStr(rec, K_EMAIL),
++            active: reportedActive,
++            contentHash: hash,
++            lastSyncedAt: now,
++          }
++          if (!existing) {
++            await db.erpCustomer.create({ data })
++            sec.created++
++          } else if (existing.contentHash !== hash) {
++            await db.erpCustomer.update({ where: { erpCode }, data })
++            sec.updated++
++            if (existing.active && !reportedActive) sec.deactivated++
+           } else {
+-            const created = await createMedpadCustomerFromErp(erpCode, data)
+-            medpadId = created
++            // touch lastSyncedAt only (cheap, keeps the app-sync trigger honest)
++            await db.erpCustomer.update({ where: { erpCode }, data: { lastSyncedAt: now } })
++            sec.unchanged++
+           }
++
++          // ── MedPad bridge: link by erpCode, else by UNIQUE normalized name,
++          //    else create an UNASSIGNED MedPad customer (no auto-assignment).
++          let medpadId = customerErpToMedpadId.get(erpCode) ?? null
++          if (!medpadId) {
++            const linked = await db.customer.findFirst({ where: { erpCode }, select: { id: true } })
++            if (linked) {
++              medpadId = linked.id
++            } else if (existing === null || existing.contentHash !== hash || kind !== 'incremental') {
++              // name-match only for NEW records / non-incremental runs (stable,
++              // cheap; avoids re-matching the whole book every 3 minutes)
++              const norm = normalizeName(data.name)
++              const candidates = byNormName.get(norm)
++              if (candidates && candidates.length === 1) {
++                await db.customer.update({ where: { id: candidates[0] }, data: { erpCode } })
++                medpadId = candidates[0]
++              } else {
++                const created = await createMedpadCustomerFromErp(erpCode, data)
++                medpadId = created
++              }
++            }
++          }
++          if (medpadId) customerErpToMedpadId.set(erpCode, medpadId)
++        } catch (e) {
++          addError(e)
++          sec.recordErrors++
+         }
+       }
+-      if (medpadId) customerErpToMedpadId.set(erpCode, medpadId)
+-    } catch (e) {
+-      addError(e)
+-      detail.customers.skipped++
++      if (sec.status !== 'error') sec.status = sec.recordErrors > 0 ? 'partial' : 'success'
+     }
++    await heartbeat()
+   }
+ 
+   // 2) PRODUCTS (کالا) — full pull, idempotent upsert by ErpCode.
+-  try {
+-    const productsRaw = await client.get('Product')
+-    if (productsRaw.extraction.kind === 'unrecognized') {
+-      addError(unrecognizedResponseError('Product', productsRaw))
++  //    Phase 14: section-scoped failure; never blocks the other sources.
++  {
++    const sec = sections.products
++    const t0 = Date.now()
++    let productsRaw: HolooListResult | null = null
++    try {
++      productsRaw = await client.get('Product')
++      sec.fetchMs = Date.now() - t0
++      sec.httpStatus = productsRaw.status
++      sec.received = productsRaw.extraction.receivedCount
++      sec.valid = productsRaw.extraction.count
++      sec.pagination = productsRaw.extraction.pagination
++      if (productsRaw.extraction.kind === 'unrecognized') {
++        sec.status = 'error'
++        sec.note = 'ساختار پاسخ شناسایی نشد'
++        addError(unrecognizedResponseError('Product', productsRaw))
++      }
++    } catch (e) {
++      sec.fetchMs = Date.now() - t0
++      sec.status = 'error'
++      sec.note = 'دریافت لیست کالاها از سرویس هلو ناموفق بود'
++      const he = e instanceof HolooError ? e : null
++      sec.httpStatus = he?.status ?? null
++      addError(e)
+     }
+-    for (const rec of productsRaw.items) {
+-      try {
+-        const erpCode = fStr(rec, P_ERP)
+-        if (!erpCode) {
+-          detail.products.skipped++
+-          continue
+-        }
+-        detail.products.checked++
+-        const hash = holooContentHash(rec)
+-        const existing = await db.erpProduct.findUnique({ where: { erpCode } })
+-        const reportedActive = fBool(rec, K_ACTIVE, true) && !fBool(rec, K_BLACKLIST, false)
+-        const data = {
+-          erpCode,
+-          code: fStr(rec, P_CODE),
+-          name: fStr(rec, P_NAME) ?? erpCode,
+-          few: fStr(rec, P_FEW),
+-          buyPrice: fNum(rec, P_BUY),
+-          sellPrice: fNum(rec, P_SELL),
+-          group: fStr(rec, P_GROUP),
+-          active: reportedActive,
+-          contentHash: hash,
+-          lastSyncedAt: new Date(),
+-        }
+-        if (!existing) {
+-          await db.erpProduct.create({ data })
+-          detail.products.created++
+-        } else if (existing.contentHash !== hash) {
+-          await db.erpProduct.update({ where: { erpCode }, data })
+-          detail.products.updated++
+-          if (existing.active && !reportedActive) detail.products.deactivated++
+-        } else {
+-          await db.erpProduct.update({ where: { erpCode }, data: { lastSyncedAt: new Date() } })
+-          detail.products.unchanged++
++    if (productsRaw) {
++      const seenKeys = new Set<string>()
++      for (const rec of productsRaw.items) {
++        try {
++          const erpCode = fStr(rec, P_ERP)
++          if (!erpCode) {
++            sec.skipped++
++            continue
++          }
++          if (seenKeys.has(erpCode)) sec.duplicates++
++          seenKeys.add(erpCode)
++          sec.checked++
++          const hash = holooContentHash(rec)
++          const existing = await db.erpProduct.findUnique({ where: { erpCode } })
++          const reportedActive = fBool(rec, K_ACTIVE, true) && !fBool(rec, K_BLACKLIST, false)
++          const data = {
++            erpCode,
++            code: fStr(rec, P_CODE),
++            name: fStr(rec, P_NAME) ?? erpCode,
++            few: fStr(rec, P_FEW),
++            buyPrice: fNum(rec, P_BUY),
++            sellPrice: fNum(rec, P_SELL),
++            group: fStr(rec, P_GROUP),
++            active: reportedActive,
++            contentHash: hash,
++            lastSyncedAt: new Date(),
++          }
++          if (!existing) {
++            await db.erpProduct.create({ data })
++            sec.created++
++          } else if (existing.contentHash !== hash) {
++            await db.erpProduct.update({ where: { erpCode }, data })
++            sec.updated++
++            if (existing.active && !reportedActive) sec.deactivated++
++          } else {
++            await db.erpProduct.update({ where: { erpCode }, data: { lastSyncedAt: new Date() } })
++            sec.unchanged++
++          }
++        } catch (e) {
++          addError(e)
++          sec.recordErrors++
+         }
+-      } catch (e) {
+-        addError(e)
+-        detail.products.skipped++
+       }
++      if (sec.status !== 'error') sec.status = sec.recordErrors > 0 ? 'partial' : 'success'
+     }
+-  } catch (e) {
+-    addError(e)
++    await heartbeat()
+   }
+ 
+   // 3) INVOICES (فاکتور) → Purchase(source='holoo') + one total line in
+   //    PurchaseItem + holooJson provenance (the documented Customer-360
+   //    adapter contract). Line items are NOT claimed until a per-item
+   //    endpoint is proven on the real service (see /test probe).
+-  const customersWithInvoiceChange = new Set<string>()
+-  try {
+-    let invoicesRaw
++  //    Phase 14: section-scoped failure (404 fallback kept); a failed
++  //    invoice section makes the INCREMENTAL payments section not_run.
++  {
++    const sec = sections.invoices
++    const t0 = Date.now()
++    let invoicesRaw: HolooListResult | null = null
+     try {
+-      invoicesRaw = await client.get('Invoice')
+-    } catch (e) {
+-      if (e instanceof HolooError && e.kind === 'http' && e.status === 404) {
+-        invoicesRaw = await client.get('Invoice/Invoice') // documented fallback path
+-      } else {
+-        throw e
+-      }
+-    }
+-    if (invoicesRaw.extraction.kind === 'unrecognized') {
+-      addError(unrecognizedResponseError('Invoice', invoicesRaw))
+-    }
+-    const fallbackDate = new Date()
+-    for (const rec of invoicesRaw.items) {
+       try {
+-        const erpCode = fStr(rec, I_ERP)
+-        const invoiceNo = fStr(rec, I_CODE)
+-        if (!erpCode && !invoiceNo) {
+-          detail.invoices.skipped++
+-          continue
+-        }
+-        const externalId = erpCode ?? `holoo-no-${invoiceNo}`
+-        const custErp = fStr(rec, I_CUST_ERP)
+-        let medpadId = custErp ? customerErpToMedpadId.get(custErp) : null
+-        if (!medpadId && custErp) {
+-          // the link is DURABLE (Customer.erpCode survives the no-delete
+-          // policy) — a Holoo customer that left the active list still has
+-          // its MedPad row; its invoices must keep attaching to it
+-          const linked = await db.customer.findFirst({ where: { erpCode: custErp }, select: { id: true } })
+-          if (linked) {
+-            medpadId = linked.id
+-            customerErpToMedpadId.set(custErp, medpadId)
+-          }
+-        }
+-        if (!medpadId) {
+-          detail.invoices.skipped++
+-          addError(`فاکتور ${invoiceNo ?? externalId} مشتری مرتبط در MedPad ندارد — نادیده گرفته شد`)
+-          continue
+-        }
+-        detail.invoices.checked++
+-        const holooJson = JSON.stringify(rec)
+-        const date = parseHolooDate(fStr(rec, I_DATE) ?? rec['Date'], fallbackDate)
+-        const discount = fNum(rec, I_DISCOUNT)
+-        const total = fNum(rec, I_TOTAL) ?? 0
+-        const existing = await db.purchase.findUnique({ where: { externalId } })
+-        if (
+-          existing &&
+-          existing.source === 'holoo' &&
+-          existing.holooJson === holooJson &&
+-          existing.invoiceNo === (invoiceNo ?? null) &&
+-          existing.discount === discount
+-        ) {
+-          await db.purchase.update({ where: { id: existing.id }, data: { syncedAt: new Date() } })
+-          detail.invoices.unchanged++
+-          continue
+-        }
+-        const upsert = {
+-          customerId: medpadId,
+-          source: 'holoo' as const,
+-          externalId,
+-          invoiceNo,
+-          date,
+-          paymentStatus: null, // unknown until Holoo provides a derivable status — never fabricated
+-          discount,
+-          notes: null,
+-          syncedAt: new Date(),
+-          holooJson,
+-        }
+-        let purchaseId: string
+-        if (existing) {
+-          await db.purchase.update({ where: { id: existing.id }, data: upsert })
+-          purchaseId = existing.id
+-          detail.invoices.updated++
++        invoicesRaw = await client.get('Invoice')
++      } catch (e) {
++        if (e instanceof HolooError && e.kind === 'http' && e.status === 404) {
++          invoicesRaw = await client.get('Invoice/Invoice') // documented fallback path
++          sec.note = 'مسیر جایگزین Invoice/Invoice پاسخ داد'
+         } else {
+-          const created = await db.purchase.create({ data: upsert })
+-          purchaseId = created.id
+-          detail.invoices.created++
+-        }
+-        // one TOTAL line (per the documented adapter contract)
+-        const items = await db.purchaseItem.findMany({ where: { purchaseId } })
+-        const totalItem = {
+-          purchaseId,
+-          productId: null,
+-          productName: 'جمع کل فاکتور هلو',
+-          productCode: null,
+-          brand: null,
+-          qty: 1,
+-          unitPrice: total,
+-          total,
+-          discount: null,
++          throw e
+         }
+-        if (items.length === 1) {
+-          await db.purchaseItem.update({ where: { id: items[0].id }, data: totalItem })
+-        } else if (items.length === 0) {
+-          await db.purchaseItem.create({ data: totalItem })
+-        } else {
+-          // legacy manual items on a holoo-source row should not exist;
+-          // replace with the single total line (source='holoo' rows are
+-          // fully owned by the adapter)
+-          await db.purchaseItem.deleteMany({ where: { purchaseId } })
+-          await db.purchaseItem.create({ data: totalItem })
++      }
++      sec.fetchMs = Date.now() - t0
++      sec.httpStatus = invoicesRaw.status
++      sec.received = invoicesRaw.extraction.receivedCount
++      sec.valid = invoicesRaw.extraction.count
++      sec.pagination = invoicesRaw.extraction.pagination
++      if (invoicesRaw.extraction.kind === 'unrecognized') {
++        sec.status = 'error'
++        sec.note = 'ساختار پاسخ شناسایی نشد'
++        addError(unrecognizedResponseError('Invoice', invoicesRaw))
++      }
++    } catch (e) {
++      sec.fetchMs = Date.now() - t0
++      sec.status = 'error'
++      sec.note = 'دریافت فاکتورها از سرویس هلو ناموفق بود'
++      const he = e instanceof HolooError ? e : null
++      sec.httpStatus = he?.status ?? null
++      addError(e)
++    }
++    if (invoicesRaw) {
++      const fallbackDate = new Date()
++      const seenKeys = new Set<string>()
++      for (const rec of invoicesRaw.items) {
++        try {
++          const erpCode = fStr(rec, I_ERP)
++          const invoiceNo = fStr(rec, I_CODE)
++          if (!erpCode && !invoiceNo) {
++            sec.skipped++
++            continue
++          }
++          const externalId = erpCode ?? `holoo-no-${invoiceNo}`
++          if (seenKeys.has(externalId)) sec.duplicates++
++          seenKeys.add(externalId)
++          const custErp = fStr(rec, I_CUST_ERP)
++          let medpadId = custErp ? customerErpToMedpadId.get(custErp) : null
++          if (!medpadId && custErp) {
++            // the link is DURABLE (Customer.erpCode survives the no-delete
++            // policy) — a Holoo customer that left the active list still has
++            // its MedPad row; its invoices must keep attaching to it
++            const linked = await db.customer.findFirst({ where: { erpCode: custErp }, select: { id: true } })
++            if (linked) {
++              medpadId = linked.id
++              customerErpToMedpadId.set(custErp, medpadId)
++            }
++          }
++          if (!medpadId) {
++            // a linkable MedPad customer is required (source='holoo' rows
++            // must attach to one) — this is a RECORD-LEVEL failure, counted
++            // once in recordErrors (never also in skipped: the record HAS a
++            // usable identity, it just cannot be attached)
++            sec.recordErrors++
++            addError(`فاکتور ${invoiceNo ?? externalId} مشتری مرتبط در MedPad ندارد — نادیده گرفته شد`)
++            continue
++          }
++          sec.checked++
++          const holooJson = JSON.stringify(rec)
++          const date = parseHolooDate(fStr(rec, I_DATE) ?? rec['Date'], fallbackDate)
++          const discount = fNum(rec, I_DISCOUNT)
++          const total = fNum(rec, I_TOTAL) ?? 0
++          const existing = await db.purchase.findUnique({ where: { externalId } })
++          if (
++            existing &&
++            existing.source === 'holoo' &&
++            existing.holooJson === holooJson &&
++            existing.invoiceNo === (invoiceNo ?? null) &&
++            existing.discount === discount
++          ) {
++            await db.purchase.update({ where: { id: existing.id }, data: { syncedAt: new Date() } })
++            sec.unchanged++
++            continue
++          }
++          const upsert = {
++            customerId: medpadId,
++            source: 'holoo' as const,
++            externalId,
++            invoiceNo,
++            date,
++            paymentStatus: null, // unknown until Holoo provides a derivable status — never fabricated
++            discount,
++            notes: null,
++            syncedAt: new Date(),
++            holooJson,
++          }
++          let purchaseId: string
++          if (existing) {
++            await db.purchase.update({ where: { id: existing.id }, data: upsert })
++            purchaseId = existing.id
++            sec.updated++
++          } else {
++            const created = await db.purchase.create({ data: upsert })
++            purchaseId = created.id
++            sec.created++
++          }
++          // one TOTAL line (per the documented adapter contract)
++          const items = await db.purchaseItem.findMany({ where: { purchaseId } })
++          const totalItem = {
++            purchaseId,
++            productId: null,
++            productName: 'جمع کل فاکتور هلو',
++            productCode: null,
++            brand: null,
++            qty: 1,
++            unitPrice: total,
++            total,
++            discount: null,
++          }
++          if (items.length === 1) {
++            await db.purchaseItem.update({ where: { id: items[0].id }, data: totalItem })
++          } else if (items.length === 0) {
++            await db.purchaseItem.create({ data: totalItem })
++          } else {
++            // legacy manual items on a holoo-source row should not exist;
++            // replace with the single total line (source='holoo' rows are
++            // fully owned by the adapter)
++            await db.purchaseItem.deleteMany({ where: { purchaseId } })
++            await db.purchaseItem.create({ data: totalItem })
++          }
++          if (custErp) customersWithInvoiceChange.add(custErp)
++        } catch (e) {
++          addError(e)
++          sec.recordErrors++
+         }
+-        if (custErp) customersWithInvoiceChange.add(custErp)
+-      } catch (e) {
+-        addError(e)
+-        detail.invoices.skipped++
+       }
++      if (sec.status !== 'error') sec.status = sec.recordErrors > 0 ? 'partial' : 'success'
+     }
+-  } catch (e) {
+-    addError(e)
++    await heartbeat()
+   }
+ 
+   // 4) PAYMENTS (Report/GetCustPay — PER-CUSTOMER requests) + balance
+   //    refresh. Initial/manual: every customer (polite pacing, capped).
+-  //    Incremental: only customers whose invoices changed in THIS run.
+-  try {
++  //    Incremental: only customers whose invoices changed in THIS run —
++  //    when the INVOICE SECTION FAILED the change set is unknowable, so
++  //    this section is honestly `not_run` (never a fake success).
++  {
++    const sec = sections.payments
++    if (kind === 'incremental' && sections.invoices.status === 'error') {
++      sec.status = 'not_run'
++      sec.note = 'بخش فاکتورها در این اجرا ناموفق بود — مجموعهٔ تغییرات برای پرداخت‌های افزایشی قابل تعیین نبود'
++      sec.finishedAt = new Date().toISOString()
++      return
++    }
++    const t0 = Date.now()
+     let targets: string[]
++    let capped = false
+     if (kind === 'incremental') {
+       targets = [...customersWithInvoiceChange]
++      if (targets.length === 0) sec.note = 'در این اجرای افزایشی فاکتور تغییری نکرد — پرداختی برای همگام‌سازی نبود'
+     } else {
+-      const all = await db.erpCustomer.findMany({
+-        select: { erpCode: true },
+-        orderBy: { createdAt: 'asc' },
+-        take: PAYMENT_MAX_CUSTOMERS,
+-      })
++      const [all, totalCustomers] = await Promise.all([
++        db.erpCustomer.findMany({
++          select: { erpCode: true },
++          orderBy: { createdAt: 'asc' },
++          take: PAYMENT_MAX_CUSTOMERS,
++        }),
++        db.erpCustomer.count(),
++      ])
+       targets = all.map((a) => a.erpCode)
++      if (totalCustomers > targets.length) {
++        capped = true
++        sec.note = `سقف ${PAYMENT_MAX_CUSTOMERS} مشتری برای پرداخت‌های هر اجرا — ${totalCustomers - targets.length} مشتری در این اجرا بررسی نشد`
++      }
+     }
++    sec.customers = targets.length
+     let unrecognizedPay = 0 // Task 12.1 — unextractable per-customer reports
++    let processed = 0
+     for (const erpCode of targets) {
+       try {
+         // BOTH documented parameter spellings travel with the SAME value — the
+@@ -552,13 +824,22 @@
+         // recognizes yields the same result; the other is ignored.
+         const pay = await client.get('Report/GetCustPay', { customerErpCode: erpCode, code: erpCode })
+         if (pay.extraction.kind === 'unrecognized') unrecognizedPay++
++        if (sec.httpStatus === null) sec.httpStatus = pay.status
++        sec.received = (sec.received ?? 0) + (pay.extraction.receivedCount ?? 0)
++        sec.valid = (sec.valid ?? 0) + pay.extraction.count
++        if (pay.extraction.pagination?.detected && !sec.pagination?.detected) {
++          sec.pagination = pay.extraction.pagination
++        }
+         const fallbackDate = new Date()
+         let latestMandeh: number | null = null
++        const seenKeys = new Set<string>()
+         for (const rec of pay.items) {
+           const code =
+             fStr(rec, PAY_CODE) ??
+             `pay-${holooContentHash({ c: erpCode, r: rec }).slice(0, 16)}`
+-          detail.payments.checked++
++          if (seenKeys.has(code)) sec.duplicates++
++          seenKeys.add(code)
++          sec.checked++
+           const hash = holooContentHash(rec)
+           const price = fNum(rec, PAY_PRICE) ?? 0
+           const date = parseHolooDate(fStr(rec, PAY_DATE) ?? rec['Date'], fallbackDate)
+@@ -579,13 +860,13 @@
+           })
+           if (!existing) {
+             await db.erpPayment.create({ data })
+-            detail.payments.created++
++            sec.created++
+           } else if (existing.contentHash !== hash) {
+             await db.erpPayment.update({ where: { id: existing.id }, data })
+-            detail.payments.updated++
++            sec.updated++
+           } else {
+             await db.erpPayment.update({ where: { id: existing.id }, data: { lastSyncedAt: new Date() } })
+-            detail.payments.unchanged++
++            sec.unchanged++
+           }
+         }
+         // refresh the customer's balance from the report (authoritative)
+@@ -597,17 +878,29 @@
+         }
+       } catch (e) {
+         addError(e)
+-        detail.payments.skipped++
++        sec.fetchErrors = (sec.fetchErrors ?? 0) + 1
+       }
++      processed++
++      if (processed % HEARTBEAT_EVERY === 0) await heartbeat()
+       await new Promise((r) => setTimeout(r, PAYMENT_DELAY_MS))
+     }
++    sec.fetchMs = Date.now() - t0
+     // Task 12.1 — unextractable per-customer reports are ONE honest summary
+     // error (per-report spam would drown the 20-error cap)
+     if (unrecognizedPay > 0) {
+       addError(`پاسخ ${unrecognizedPay} گزارش GetCustPay ساختار شناسایی‌شده نداشت — پرداخت/مانده آن مشتریان این بار استخراج نشد`)
+     }
+-  } catch (e) {
+-    addError(e)
++    // Phase 14 — payments section status: EVERY target report failing means
++    // the section did NOTHING useful (error); SOME failing = partial
++    const failedFetches = (sec.fetchErrors ?? 0) + unrecognizedPay
++    if (targets.length > 0 && failedFetches >= targets.length) {
++      sec.status = 'error'
++      sec.note = 'گزارش پرداخت هیچ‌یک از مشتریان این اجرا دریافت نشد'
++    } else {
++      sec.status = failedFetches > 0 ? 'partial' : 'success'
++    }
++    if (capped) sec.note = sec.note ?? `سقف ${PAYMENT_MAX_CUSTOMERS} مشتری`
++    await heartbeat()
+   }
+ }
+ 
+@@ -659,14 +952,24 @@
+ 
+ // ── the scheduler (no new infrastructure — a timer in this process) ──
+ 
++/** Scheduler tick cadence. Default 30 s (unchanged behavior); the env
++ *  knob exists for the concurrency AUDIT TESTS (a 2 s tick lets the test
++ *  genuinely race the scheduler against a manual run) — production never
++ *  sets it. */
++export function holooTickMs(): number {
++  const n = Number(process.env.MEDPAD_HOLOO_TICK_MS)
++  return Number.isFinite(n) && n >= 1_000 ? n : 30_000
++}
++
+ export function startHolooScheduler(): void {
+   if (guard.__medpadHolooTimer) return
++  const tickMs = holooTickMs()
+   const timer = setInterval(() => {
+     void tick().catch(() => {})
+-  }, 30_000)
++  }, tickMs)
+   if (typeof timer.unref === 'function') timer.unref()
+   guard.__medpadHolooTimer = timer
+-  console.log('[medpad][holoo] scheduler armed (30s tick, config re-read every tick)')
++  console.log(`[medpad][holoo] scheduler armed (${Math.round(tickMs / 1000)}s tick, config re-read every tick)`)
+ }
+ 
+ async function tick(): Promise<void> {
+@@ -691,6 +994,11 @@
+ 
+ // ── status aggregation (for /api/admin/holoo/status) ─────────────────
+ 
++/** Phase 14 — the per-section view handed to the UI. Old rows (pre-v2
++ *  checkpoints) have NO sections: `sections: null` and the UI renders the
++ *  aggregate-only view with an honest «گزارش قدیمی» note. */
++export interface HolooSectionView extends HolooSectionReport {}
++
+ export interface HolooSyncStatusView {
+   running: boolean
+   lastRun: {
+@@ -705,6 +1013,14 @@
+     unchanged: number
+     deactivated: number
+     errors: string[]
++    /** run duration when knowable (v2 checkpoints); null = نامشخص */
++    durationMs: number | null
++    /** TOTAL error count (stored list is capped at 20) */
++    errorsTotal: number | null
++    errorsDropped: number | null
++    /** last liveness signal while the run was in flight */
++    heartbeatAt: string | null
++    sections: Record<string, HolooSectionView> | null
+   } | null
+   /** spec §8: آخرین همگام‌سازی موفق — the most recent status='success' run */
+   lastSuccess: {
+@@ -726,6 +1042,11 @@
+     unchanged: number
+     deactivated: number
+     errors: string[]
++    durationMs: number | null
++    errorsTotal: number | null
++    errorsDropped: number | null
++    heartbeatAt: string | null
++    sections: Record<string, HolooSectionView> | null
+   }>
+   counts: {
+     erpCustomers: number
+@@ -737,6 +1058,74 @@
+   nextRunInSec: number | null
+ }
+ 
++interface ParsedCheckpoint {
++  durationMs: number | null
++  errorsDropped: number | null
++}
++
++/** Defensive checkpoint parse — old/absent/garbage checkpoints never crash
++ *  the status view (Phase 14 stage 5: legacy reports must keep rendering). */
++function parseCheckpoint(s: string | null): ParsedCheckpoint {
++  const empty: ParsedCheckpoint = { durationMs: null, errorsDropped: null }
++  if (!s) return empty
++  try {
++    const v = JSON.parse(s) as {
++      durationMs?: unknown
++      errorsDropped?: unknown
++    }
++    return {
++      durationMs: typeof v.durationMs === 'number' && Number.isFinite(v.durationMs) ? v.durationMs : null,
++      errorsDropped: typeof v.errorsDropped === 'number' ? v.errorsDropped : null,
++    }
++  } catch {
++    return empty
++  }
++}
++
++/** Defensive per-section parse from the dedicated `sections` column.
++ *  Pre-Phase-14 rows have none → null (the UI shows the aggregate view
++ *  with an honest «گزارش قدیمی» note instead of fake zeros). */
++function parseSections(s: string | null): Record<string, HolooSectionView> | null {
++  if (!s) return null
++  try {
++    const v = JSON.parse(s)
++    if (!v || typeof v !== 'object' || Array.isArray(v)) return null
++    const out: Record<string, HolooSectionView> = {}
++    for (const [k, raw] of Object.entries(v as Record<string, unknown>)) {
++      if (!raw || typeof raw !== 'object') continue
++      const r = raw as Partial<HolooSectionView>
++      // only trust well-formed section reports; anything else is skipped
++      if (typeof r.status !== 'string') continue
++      out[k] = {
++        status: (['success', 'partial', 'error', 'not_run'].includes(r.status)
++          ? r.status
++          : 'error') as HolooSectionView['status'],
++        note: typeof r.note === 'string' ? r.note : undefined,
++        startedAt: typeof r.startedAt === 'string' ? r.startedAt : '',
++        finishedAt: typeof r.finishedAt === 'string' ? r.finishedAt : null,
++        fetchMs: typeof r.fetchMs === 'number' ? r.fetchMs : null,
++        httpStatus: typeof r.httpStatus === 'number' ? r.httpStatus : null,
++        received: typeof r.received === 'number' ? r.received : null,
++        valid: typeof r.valid === 'number' ? r.valid : null,
++        duplicates: typeof r.duplicates === 'number' ? r.duplicates : 0,
++        checked: typeof r.checked === 'number' ? r.checked : 0,
++        created: typeof r.created === 'number' ? r.created : 0,
++        updated: typeof r.updated === 'number' ? r.updated : 0,
++        unchanged: typeof r.unchanged === 'number' ? r.unchanged : 0,
++        skipped: typeof r.skipped === 'number' ? r.skipped : 0,
++        recordErrors: typeof r.recordErrors === 'number' ? r.recordErrors : 0,
++        deactivated: typeof r.deactivated === 'number' ? r.deactivated : 0,
++        pagination: r.pagination ?? undefined,
++        customers: typeof r.customers === 'number' ? r.customers : undefined,
++        fetchErrors: typeof r.fetchErrors === 'number' ? r.fetchErrors : undefined,
++      }
++    }
++    return Object.keys(out).length ? out : null
++  } catch {
++    return null
++  }
++}
++
+ export async function holooSyncState(cfg: HolooConfig): Promise<HolooSyncStatusView> {
+   const [lastRow, recent, lastSuccessRow, erpCustomers, erpProducts, erpPayments, holooPurchases, linkedCustomers] = await Promise.all([
+     db.holooSyncLog.findFirst({ orderBy: { startedAt: 'desc' } }),
+@@ -753,19 +1142,27 @@
+     const elapsedSec = Math.floor((Date.now() - lastRow.startedAt.getTime()) / 1000)
+     nextRunInSec = Math.max(0, cfg.syncIntervalMin * 60 - elapsedSec)
+   }
+-  const view = (r: NonNullable<typeof lastRow>) => ({
+-    id: r.id,
+-    kind: r.kind,
+-    status: r.status,
+-    startedAt: r.startedAt.toISOString(),
+-    finishedAt: r.finishedAt ? r.finishedAt.toISOString() : null,
+-    checked: r.checked,
+-    created: r.created,
+-    updated: r.updated,
+-    unchanged: r.unchanged,
+-    deactivated: r.deactivated,
+-    errors: safeParseErrors(r.errors),
+-  })
++  const view = (r: NonNullable<typeof lastRow>) => {
++    const cp = parseCheckpoint(r.checkpoint)
++    return {
++      id: r.id,
++      kind: r.kind,
++      status: r.status,
++      startedAt: r.startedAt.toISOString(),
++      finishedAt: r.finishedAt ? r.finishedAt.toISOString() : null,
++      checked: r.checked,
++      created: r.created,
++      updated: r.updated,
++      unchanged: r.unchanged,
++      deactivated: r.deactivated,
++      errors: safeParseErrors(r.errors),
++      durationMs: cp.durationMs,
++      errorsTotal: r.errorsTotal ?? null,
++      errorsDropped: cp.errorsDropped,
++      heartbeatAt: r.heartbeatAt ? r.heartbeatAt.toISOString() : null,
++      sections: parseSections(r.sections),
++    }
++  }
+   return {
+     running: isSyncRunning(),
+     lastRun: lastRow ? view(lastRow) : null,
+diff -ruN a/src/lib/holoo.ts b/src/lib/holoo.ts
+--- a/src/lib/holoo.ts	2026-11-18 23:51:26.505369844 +0000
++++ b/src/lib/holoo.ts	2026-11-19 00:05:19.738885694 +0000
+@@ -120,12 +120,36 @@
+   raw: unknown
+   /** extracted record list (arrays, wrapped lists, single objects, …) */
+   items: Record<string, unknown>[]
++  /** HTTP status of the response (200 unless an error was thrown) */
++  status: number
+   /** Task 12.1 extraction diagnostics — wrapper, shape, counts. A valid
+    *  empty business list has kind 'array'/'wrapped' with count 0;
+    *  kind 'unrecognized' means NOTHING could be extracted (invalid). */
+   extraction: HolooExtraction
+ }
+ 
++/** Phase 14 (Task 72) — passive pagination evidence. Extracted ONLY from
++ *  what the response itself carries (envelope-level metadata keys); no
++ *  pagination/filter parameter is ever ADDED to a request. Key NAMES are
++ *  recorded as received; numeric/boolean metadata VALUES (counts, page
++ *  numbers, limit, hasMore) are safe to record — never record payloads. */
++export interface HolooPaginationInfo {
++  /** any pagination-ish metadata key was present at envelope level */
++  detected: boolean
++  /** the metadata key NAMES that were present (as received, ≤8) */
++  signals: string[]
++  /** numeric value of a total-ish key (TotalCount/Total/…) when present */
++  totalCount: number | null
++  /** numeric value of a window-ish key (Limit/PageSize/Take/…) when present */
++  limit: number | null
++  /** STRONG evidence only: hasMore=true, or totalCount > received count,
++   *  or page < pageCount — a soft "count == limit" coincidence is NOT
++   *  flagged (recorded in the note instead, never as a certainty) */
++  suspectedIncomplete: boolean
++  /** Persian explanation for the admin (safe — no data values) */
++  note: string
++}
++
+ export interface HolooEndpointProbe {
+   path: string
+   ok: boolean
+@@ -143,6 +167,8 @@
+   firstRecordKeys?: string[]
+   /** classified failure (HolooErrorKind) when ok=false */
+   errorKind?: string
++  /** Phase 14 — passive pagination evidence (present on successful probes) */
++  pagination?: HolooPaginationInfo
+   error?: string
+ }
+ 
+@@ -265,7 +291,7 @@
+     try {
+       const raw = JSON.parse(text)
+       const { items, extraction } = extractHolooItemsDetailed(raw)
+-      return { raw, items, extraction }
++      return { raw, items, status: res.status, extraction }
+     } catch {
+       throw new HolooError('invalid-response', `پاسخ غیر JSON از هلو برای ${path}`)
+     }
+@@ -293,6 +319,7 @@
+         wrapper: extraction.wrapper,
+         count: extraction.count,
+         firstRecordKeys: extraction.firstRecordKeys,
++        pagination: extraction.pagination,
+       }
+     } catch (e) {
+       const he = e instanceof HolooError ? e : null
+@@ -368,16 +395,139 @@
+   shape: string
+   /** extracted item count */
+   count: number
++  /** records PRESENT in the response as received (raw array length —
++   *  includes non-object junk elements; null when the structure is
++   *  unknown so "received" is honestly «نامشخص», never a fake 0) */
++  receivedCount: number | null
+   /** first record's FIELD NAMES (≤12) — never values (privacy) */
+   firstRecordKeys: string[]
+   /** top-level response keys (≤8) — diagnostics for unrecognized bodies */
+   responseKeys: string[]
+   /** wrapper levels unwrapped (bounded 0..3) */
+   depth: number
++  /** Phase 14 — passive pagination evidence from the envelope levels */
++  pagination: HolooPaginationInfo
+ }
+ 
+ const MAX_UNWRAP_DEPTH = 3
+ 
++// ── Phase 14 (Task 72) — passive pagination metadata detection ──────────
++// The envelope objects traversed while unwrapping are scanned for these
++// key patterns (case-insensitive). This is OBSERVATION ONLY — no request
++// ever gains a page/limit/filter parameter from this code, and nothing is
++// recorded beyond key names and numeric/boolean count-like values.
++const PAG_TOTAL_KEYS = /^(totalcount|total|recordcount|rowcount|itemscount|count)$/i
++const PAG_PAGE_KEYS = /^(page|pagenumber|pageindex|currentpage)$/i
++const PAG_PAGECOUNT_KEYS = /^(pagecount|totalpages|pages|lastpage)$/i
++const PAG_WINDOW_KEYS = /^(limit|pagesize|size|take|perpage|top)$/i
++const PAG_OFFSET_KEYS = /^(offset|skip|start|startindex)$/i
++const PAG_MORE_KEYS = /^(hasmore|more|hasnext|hasnextpage|morepages)$/i
++const PAG_LAST_KEYS = /^(islastpage|islast|lastpage)$/i
++
++/** Scan ONE envelope level for pagination metadata (returns nothing for
++ *  record objects — only envelope levels are ever scanned). */
++function scanPaginationKeys(o: Record<string, unknown>): {
++  signals: string[]
++  totalCount: number | null
++  limit: number | null
++  offset: number | null
++  page: number | null
++  pageCount: number | null
++  hasMore: boolean | null
++  isLast: boolean | null
++} {
++  const out = {
++    signals: [] as string[],
++    totalCount: null as number | null,
++    limit: null as number | null,
++    offset: null as number | null,
++    page: null as number | null,
++    pageCount: null as number | null,
++    hasMore: null as boolean | null,
++    isLast: null as boolean | null,
++  }
++  for (const [k, v] of Object.entries(o)) {
++    const num = typeof v === 'number' && Number.isFinite(v) ? v : null
++    if (PAG_TOTAL_KEYS.test(k) && num !== null) {
++      out.signals.push(k)
++      out.totalCount = out.totalCount ?? num
++    } else if (PAG_PAGE_KEYS.test(k) && num !== null) {
++      out.signals.push(k)
++      out.page = out.page ?? num
++    } else if (PAG_PAGECOUNT_KEYS.test(k) && num !== null) {
++      out.signals.push(k)
++      out.pageCount = out.pageCount ?? num
++    } else if (PAG_WINDOW_KEYS.test(k) && num !== null) {
++      out.signals.push(k)
++      out.limit = out.limit ?? num
++    } else if (PAG_OFFSET_KEYS.test(k) && num !== null) {
++      out.signals.push(k)
++      out.offset = out.offset ?? num
++    } else if (PAG_MORE_KEYS.test(k) && typeof v === 'boolean') {
++      out.signals.push(k)
++      out.hasMore = out.hasMore ?? v
++    } else if (PAG_LAST_KEYS.test(k) && typeof v === 'boolean') {
++      out.signals.push(k)
++      out.isLast = out.isLast ?? v
++    }
++  }
++  out.signals = out.signals.slice(0, 8)
++  return out
++}
++
++/** Combine the envelope-level scans into the final pagination verdict.
++ *  `received` = the record count actually present in the response (raw
++ *  array length when known). STRONG evidence only sets
++ *  suspectedIncomplete; a count==limit coincidence is a soft note. */
++function paginationVerdict(
++  scans: ReturnType<typeof scanPaginationKeys>[],
++  received: number | null,
++): HolooPaginationInfo {
++  const signals = [...new Set(scans.flatMap((s) => s.signals))].slice(0, 8)
++  if (signals.length === 0) {
++    return {
++      detected: false,
++      signals: [],
++      totalCount: null,
++      limit: null,
++      suspectedIncomplete: false,
++      note: 'پاسخ هیچ نشانه‌ای از صفحه‌بندی یا محدودیت تعداد ندارد — وضعیت: نامشخص (سرویس متادیتای صفحه/تعداد کل نمی‌فرستد)',
++    }
++  }
++  const totalCount = scans.find((s) => s.totalCount !== null)?.totalCount ?? null
++  const limit = scans.find((s) => s.limit !== null)?.limit ?? null
++  const page = scans.find((s) => s.page !== null)?.page ?? null
++  const pageCount = scans.find((s) => s.pageCount !== null)?.pageCount ?? null
++  const hasMore = scans.find((s) => s.hasMore !== null)?.hasMore ?? null
++  const isLast = scans.find((s) => s.isLast !== null)?.isLast ?? null
++  const reasons: string[] = []
++  if (hasMore === true) reasons.push('سرویس صراحتاً «رکورد بیشتر» اعلام کرده است')
++  if (isLast === false) reasons.push('این صفحه، آخرین صفحه نیست')
++  if (totalCount !== null && received !== null && totalCount > received) {
++    reasons.push(`تعداد کل اعلامی (${totalCount}) از رکوردهای این پاسخ (${received}) بیشتر است`)
++  }
++  if (page !== null && pageCount !== null && page < pageCount) {
++    reasons.push(`صفحهٔ ${page} از ${pageCount} است`)
++  }
++  const soft: string[] = []
++  if (limit !== null && received !== null && limit > 0 && received === limit) {
++    soft.push(`تعداد رکوردهای پاسخ دقیقاً برابر سقف اعلامی (${limit}) است — می‌تواند تصادفی باشد`)
++  }
++  const note =
++    (reasons.length
++      ? `احتمال ناقص بودن پاسخ: ${reasons.join('؛ ')} — ممکن است سرویس صفحه‌بندی داشته باشد و بخشی از رکوردها در این پاسخ نباشد.`
++      : 'متادیتای صفحه‌بندی موجود است اما نشانهٔ قطعی ناقص‌بودن ندارد.') +
++    (soft.length ? ` (${soft.join('؛ ')})` : '')
++  return {
++    detected: true,
++    signals,
++    totalCount,
++    limit,
++    suspectedIncomplete: reasons.length > 0,
++    note,
++  }
++}
++
+ /** Bounded recursive unwrapping with explicit known-wrapper rules.
+  *  Never flattens arbitrary objects; never mistakes an envelope for a
+  *  record (an object that BOTH carries a wrapper-named key and business
+@@ -394,23 +544,40 @@
+     return typeof v
+   }
+   const topKeys = isPlainObject(raw) ? Object.keys(raw).slice(0, 8) : []
++  // Phase 14 — every ENVELOPE level traversed is scanned for pagination
++  // metadata (record objects are never scanned — only the wrappers that
++  // carried the list). `raw` itself counts as the first envelope level.
++  const pagScans: ReturnType<typeof scanPaginationKeys>[] = []
++  if (isPlainObject(raw)) pagScans.push(scanPaginationKeys(raw))
+   let cur: unknown = raw
+   let depth = 0
+   let wrapper: string | null = null
+   let prefix = ''
+ 
+-  const finish = (items: Record<string, unknown>[], kind: HolooExtraction['kind']): { items: Record<string, unknown>[]; extraction: HolooExtraction } => ({
+-    items,
+-    extraction: {
+-      kind,
+-      wrapper,
+-      shape: prefix + shapeOf(cur) + '}'.repeat(depth),
+-      count: items.length,
+-      firstRecordKeys: items[0] ? Object.keys(items[0]).slice(0, 12) : [],
+-      responseKeys: topKeys,
+-      depth,
+-    },
+-  })
++  const finish = (items: Record<string, unknown>[], kind: HolooExtraction['kind']): { items: Record<string, unknown>[]; extraction: HolooExtraction } => {
++    // received = records as present in the response: the RAW array length
++    // for arrays (junk elements included — they were received), 1 for a
++    // single record, null when nothing extractable was recognized.
++    const received: number | null = Array.isArray(cur)
++      ? cur.length
++      : kind === 'single' || kind === 'wrapped'
++        ? items.length || null
++        : null
++    return {
++      items,
++      extraction: {
++        kind,
++        wrapper,
++        shape: prefix + shapeOf(cur) + '}'.repeat(depth),
++        count: items.length,
++        receivedCount: received,
++        firstRecordKeys: items[0] ? Object.keys(items[0]).slice(0, 12) : [],
++        responseKeys: topKeys,
++        depth,
++        pagination: paginationVerdict(pagScans, received),
++      },
++    }
++  }
+   const unrecognized = () => finish([], 'unrecognized')
+ 
+   while (depth < MAX_UNWRAP_DEPTH) {
+@@ -430,6 +597,7 @@
+       wrapper = wrapperKey
+       cur = cur[wrapperKey]
+       depth++
++      if (isPlainObject(cur) && depth < MAX_UNWRAP_DEPTH) pagScans.push(scanPaginationKeys(cur))
+       continue
+     }
+     // no wrapper to follow, or this object is itself a record carrying a

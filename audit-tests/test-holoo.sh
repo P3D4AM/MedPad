@@ -135,6 +135,8 @@ chk "H0 ErpPayment table" \
   "py \"import sqlite3;c=sqlite3.connect('$DB');exit(0 if c.execute(\\\"SELECT name FROM sqlite_master WHERE name='ErpPayment'\\\").fetchone() else 1)\""
 chk "H0 HolooSyncLog table" \
   "py \"import sqlite3;c=sqlite3.connect('$DB');exit(0 if c.execute(\\\"SELECT name FROM sqlite_master WHERE name='HolooSyncLog'\\\").fetchone() else 1)\""
+chk "H0 HolooSyncLog Phase-14 columns (errorsTotal/heartbeatAt/sections)" \
+  "py \"import sqlite3;c=sqlite3.connect('$DB');cols=[r[1] for r in c.execute('PRAGMA table_info(HolooSyncLog)')];exit(0 if all(x in cols for x in ['errorsTotal','heartbeatAt','sections']) else 1)\""
 chk "H0 Customer.erpCode column + unique index" \
   "py \"import sqlite3;c=sqlite3.connect('$DB');cols=[r[1] for r in c.execute('PRAGMA table_info(Customer)')];idx=[r[1] for r in c.execute('PRAGMA index_list(Customer)')];exit(0 if 'erpCode' in cols and 'Customer_erpCode_key' in idx else 1)\""
 chk "H0 Purchase.holooJson column" \
@@ -396,6 +398,8 @@ chk "H7 no token material in API responses" \
   "! grep -rq 'mock-token-' $W/h_set*.json $W/h_test*.json $W/h_status*.json"
 chk "H7 HolooSyncLog error texts carry no credentials" \
   "py \"import sqlite3;c=sqlite3.connect('$DB');rows=[r[0] or '' for r in c.execute('SELECT errors FROM HolooSyncLog')];exit(0 if not any('$HOLOO_PASS' in x or 'mock-token' in x for x in rows) else 1)\""
+chk "H7 the new sections/checkpoint report columns carry no credentials" \
+  "py \"import sqlite3;c=sqlite3.connect('$DB');rows=[(r[0] or '')+(r[1] or '') for r in c.execute('SELECT sections, checkpoint FROM HolooSyncLog')];exit(0 if not any('$HOLOO_PASS' in x or 'mock-token' in x for x in rows) else 1)\""
 chk "H7 stored password is an enc1: envelope (AES-256-GCM, Task 67)" \
   "py \"import sqlite3,base64;c=sqlite3.connect('$DB');v=c.execute(\\\"SELECT value FROM Config WHERE key='holoo.password'\\\").fetchone()[0];exit(0 if v.startswith('enc1:') and v.count(':')==3 and v!=base64.b64encode('$HOLOO_PASS'.encode()).decode() else 1)\""
 chk "H7 raw wire Base64 of the password is NOT stored anywhere in Config" \
@@ -643,6 +647,444 @@ st = json.load(open(p))
 st.pop('modes', None)
 st.pop('rawCustomer', None)
 st.pop('rawGetCustPay', None)
+json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
+PEOF
+
+# ── H11..H16: Phase 14 (Task 72) — reliability & transparency ──────────
+# Helpers: id-based run tracking (robust against the 10-row recentLogs cap
+# and against the DateTime storage format — Prisma SQLite = epoch-ms INT).
+holoo_logs_ids() { python3 -c "import sqlite3;c=sqlite3.connect('$DB');print(','.join(r[0] for r in c.execute('SELECT id FROM HolooSyncLog')))"; }
+# fire a manual sync and wait until a NEW log row (id not in $2) finished
+holoo_wait_new_run() { # $1 outfile, $2 known-ids, $3 expected kind (or 'any')
+  curl -s -b $W/cj -X POST $BASE/api/admin/holoo/sync -o /dev/null
+  local done=1
+  for i in $(seq 1 90); do
+    curl -s -b $W/cj $BASE/api/admin/holoo/status -o "$1.json"
+    if py "import json;d=json.load(open('$1.json'))['sync'];lr=d['lastRun'];known=set(filter(None,'$2'.split(',')));k='$3';exit(0 if lr and lr['id'] not in known and lr['status']!='running' and (k=='any' or lr['kind']==k) else 1)"; then done=0; break; fi
+    sleep 1
+  done
+  [ "$done" = '0' ]
+}
+holoo_wait_idle() { # $1 outfile — wait until no run is in flight
+  local done=1
+  for i in $(seq 1 90); do
+    curl -s -b $W/cj $BASE/api/admin/holoo/status -o "$1"
+    if py "import json;exit(0 if not json.load(open('$1'))['sync']['running'] else 1)"; then done=0; break; fi
+    sleep 1
+  done
+  [ "$done" = '0' ]
+}
+
+# ── H11: section isolation (stage 1 — one source fails, the rest run) ──
+echo "== H11: section isolation =="
+# H11a — Customer list fetch FAILS (HTTP 500); products/invoices/payments
+# must still run, and the prior customer data must SURVIVE (no deletes)
+KNOWN=$(holoo_logs_ids)
+python3 - "$MOCK_STATE" << 'PEOF'
+import json, sys
+p = sys.argv[1]
+st = json.load(open(p))
+st['modes'] = {'Customer': 'fail'}
+json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
+PEOF
+holoo_wait_new_run "$W/h11a_status" "$KNOWN" manual
+chk "H11a Customer HTTP-500 → run PARTIAL (the other sources still ran)" \
+  "py \"import json;d=json.load(open('$W/h11a_status.json'))['sync']['lastRun'];exit(0 if d['status']=='partial' else 1)\""
+chk "H11a customers section = error, httpStatus 500, received = unknown (null)" \
+  "py \"import json;s=json.load(open('$W/h11a_status.json'))['sync']['lastRun']['sections']['customers'];exit(0 if s['status']=='error' and s['httpStatus']==500 and s['received'] is None else 1)\""
+chk "H11a products section SUCCESS (isolated from the customer outage)" \
+  "py \"import json;s=json.load(open('$W/h11a_status.json'))['sync']['lastRun']['sections']['products'];exit(0 if s['status']=='success' and s['checked']>0 else 1)\""
+chk "H11a invoices section SUCCESS" \
+  "py \"import json;s=json.load(open('$W/h11a_status.json'))['sync']['lastRun']['sections']['invoices'];exit(0 if s['status']=='success' and s['checked']>0 else 1)\""
+chk "H11a payments section SUCCESS (targets resolved from the DB bridge)" \
+  "py \"import json;s=json.load(open('$W/h11a_status.json'))['sync']['lastRun']['sections']['payments'];exit(0 if s['status']=='success' else 1)\""
+chk "H11a prior ErpCustomer data SURVIVES the customer-list outage (6, no deletes)" \
+  "py \"import sqlite3;c=sqlite3.connect('$DB');exit(0 if c.execute('SELECT COUNT(*) FROM ErpCustomer').fetchone()[0]==6 else 1)\""
+chk "H11a the outage is a recorded, classified error naming Customer" \
+  "py \"import json;d=json.load(open('$W/h11a_status.json'))['sync']['lastRun'];exit(0 if any('Customer' in e for e in d['errors']) else 1)\""
+
+# H11b — Product list fails; customers/invoices/payments continue
+KNOWN=$(holoo_logs_ids)
+python3 - "$MOCK_STATE" << 'PEOF'
+import json, sys
+p = sys.argv[1]
+st = json.load(open(p))
+st['modes'] = {'Product': 'fail'}
+json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
+PEOF
+holoo_wait_new_run "$W/h11b_status" "$KNOWN" manual
+chk "H11b Product HTTP-500 → run PARTIAL, products section error" \
+  "py \"import json;d=json.load(open('$W/h11b_status.json'))['sync']['lastRun'];exit(0 if d['status']=='partial' and d['sections']['products']['status']=='error' and d['sections']['products']['httpStatus']==500 else 1)\""
+chk "H11b customers + invoices + payments sections SUCCESS" \
+  "py \"import json;s=json.load(open('$W/h11b_status.json'))['sync']['lastRun']['sections'];exit(0 if all(s[k]['status']=='success' for k in ['customers','invoices','payments']) else 1)\""
+chk "H11b prior ErpProduct data SURVIVES (2, no deletes)" \
+  "py \"import sqlite3;c=sqlite3.connect('$DB');exit(0 if c.execute('SELECT COUNT(*) FROM ErpProduct').fetchone()[0]==2 else 1)\""
+
+# H11c — Invoice endpoint fails with 500 (NOT 404 — the fallback path must
+# not trigger); the other sources continue
+KNOWN=$(holoo_logs_ids)
+python3 - "$MOCK_STATE" << 'PEOF'
+import json, sys
+p = sys.argv[1]
+st = json.load(open(p))
+st['modes'] = {'Invoice': 'fail'}
+json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
+PEOF
+holoo_wait_new_run "$W/h11c_status" "$KNOWN" manual
+chk "H11c Invoice HTTP-500 → run PARTIAL, invoices section error (fallback not triggered)" \
+  "py \"import json;d=json.load(open('$W/h11c_status.json'))['sync']['lastRun'];exit(0 if d['status']=='partial' and d['sections']['invoices']['status']=='error' and d['sections']['invoices']['httpStatus']==500 else 1)\""
+chk "H11c customers + products + payments sections SUCCESS" \
+  "py \"import json;s=json.load(open('$W/h11c_status.json'))['sync']['lastRun']['sections'];exit(0 if all(s[k]['status']=='success' for k in ['customers','products','payments']) else 1)\""
+chk "H11c prior holoo Purchase rows SURVIVE the invoice outage" \
+  "py \"import sqlite3;c=sqlite3.connect('$DB');exit(0 if c.execute(\\\"SELECT COUNT(*) FROM Purchase WHERE source='holoo'\\\").fetchone()[0]>=3 else 1)\""
+
+# H11d — ALL FOUR sources fail → overall status = error (no useful work);
+# the payments section with every per-customer report failing is 'error'
+KNOWN=$(holoo_logs_ids)
+python3 - "$MOCK_STATE" << 'PEOF'
+import json, sys
+p = sys.argv[1]
+st = json.load(open(p))
+st['modes'] = {'Customer': 'fail', 'Product': 'fail', 'Invoice': 'fail'}
+st['failPay'] = True
+json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
+PEOF
+holoo_wait_new_run "$W/h11d_status" "$KNOWN" manual
+chk "H11d ALL sources fail → overall status=error (nothing useful done)" \
+  "py \"import json;d=json.load(open('$W/h11d_status.json'))['sync']['lastRun'];exit(0 if d['status']=='error' else 1)\""
+chk "H11d all four section statuses = error" \
+  "py \"import json;s=json.load(open('$W/h11d_status.json'))['sync']['lastRun']['sections'];exit(0 if all(v['status']=='error' for v in s.values()) else 1)\""
+chk "H11d errorsTotal counts every section failure (>= 4)" \
+  "py \"import json;d=json.load(open('$W/h11d_status.json'))['sync']['lastRun'];exit(0 if (d['errorsTotal'] or 0)>=4 else 1)\""
+chk "H11d prior data SURVIVES the total outage (6 customers, 2 products)" \
+  "py \"import sqlite3;c=sqlite3.connect('$DB');exit(0 if c.execute('SELECT COUNT(*) FROM ErpCustomer').fetchone()[0]==6 and c.execute('SELECT COUNT(*) FROM ErpProduct').fetchone()[0]==2 else 1)\""
+
+# H11e — per-customer GetCustPay failure: ONE customer's report fails,
+# the others' payments still sync (isolation inside the payments section)
+KNOWN=$(holoo_logs_ids)
+python3 - "$MOCK_STATE" << 'PEOF'
+import json, sys
+p = sys.argv[1]
+st = json.load(open(p))
+st.pop('modes', None)
+st.pop('failPay', None)
+st['failPayFor'] = ['bBAPcust0002=']
+json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
+PEOF
+holoo_wait_new_run "$W/h11e_status" "$KNOWN" manual
+chk "H11e one customer's report fails → run PARTIAL, payments section partial with fetchErrors=1" \
+  "py \"import json;d=json.load(open('$W/h11e_status.json'))['sync']['lastRun'];exit(0 if d['status']=='partial' and d['sections']['payments']['status']=='partial' and d['sections']['payments']['fetchErrors']==1 else 1)\""
+chk "H11e the OTHER customers' payments still synced (cust0001 balance intact)" \
+  "py \"import sqlite3;c=sqlite3.connect('$DB');exit(0 if c.execute(\\\"SELECT mandeh FROM ErpCustomer WHERE erpCode='bBAPcust0001='\\\").fetchone()[0]==1250000.5 else 1)\""
+chk "H11e the failed customer's error names GetCustPay" \
+  "py \"import json;d=json.load(open('$W/h11e_status.json'))['sync']['lastRun'];exit(0 if any('GetCustPay' in e for e in d['errors']) else 1)\""
+
+# ── H12: record isolation, duplicates, counter consistency (stage 2) ──
+echo "== H12: records, duplicates, counters =="
+# H12a — one poisoned customer response: a key-less record FIRST (skipped),
+# a non-object junk element (received but not valid), a NEW valid record,
+# then a DUPLICATE of it with different content (last wins; one DB row)
+KNOWN=$(holoo_logs_ids)
+python3 - "$MOCK_STATE" << 'PEOF'
+import json, sys
+p = sys.argv[1]
+st = json.load(open(p))
+st.pop('failPayFor', None)
+st['modes'] = {'Customer': 'raw'}
+st['rawCustomer'] = {'Customer': [
+  {'Code': 'x1', 'Name': 'رکورد بدون کلید'},
+  'junk-non-object',
+  {'ErpCode': 'bBAPdup1=', 'Code': 'd1', 'Name': 'تکراری یک', 'Mandeh': 10, 'Credit': 0, 'City': 'مشهد', 'IsActive': True},
+  {'ErpCode': 'bBAPdup1=', 'Code': 'd1', 'Name': 'تکراری یک ویرایش‌شده', 'Mandeh': 20, 'Credit': 0, 'City': 'تهران', 'IsActive': True},
+]}
+json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
+PEOF
+holoo_wait_new_run "$W/h12a_status" "$KNOWN" manual
+chk "H12a honest counters: received=4, valid=3, skipped=1, duplicates=1" \
+  "py \"import json;s=json.load(open('$W/h12a_status.json'))['sync']['lastRun']['sections']['customers'];exit(0 if s['received']==4 and s['valid']==3 and s['skipped']==1 and s['duplicates']==1 else 1)\""
+chk "H12a the VALID record after the junk ones still processed (created=1, updated=1 — last wins)" \
+  "py \"import json;s=json.load(open('$W/h12a_status.json'))['sync']['lastRun']['sections']['customers'];exit(0 if s['created']==1 and s['updated']==1 and s['recordErrors']==0 else 1)\""
+chk "H12a duplicate key → exactly ONE ErpCustomer row with the LAST content" \
+  "py \"import sqlite3;c=sqlite3.connect('$DB');r=c.execute(\\\"SELECT name, mandeh, city FROM ErpCustomer WHERE erpCode='bBAPdup1='\\\").fetchall();exit(0 if len(r)==1 and r[0][0]=='تکراری یک ویرایش‌شده' and r[0][1]==20 and r[0][2]=='تهران' else 1)\""
+chk "H12a run SUCCESS (skips and duplicates are not errors)" \
+  "py \"import json;d=json.load(open('$W/h12a_status.json'))['sync']['lastRun'];exit(0 if d['status']=='success' and len(d['errors'])==0 else 1)\""
+chk "H12a no auto-assignment from the duplicate import (still exactly 1)" \
+  "py \"import sqlite3;c=sqlite3.connect('$DB');exit(0 if c.execute('SELECT COUNT(*) FROM Assignment').fetchone()[0]==1 else 1)\""
+
+# H12b — duplicate payment records in ONE report (same Code, new content):
+# last wins, no duplicate DB rows, counted as duplicates
+KNOWN=$(holoo_logs_ids)
+python3 - "$MOCK_STATE" << 'PEOF'
+import json, sys
+p = sys.argv[1]
+st = json.load(open(p))
+st.pop('modes', None)
+st.pop('rawCustomer', None)
+st['payments']['bBAPcust0001='] = [
+  {'Code': '88001', 'Name': 'دریافت نقدی', 'Price': 100000, 'Date': '1404/08/20', 'Mandeh': 111000},
+  {'Code': '88001', 'Name': 'دریافت نقدی', 'Price': 200000, 'Date': '1404/08/21', 'Mandeh': 222000},
+]
+json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
+PEOF
+holoo_wait_new_run "$W/h12b_status" "$KNOWN" manual
+chk "H12b payments duplicates=1; the report's other records still processed" \
+  "py \"import json;s=json.load(open('$W/h12b_status.json'))['sync']['lastRun']['sections']['payments'];exit(0 if s['duplicates']==1 and s['recordErrors']==0 else 1)\""
+chk "H12b duplicate payment code → ONE row with the LAST content + balance from it" \
+  "py \"import sqlite3;c=sqlite3.connect('$DB');r=c.execute(\\\"SELECT COUNT(*), MAX(price) FROM ErpPayment WHERE customerErpCode='bBAPcust0001=' AND code='88001'\\\").fetchone();m=c.execute(\\\"SELECT mandeh FROM ErpCustomer WHERE erpCode='bBAPcust0001='\\\").fetchone()[0];exit(0 if r[0]==1 and r[1]==200000 and m==222000 else 1)\""
+chk "H12b run SUCCESS" \
+  "py \"import json;d=json.load(open('$W/h12b_status.json'))['sync']['lastRun'];exit(0 if d['status']=='success' else 1)\""
+
+# H12c — counter consistency: every TOTAL equals the sum of its sections
+chk "H12c totals == sum of sections for every counter" \
+  "py \"import json;d=json.load(open('$W/h12b_status.json'))['sync']['lastRun'];secs=list(d['sections'].values());exit(0 if all(d[k]==sum(s[k] for s in secs) for k in ['checked','created','updated','unchanged','deactivated']) else 1)\""
+
+# H12d — record-level isolation inside the invoice section: an invoice for
+# an UNKNOWN customer errors (recordErrors), the FOLLOWING invoices process
+KNOWN=$(holoo_logs_ids)
+python3 - "$MOCK_STATE" << 'PEOF'
+import json, sys
+p = sys.argv[1]
+st = json.load(open(p))
+st['modes'] = {'Invoice': 'raw'}
+st['rawInvoice'] = {'Invoice': [
+  {'ErpCode': 'bBAPinvU1=', 'Code': '99991', 'CustomerErpCode': 'UNKNOWN-CUST-1', 'Date': '1404/08/15', 'SumPrice': 1},
+  {'ErpCode': 'bBAPinvU2=', 'Code': '99992', 'CustomerErpCode': 'bBAPcust0001=', 'Date': '1404/08/16', 'SumPrice': 7000},
+  {'ErpCode': 'bBAPinvU3=', 'Code': '99993', 'CustomerErpCode': 'bBAPcust0002=', 'Date': '1404/08/17', 'SumPrice': 8000},
+]}
+json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
+PEOF
+holoo_wait_new_run "$W/h12d_status" "$KNOWN" manual
+chk "H12d invoices section PARTIAL with recordErrors=1 (the unlinked invoice)" \
+  "py \"import json;s=json.load(open('$W/h12d_status.json'))['sync']['lastRun']['sections']['invoices'];exit(0 if s['status']=='partial' and s['recordErrors']==1 and s['skipped']==0 else 1)\""
+chk "H12d the invoices AFTER the failing one still processed (created=2)" \
+  "py \"import json;s=json.load(open('$W/h12d_status.json'))['sync']['lastRun']['sections']['invoices'];exit(0 if s['created']==2 else 1)\""
+chk "H12d the unlinked-invoice error is recorded (names invoice 99991)" \
+  "py \"import json;d=json.load(open('$W/h12d_status.json'))['sync']['lastRun'];exit(0 if any('99991' in e for e in d['errors']) else 1)\""
+chk "H12d no Purchase row was created for the unlinked invoice" \
+  "py \"import sqlite3;c=sqlite3.connect('$DB');exit(0 if c.execute(\\\"SELECT COUNT(*) FROM Purchase WHERE externalId='bBAPinvU1='\\\").fetchone()[0]==0 and c.execute(\\\"SELECT COUNT(*) FROM Purchase WHERE externalId='bBAPinvU3='\\\").fetchone()[0]==1 else 1)\""
+
+# ── H13: pagination detection (stage 3 — passive evidence only) ────────
+echo "== H13: pagination detection =="
+# H13a — the response carries pagination metadata (TotalCount/Page/…)
+KNOWN=$(holoo_logs_ids)
+python3 - "$MOCK_STATE" << 'PEOF'
+import json, sys
+p = sys.argv[1]
+st = json.load(open(p))
+st.pop('modes', None)
+st.pop('rawInvoice', None)
+st['modes'] = {'Customer': 'paginated'}
+st['pagTotal'] = 50
+json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
+PEOF
+curl -s -b $W/cj -X POST $BASE/api/admin/holoo/test -o $W/h13a_test.json
+chk "H13a probe sees the pagination metadata (TotalCount=50 > received=2)" \
+  "py \"import json;d=json.load(open('$W/h13a_test.json'));e=[x for x in d['endpoints'] if x['path']=='Customer'][0];pg=e.get('pagination') or {};exit(0 if pg.get('detected') and pg.get('totalCount')==50 and pg.get('suspectedIncomplete') else 1)\""
+holoo_wait_new_run "$W/h13a_status" "$KNOWN" manual
+chk "H13a sync section records suspectedIncomplete + the Persian warning" \
+  "py \"import json;pg=json.load(open('$W/h13a_status.json'))['sync']['lastRun']['sections']['customers'].get('pagination') or {};exit(0 if pg.get('suspectedIncomplete') and 'ناقص' in pg.get('note','') else 1)\""
+chk "H13a pagination is a WARNING, not an error (run stays success)" \
+  "py \"import json;d=json.load(open('$W/h13a_status.json'))['sync']['lastRun'];exit(0 if d['status']=='success' else 1)\""
+
+# H13b — a capped/truncated response with a TotalCount proving more exists
+KNOWN=$(holoo_logs_ids)
+python3 - "$MOCK_STATE" << 'PEOF'
+import json, sys
+p = sys.argv[1]
+st = json.load(open(p))
+st['modes'] = {'Customer': 'capped'}
+st['cap'] = 1
+json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
+PEOF
+holoo_wait_new_run "$W/h13b_status" "$KNOWN" manual
+chk "H13b capped response: received=1, TotalCount=2 → suspectedIncomplete" \
+  "py \"import json;s=json.load(open('$W/h13b_status.json'))['sync']['lastRun']['sections']['customers'];pg=s.get('pagination') or {};exit(0 if s['received']==1 and pg.get('totalCount')==2 and pg.get('suspectedIncomplete') else 1)\""
+chk "H13b truncation NEVER deletes the unsent records (7 ErpCustomers kept)" \
+  "py \"import sqlite3;c=sqlite3.connect('$DB');exit(0 if c.execute('SELECT COUNT(*) FROM ErpCustomer').fetchone()[0]==7 else 1)\""
+
+# H13c — no metadata at all → honestly «نامشخص» (never a fabricated verdict)
+KNOWN=$(holoo_logs_ids)
+python3 - "$MOCK_STATE" << 'PEOF'
+import json, sys
+p = sys.argv[1]
+st = json.load(open(p))
+st.pop('modes', None)
+st.pop('pagTotal', None)
+st.pop('cap', None)
+json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
+PEOF
+holoo_wait_new_run "$W/h13c_status" "$KNOWN" manual
+chk "H13c no pagination metadata → detected=false + وضعیت «نامشخص»" \
+  "py \"import json;pg=json.load(open('$W/h13c_status.json'))['sync']['lastRun']['sections']['customers'].get('pagination') or {};exit(0 if pg.get('detected') is False and 'نامشخص' in pg.get('note','') else 1)\""
+
+# ── H14: concurrency hardening (stage 4 — real simultaneous requests) ──
+echo "== H14: concurrency =="
+# H14a — two manual syncs fired in the SAME instant → exactly one 200 + one 409
+python3 - "$MOCK_STATE" << 'PEOF'
+import json, sys
+p = sys.argv[1]
+st = json.load(open(p))
+st['slow'] = {'Customer': 2500}
+json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
+PEOF
+curl -s -b $W/cj -o /dev/null -w '%{http_code}' -X POST $BASE/api/admin/holoo/sync > $W/h14a_c1 &
+CP1=$!
+curl -s -b $W/cj -o /dev/null -w '%{http_code}' -X POST $BASE/api/admin/holoo/sync > $W/h14a_c2 &
+CP2=$!
+wait $CP1; wait $CP2
+C1=$(cat $W/h14a_c1); C2=$(cat $W/h14a_c2)
+chk "H14a two SIMULTANEOUS manual syncs → exactly one 200 + one 409 busy" \
+  "py \"exit(0 if {'$C1','$C2'}=={'200','409'} else 1)\""
+holoo_wait_idle "$W/h14a_idle.json"
+chk "H14a the winning run completed (success)" \
+  "py \"import json;d=json.load(open('$W/h14a_idle.json'))['sync']['lastRun'];exit(0 if d['status']=='success' else 1)\""
+
+# H14b — a rapid burst of 5 → exactly one starts, four get busy
+# (NOTE: `wait` is given EXPLICIT pids — a bare `wait` would also wait on
+# the ever-running mock process and deadlock the suite)
+rm -f $W/h14b_codes
+H14B_PIDS=""
+for i in 1 2 3 4 5; do
+  curl -s -b $W/cj -o /dev/null -w '%{http_code}\n' -X POST $BASE/api/admin/holoo/sync >> $W/h14b_codes &
+  H14B_PIDS="$H14B_PIDS $!"
+done
+for p in $H14B_PIDS; do wait "$p"; done
+chk "H14b burst of 5 rapid syncs → exactly ONE 200 and FOUR 409" \
+  "py \"codes=open('$W/h14b_codes').read().split();exit(0 if codes.count('200')==1 and codes.count('409')==4 else 1)\""
+holoo_wait_idle "$W/h14b_idle.json"
+
+# H14c — scheduler vs manual: the panel is restarted with a 2-second
+# diagnostic tick (MEDPAD_HOLOO_TICK_MS — test-only knob), every log row is
+# aged past the interval gate, and a SLOW manual run is fired. Ticks keep
+# hammering the engine while the run is in flight — mutual exclusion means
+# EXACTLY ONE new log row may appear in the window, whoever started it.
+(cd $W/inst && node server-manager.mjs stop --quiet > /dev/null 2>&1)
+(cd $W/inst && MEDPAD_HOLOO_TICK_MS=2000 node server-manager.mjs start --no-open > $W/boot_h14c.log 2>&1)
+for i in $(seq 1 40); do curl -s -o /dev/null "$BASE/" && break; sleep 1; done
+chk "H14c panel restarted with the 2s diagnostic tick" \
+  "curl -s -o /dev/null -w '%{http_code}' $BASE/ | grep -q 200"
+python3 - "$DB" << 'PEOF'
+import sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+# Prisma SQLite DateTime = epoch-ms INTEGER (verified empirically) — age 2h
+c.execute("UPDATE HolooSyncLog SET startedAt = startedAt - 7200000")
+c.commit()
+PEOF
+curl -s -b $W/cj -X PUT $BASE/api/admin/holoo/settings -H 'content-type: application/json' \
+  -d '{"enabled":true,"syncIntervalMin":1}' > /dev/null
+python3 - "$MOCK_STATE" << 'PEOF'
+import json, sys
+p = sys.argv[1]
+st = json.load(open(p))
+st['slow'] = {'Customer': 3000, 'Product': 2000, 'Invoice': 2000, 'GetCustPay': 400}
+json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
+PEOF
+KNOWN=$(holoo_logs_ids)
+curl -s -b $W/cj -X POST $BASE/api/admin/holoo/sync -o /dev/null
+H14C_DONE=1
+for i in $(seq 1 90); do
+  curl -s -b $W/cj $BASE/api/admin/holoo/status -o $W/h14c_status.json
+  if py "import json;d=json.load(open('$W/h14c_status.json'))['sync'];lr=d['lastRun'];known=set(filter(None,'$KNOWN'.split(',')));exit(0 if lr and lr['id'] not in known and lr['status']!='running' else 1)"; then H14C_DONE=0; break; fi
+  sleep 1
+done
+chk "H14c a run started and finished in the race window" "[ '$H14C_DONE' = '0' ]"
+chk "H14c EXACTLY ONE sync row exists after the window (ticks locked out)" \
+  "py \"import sqlite3;c=sqlite3.connect('$DB');known=set(filter(None,'$KNOWN'.split(',')));n=[r[0] for r in c.execute('SELECT id FROM HolooSyncLog') if r[0] not in known];exit(0 if len(n)==1 else 1)\""
+chk "H14c that run completed successfully" \
+  "py \"import json;d=json.load(open('$W/h14c_status.json'))['sync']['lastRun'];exit(0 if d['status']=='success' else 1)\""
+# cleanup: disable the scheduler + drop the slow fixture
+curl -s -b $W/cj -X PUT $BASE/api/admin/holoo/settings -H 'content-type: application/json' \
+  -d '{"enabled":false}' > /dev/null
+python3 - "$MOCK_STATE" << 'PEOF'
+import json, sys
+p = sys.argv[1]
+st = json.load(open(p))
+st.pop('slow', None)
+json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
+PEOF
+
+# H14d — the lock is FREE after every failure mode; a fresh run starts
+KNOWN=$(holoo_logs_ids)
+holoo_wait_new_run "$W/h14d_status" "$KNOWN" manual
+chk "H14d a fresh manual sync runs to completion right after the race window" \
+  "py \"import json;d=json.load(open('$W/h14d_status.json'))['sync']['lastRun'];exit(0 if d['status']=='success' else 1)\""
+
+# ── H15: legacy log compatibility (stage 5 — old reports keep rendering) ─
+echo "== H15: legacy logs =="
+python3 - "$DB" << 'PEOF'
+import sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+mx = c.execute("SELECT MAX(startedAt) FROM HolooSyncLog").fetchone()[0] or 0
+base = int(mx) if isinstance(mx, (int, float)) else 0
+# three legacy rows: (A) phase-12-style checkpoint WITHOUT sections, (B)
+# NULL checkpoint/sections, (C) GARBAGE in both. startedAt = epoch-ms INT
+# (the verified Prisma SQLite DateTime storage) so the ORM reads them back.
+c.execute(
+  "INSERT INTO HolooSyncLog (id, kind, status, startedAt, finishedAt, checked, created, updated, unchanged, deactivated, errors, checkpoint) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+  ('legacy-row-a', 'manual', 'partial', base + 1000, base + 4000, 3, 0, 0, 3, 0,
+   '["[http] خطای قدیمی"]',
+   '{"completedAt":"2026-01-01T00:00:00.000Z","durationMs":3000,"detail":{"customers":{"checked":3,"created":0,"updated":0,"unchanged":3,"deactivated":0,"skipped":0}}}'))
+c.execute(
+  "INSERT INTO HolooSyncLog (id, kind, status, startedAt, finishedAt, checked, created, updated, unchanged, deactivated, errors, checkpoint) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+  ('legacy-row-b', 'incremental', 'error', base + 2000, base + 2500, 0, 0, 0, 0, 0, None, None))
+c.execute(
+  "INSERT INTO HolooSyncLog (id, kind, status, startedAt, finishedAt, checked, created, updated, unchanged, deactivated, errors, sections, checkpoint) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+  ('legacy-row-c', 'manual', 'partial', base + 3000, base + 3500, 1, 0, 0, 1, 0,
+   '["[unknown] قدیمی"]', '###not json###', '{broken json'))
+c.commit()
+PEOF
+CODE=$(curl -s -b $W/cj -o $W/h15_status.json -w '%{http_code}' $BASE/api/admin/holoo/status)
+chk "H15 status API stays healthy with legacy/garbage rows (200)" "[ '$CODE' = '200' ]"
+chk "H15 the garbage-checkpoint row renders as lastRun WITHOUT sections (no crash, no fake zeros)" \
+  "py \"import json;d=json.load(open('$W/h15_status.json'))['sync']['lastRun'];exit(0 if d['id']=='legacy-row-c' and d['sections'] is None and d['durationMs'] is None else 1)\""
+chk "H15 all three legacy rows appear in recentLogs" \
+  "py \"import json;d=json.load(open('$W/h15_status.json'))['sync'];ids=[l['id'] for l in d['recentLogs']];exit(0 if all(x in ids for x in ['legacy-row-a','legacy-row-b','legacy-row-c']) else 1)\""
+chk "H15 the legacy phase-12 row still shows its aggregate counters" \
+  "py \"import json;d=json.load(open('$W/h15_status.json'))['sync'];a=[l for l in d['recentLogs'] if l['id']=='legacy-row-a'][0];exit(0 if a['checked']==3 and a['unchanged']==3 else 1)\""
+chk "H15 lastSuccess untouched by the legacy inserts (still a real run)" \
+  "py \"import json;d=json.load(open('$W/h15_status.json'))['sync'];exit(0 if d['lastSuccess'] and d['lastSuccess']['checked']>0 else 1)\""
+# age the legacy rows BACK by 1h — they must stay in recentLogs (already
+# verified above) but NEVER shadow the lastRun of the LATER sections: H15's
+# own checks take ~2s, so a +3s future stamp would outrun the H16 sync's
+# startedAt and steal the lastRun slot.
+python3 - "$DB" << 'PEOF'
+import sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+c.execute("UPDATE HolooSyncLog SET startedAt = startedAt - 3600000 WHERE id LIKE 'legacy-row-%'")
+c.commit()
+PEOF
+
+# ── H16: honest error accounting (cap 20 + totals, stage 1/2) ──────────
+echo "== H16: error accounting =="
+KNOWN=$(holoo_logs_ids)
+python3 - "$MOCK_STATE" << 'PEOF'
+import json, sys
+p = sys.argv[1]
+st = json.load(open(p))
+inv = [{'ErpCode': f'bBAPcap{i:02d}=', 'Code': f'777{i:02d}', 'CustomerErpCode': f'UNKNOWN-{i}', 'Date': '1404/08/15', 'SumPrice': i} for i in range(1, 26)]
+inv.append({'ErpCode': 'bBAPcapOK=', 'Code': '77799', 'CustomerErpCode': 'bBAPcust0001=', 'Date': '1404/08/18', 'SumPrice': 9000})
+st['modes'] = {'Invoice': 'raw'}
+st['rawInvoice'] = {'Invoice': inv}
+json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
+PEOF
+holoo_wait_new_run "$W/h16_status" "$KNOWN" manual
+chk "H16 25 record errors → errorsTotal=25 (all counted, none swallowed)" \
+  "py \"import json;d=json.load(open('$W/h16_status.json'))['sync']['lastRun'];exit(0 if d['errorsTotal']==25 else 1)\""
+chk "H16 the stored list is capped at 20 and 5 dropped are visible" \
+  "py \"import json;d=json.load(open('$W/h16_status.json'))['sync']['lastRun'];exit(0 if len(d['errors'])==20 and d['errorsDropped']==5 else 1)\""
+chk "H16 invoices section: recordErrors=25 and the 26th (valid) invoice still created" \
+  "py \"import json;s=json.load(open('$W/h16_status.json'))['sync']['lastRun']['sections']['invoices'];exit(0 if s['recordErrors']==25 and s['created']==1 else 1)\""
+chk "H16 the valid invoice really landed (Purchase row exists)" \
+  "py \"import sqlite3;c=sqlite3.connect('$DB');exit(0 if c.execute(\\\"SELECT COUNT(*) FROM Purchase WHERE externalId='bBAPcapOK='\\\").fetchone()[0]==1 else 1)\""
+chk "H16 run PARTIAL (errors present but useful work done)" \
+  "py \"import json;d=json.load(open('$W/h16_status.json'))['sync']['lastRun'];exit(0 if d['status']=='partial' else 1)\""
+# restore the default mock state for any later section
+python3 - "$MOCK_STATE" << 'PEOF'
+import json, sys
+p = sys.argv[1]
+st = json.load(open(p))
+st.pop('modes', None)
+st.pop('rawInvoice', None)
 json.dump(st, open(p, 'w'), ensure_ascii=False, indent=1)
 PEOF
 

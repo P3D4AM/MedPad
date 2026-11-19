@@ -73,11 +73,29 @@
 #           assignment routes, the audit targetId null for bulk operations,
 #           the stale Employee._count type (tokens), the proximity typeof
 #           guards — and `typescript.ignoreBuildErrors` REMOVED from
-#           next.config.ts so `next build` enforces types again — last)
+#           next.config.ts so `next build` enforces types again) →
+#           phase15-holoo-reliability (Task 72 / roadmap Phase 14, Nov 2026:
+#           Holoo sync RELIABILITY & TRANSPARENCY — the four sync sources
+#           (customers/products/invoices/payments) are fully ISOLATED (a
+#           failing fetch never aborts the other sources), every run now
+#           records an independent per-source report (status success/partial/
+#           error/not_run, received/valid/duplicates/checked/created/updated/
+#           unchanged/skipped/recordErrors/deactivated, fetchMs, httpStatus)
+#           in a new HolooSyncLog.sections column, the overall status is
+#           DERIVED from the section statuses, error accounting is honest
+#           (errorsTotal + 20-cap + dropped count), a heartbeatAt column
+#           gives liveness evidence, PASSIVE pagination metadata detection
+#           (suspectedIncomplete — never any new request parameter), the
+#           run guard is claimed SYNCHRONOUSLY (check-and-set atomic, race
+#           closed at BOTH the engine and the manual route), a diagnostic
+#           tick knob MEDPAD_HOLOO_TICK_MS (default 30s) makes the
+#           scheduler-vs-manual race actually testable, and the Holoo tab
+#           renders the per-source table + duration + pagination warnings
+#           with legacy-report tolerance — last)
 #
 # This script performs the WHOLE reproducible pipeline and verifies it:
 #   1. fresh extraction of the base source (git archive)
-#   2. apply the 24-patch chain (fails hard on ANY .rej)
+#   2. apply the 25-patch chain (fails hard on ANY .rej)
 #   3. npm install --no-audit --no-fund        (tested with npm 11.19.1 / Node 24.x)
 #   4. DATABASE_URL=file:./dev.db  npx prisma generate   (3 query engines)
 #   5. DATABASE_URL=file:./build-time.db  npm run build  (next 16.4.3, standalone)
@@ -85,7 +103,7 @@
 #      with `cp -rL` — dereferencing symlinks is REQUIRED (committed bundle has
 #      zero symlinks; raw Next output has @prisma/bcryptjs symlinks in
 #      .next/node_modules — lesson from 5-C)
-#   7. run 63 hardening checks against the assembled bundle
+#   7. run 71 hardening checks against the assembled bundle
 #   8. compare the result with the committed bundle (app/panel/.next),
 #      BUILD_ID-normalized, and report equivalence
 #   9. typecheck double-report (since phase 14 the build itself enforces
@@ -109,7 +127,7 @@ set -euo pipefail
 REPO_ROOT="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
 WORK="${2:-$REPO_ROOT/panel-build}"
 BASE_REF="bd9c80b:medpad-full-1.9/inst-stage/panel-src"
-CHAIN="phase1-task1 phase2-remediation phase2-task1 phase2-task2 phase2-dev2-fixes phase2-package4 phase2-madrep phase2-package6 phase2-package7 phase2-package9 phase2-package5 phase2-package13 phase3-package14 phase4-package15 phase5-package16 phase6-customer360 phase7-central-settings phase8-owner-fixes phase9-holoo phase10-holoo-hardening phase11-holoo-secret-encryption phase12-holoo-extraction phase13-geo-mashhad phase14-strict-types"
+CHAIN="phase1-task1 phase2-remediation phase2-task1 phase2-task2 phase2-dev2-fixes phase2-package4 phase2-madrep phase2-package6 phase2-package7 phase2-package9 phase2-package5 phase2-package13 phase3-package14 phase4-package15 phase5-package16 phase6-customer360 phase7-central-settings phase8-owner-fixes phase9-holoo phase10-holoo-hardening phase11-holoo-secret-encryption phase12-holoo-extraction phase13-geo-mashhad phase14-strict-types phase15-holoo-reliability"
 
 # RESUME mode (sandbox convenience): with MEDPAD_BUILD_RESUME=1 an existing
 # $WORK/src with node_modules (from an interrupted run — e.g. a sandbox that
@@ -138,7 +156,7 @@ fi
 if [ "$RESUME" = "1" ]; then
   say "2/9 RESUME — patch chain already applied (verified by the marker below)"
 else
-  say "2/9 applying 24-patch chain"
+  say "2/9 applying 25-patch chain"
   cd "$WORK/src"
   for p in $CHAIN; do
     patchfile="$REPO_ROOT/patches/panel-src-$p.patch"
@@ -168,8 +186,11 @@ fi
 # phase 10 markers (Holoo hardening — dual GetCustPay param + partial status)
 grep -q "customerErpCode: erpCode, code: erpCode" "$WORK/src/src/lib/holoo-sync.ts" \
   || die "phase10 missing: GetCustPay dual parameter"
-grep -q "errors.length ? 'partial' : 'success'" "$WORK/src/src/lib/holoo-sync.ts" \
-  || die "phase10 missing: partial sync status"
+# phase 10's partial-status vocabulary now lives in the Phase-14 section
+# derivation (deriveRunStatus — success/partial/error from the per-source
+# statuses; the marker follows the feature, not the old line)
+grep -q "deriveRunStatus" "$WORK/src/src/lib/holoo-sync.ts" \
+  || die "phase10/15 missing: derived (partial) sync status"
 grep -q "lastSuccess" "$WORK/src/src/components/panel/HolooTab.tsx" \
   || die "phase10 missing: lastSuccess in the tab"
 # phase 11 markers (Task 67 — AES-256-GCM secret encryption)
@@ -212,6 +233,27 @@ grep -q "targetId?: string | null" "$WORK/src/src/lib/audit.ts" \
   || die "phase14 missing: audit targetId accepts null (bulk)"
 grep -q "tokens: number }" "$WORK/src/src/lib/types.ts" \
   || die "phase14 missing: Employee._count tokens"
+# phase 15 markers (Task 72 / roadmap Phase 14 — Holoo sync reliability)
+grep -q "deriveRunStatus" "$WORK/src/src/lib/holoo-sync.ts" \
+  || die "phase15 missing: section-derived run status"
+grep -q "recordErrors" "$WORK/src/src/lib/holoo-sync.ts" \
+  || die "phase15 missing: per-record error accounting"
+grep -q "heartbeatAt" "$WORK/src/src/lib/holoo-sync.ts" \
+  || die "phase15 missing: run heartbeat"
+grep -q "MEDPAD_HOLOO_TICK_MS" "$WORK/src/src/lib/holoo-sync.ts" \
+  || die "phase15 missing: diagnostic tick knob"
+grep -q "suspectedIncomplete" "$WORK/src/src/lib/holoo.ts" \
+  || die "phase15 missing: pagination detection in the client"
+grep -q "HOLOO_SYNC_LOG_PHASE14_DDL" "$WORK/src/src/instrumentation.ts" \
+  || die "phase15 missing: boot ALTERs for the new HolooSyncLog columns"
+grep -q "errorsTotal" "$WORK/src/prisma/schema.prisma" \
+  || die "phase15 missing: schema columns on HolooSyncLog"
+grep -q "isSyncRunning" "$WORK/src/src/app/api/admin/holoo/sync/route.ts" \
+  || die "phase15 missing: atomic busy check in the manual route"
+grep -q "نتیجهٔ هر منبع در آخرین اجرا" "$WORK/src/src/components/panel/HolooTab.tsx" \
+  || die "phase15 missing: per-source table in the tab"
+grep -q "گزارش قدیمی" "$WORK/src/src/components/panel/HolooTab.tsx" \
+  || die "phase15 missing: legacy-report tolerance in the tab"
 cd "$WORK/src"
 
 # ── 3. npm install ──────────────────────────────────────────────────────────
@@ -345,7 +387,21 @@ chk "geo gate text in server"      "grep -rq 'ثبت موقت در انتظار 
 # Next writes the key explicitly with its default value — what matters is
 # that the value is never `true`)
 chk "shipped config enforces type checks" "! grep -qE 'ignoreBuildErrors[^:]*: *true' .next/required-server-files.json"
-echo "   hardening: PASS=$P FAIL=$F / 63"
+# phase 15 (Task 72 / roadmap Phase 14 — Holoo sync reliability): the
+# section-derived engine, honest error accounting, heartbeat and passive
+# pagination detection must ship in the server; the per-source table +
+# legacy tolerance in the client chunks. (Markers use string/property
+# literals — minifier-safe: local FUNCTION names like deriveRunStatus do
+# NOT survive bundling.)
+chk "holoo section engine in server"   "grep -rq 'errorsDropped' .next/server --include='*.js'"
+chk "holoo per-record error accounting" "grep -rq 'recordErrors' .next/server --include='*.js'"
+chk "holoo run heartbeat in server"    "grep -rq 'heartbeatAt' .next/server --include='*.js'"
+chk "holoo pagination detection"       "grep -rq 'suspectedIncomplete' .next/server --include='*.js'"
+chk "holoo not_run section status"     "grep -rq 'not_run' .next/server --include='*.js'"
+chk "holoo received/valid distinction" "grep -rq 'receivedCount' .next/server --include='*.js'"
+chk "holoo tab per-source table"       "grep -rq 'نتیجهٔ هر منبع در آخرین اجرا' --include='*.js' ."
+chk "holoo tab legacy tolerance"       "grep -rq 'گزارش قدیمی' --include='*.js' ."
+echo "   hardening: PASS=$P FAIL=$F / 71"
 LAST_HARDENING="$P/$F PASS"
 [ "$F" -eq 0 ] || die "hardening checks failed"
 

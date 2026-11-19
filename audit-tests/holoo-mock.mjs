@@ -17,7 +17,7 @@
 //   state.failPay=true → 500 on GetCustPay (exercises the spec-§9 PARTIAL
 //        run: healthy sections keep their data, the run is labeled ناقص)
 //   401 (JSON) when the Authorization header is missing/unknown — exercising
-//   the client's ONE auto re-login.
+//        the client's ONE auto re-login.
 //
 // Task 12 (Nov 2026): by default every list is served inside the EXACT
 // business wrapper the LIVE service was observed using (owner field test):
@@ -27,14 +27,30 @@
 // mock tests passed while the live sync imported ZERO records.)
 //
 // Per-endpoint "modes" in state.json drive the extraction edge cases
-// (test-holoo.sh H10):
-//   "modes": { "Customer": "real|bare|raw|nonjson", "Product": ...,
-//              "GetCustPay": ... }
-//   real    - the observed wrapped shape (default)
-//   bare    - a direct JSON array (legacy tolerance)
-//   raw     - serve state.rawCustomer / rawProduct / rawGetCustPay AS-IS
-//             (arbitrary envelopes: junk, nested, single-record, empty...)
-//   nonjson - an HTML body (invalid-response classification)
+// (test-holoo.sh H10 + the Phase 14 sections H11-H16):
+//   "modes": { "Customer": "real|bare|raw|nonjson|fail|paginated|capped", ... }
+//   real      - the observed wrapped shape (default)
+//   bare      - a direct JSON array (legacy tolerance)
+//   raw       - serve state.rawCustomer / rawProduct / rawGetCustPay AS-IS
+//               (arbitrary envelopes: junk, nested, single-record, empty,
+//                duplicates, poison records — fully hand-crafted)
+//   nonjson   - an HTML body (invalid-response classification)
+//   fail      - HTTP 500 (Phase 14 section isolation: one source fails,
+//               the others must still run)
+//   paginated - the wrapped shape PLUS pagination metadata
+//               ({"<wrapper>":[...], "TotalCount": state.pagTotal (default
+//               3x the list), "Page":1, "PageCount":3}) — strong evidence
+//               of a possibly-incomplete response (totalCount > received)
+//   capped    - the list TRUNCATED to state.cap records (default 2) with
+//               "TotalCount" = the FULL list length — the response hit a
+//               record-count cap with metadata proving more exists
+//
+// Phase 14 concurrency fixtures (all in state.json, re-read EVERY request):
+//   "slow":  { "Customer": 3000, "GetCustPay": 400, ... }  — artificial
+//             per-endpoint delay in ms (makes a manual run last long
+//             enough for the scheduler-tick race tests)
+//   "failPayFor": ["<erpCode>", ...] — 500 for THOSE customers' GetCustPay
+//             only (per-customer failure isolation)
 //
 // The DATA is re-read from <state.json> on EVERY request so the test can
 // mutate the "Holoo side" between syncs (change detection + no-delete).
@@ -62,6 +78,8 @@ let loginCount = 0
 
 const readState = () => JSON.parse(readFileSync(stateFile, 'utf8'))
 const log = (line) => appendFileSync(logFile, `${new Date().toISOString()} ${line}\n`)
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 const server = http.createServer((req, res) => {
   const json = (code, obj) => {
@@ -120,12 +138,19 @@ const server = http.createServer((req, res) => {
     return
   }
 
+  // Phase 14 — artificial per-endpoint delay (concurrency fixtures)
+  const slowFor = (ep) => {
+    const ms = Number(state.slow && state.slow[ep])
+    return Number.isFinite(ms) && ms > 0 ? ms : 0
+  }
+
   // exact suffix routing (LONGEST first — '/Invoice/Invoice' must not fall
   // into the '/Invoice' handler just because it shares the suffix)
   if (req.method === 'GET' && path.endsWith('/Invoice/Invoice')) return json(404, { error: 'not found (fallback path)' })
 
   // Task 12 - per-endpoint envelope modes (default: the OBSERVED live
-  // wrappers; 'bare'/'raw'/'nonjson' drive the H10 extraction edge cases)
+  // wrappers; 'bare'/'raw'/'nonjson'/'fail'/'paginated'/'capped' drive
+  // the H10 extraction edge cases + the Phase 14 isolation/pagination ones)
   const serve = (ep, wrappedKey, data) => {
     const m = (state.modes && state.modes[ep]) || 'real'
     if (m === 'nonjson') {
@@ -135,19 +160,50 @@ const server = http.createServer((req, res) => {
     }
     if (m === 'raw') return json(200, state['raw' + ep])
     if (m === 'bare') return json(200, data)
+    if (m === 'paginated') {
+      const total = Number(state.pagTotal) > 0 ? Number(state.pagTotal) : data.length * 3
+      return json(200, { [wrappedKey]: data, TotalCount: total, Page: 1, PageCount: 3 })
+    }
+    if (m === 'capped') {
+      const cap = Number(state.cap) > 0 ? Number(state.cap) : Math.min(2, data.length)
+      return json(200, { [wrappedKey]: data.slice(0, cap), TotalCount: data.length })
+    }
     return json(200, { [wrappedKey]: data }) // 'real' - the observed live shape
   }
 
-  if (req.method === 'GET' && path.endsWith('/Customer')) return serve('Customer', 'Customer', state.customers)
-  if (req.method === 'GET' && path.endsWith('/Product')) return serve('Product', 'product', state.products)
-  if (req.method === 'GET' && path.endsWith('/Invoice')) return serve('Invoice', 'Invoice', state.invoices)
-  if (req.method === 'GET' && path.endsWith('/Report/GetCustPay')) {
-    if (state.failPay) return json(500, { error: 'simulated GetCustPay outage (MOCK)' })
-    const code = url.searchParams.get('customerErpCode') ?? url.searchParams.get('code') ?? ''
-    const all = state.payments[code] ?? []
-    return serve('GetCustPay', 'report', all)
+  const handle = async () => {
+    if (req.method === 'GET' && path.endsWith('/Customer')) {
+      await sleep(slowFor('Customer'))
+      const m = (state.modes && state.modes.Customer) || 'real'
+      if (m === 'fail') return json(500, { error: 'simulated Customer outage (MOCK)' })
+      return serve('Customer', 'Customer', state.customers)
+    }
+    if (req.method === 'GET' && path.endsWith('/Product')) {
+      await sleep(slowFor('Product'))
+      const m = (state.modes && state.modes.Product) || 'real'
+      if (m === 'fail') return json(500, { error: 'simulated Product outage (MOCK)' })
+      return serve('Product', 'product', state.products)
+    }
+    if (req.method === 'GET' && path.endsWith('/Invoice')) {
+      await sleep(slowFor('Invoice'))
+      const m = (state.modes && state.modes.Invoice) || 'real'
+      if (m === 'fail') return json(500, { error: 'simulated Invoice outage (MOCK)' })
+      return serve('Invoice', 'Invoice', state.invoices)
+    }
+    if (req.method === 'GET' && path.endsWith('/Report/GetCustPay')) {
+      await sleep(slowFor('GetCustPay'))
+      if (state.failPay) return json(500, { error: 'simulated GetCustPay outage (MOCK)' })
+      const code = url.searchParams.get('customerErpCode') ?? url.searchParams.get('code') ?? ''
+      // Phase 14 — per-customer failure isolation fixture
+      if (Array.isArray(state.failPayFor) && state.failPayFor.includes(code)) {
+        return json(500, { error: `simulated per-customer outage (MOCK) for ${code}` })
+      }
+      const all = state.payments[code] ?? []
+      return serve('GetCustPay', 'report', all)
+    }
+    return json(404, { error: `mock has no handler for ${req.method} ${path}` })
   }
-  json(404, { error: `mock has no handler for ${req.method} ${path}` })
+  handle().catch(() => json(500, { error: 'mock internal error' }))
 })
 
 server.listen(PORT, '127.0.0.1', () => {
