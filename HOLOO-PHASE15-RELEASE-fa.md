@@ -9,7 +9,7 @@
 |---|---|
 | شمارهٔ نسخه | **v1.9.16-dev.2** (Android `versionCode` **۲۵** — بزرگتر از ۲۴ِ ریلیز قبلی) |
 | SHA کامیت bump | `18dc7d8` (`chore(release): bump v1.9.16-dev.2 (versionCode 25)`) |
-| SHA کامیت مستندات (مبنای تگ) | **`c8c8020f87c0d0e33ec08a12b6db2df87b8329ed`** (`docs(holoo): Phase 15 report + owner live-test guide (A-E) + WORKLOG Task 73 + PROGRESS/checklist refresh`) |
+| SHA کامیت مستندات (مبنای تگ) | **`c8c8020f87f01527de4b0e682262ba52ca8a1dcc`** (`docs(holoo): Phase 15 report + owner live-test guide (A-E) + WORKLOG Task 73 + PROGRESS/checklist refresh`) |
 | زنجیرهٔ کامیت روی `develop` | `2fc8964` (پایهٔ فاز ۱۴) → `18dc7d8` (bump) → `c8c8020` (مستندات) — هر دو پوش و با ls-remote تأیید |
 | تگ | `v1.9.16-dev.2` (annotated؛ شیء تگ `6a73cd1e8694c9ddf78d9dc42abe630fd8203e37` روی `c8c8020`) — پوش و تأیید ls-remote |
 | تاریخ انتشار | **Nov 19, 2026** (published 09:47:53 UTC) |
