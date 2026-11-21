@@ -1,7 +1,7 @@
 # چک‌لیست انتشار نسخه‌های MedPad — آمادگی و مراحل
 
 > وضعیت: v1.9.16-dev.2 **منتشر شد** (Nov 19، Pre-release — فاز ۱۴ کامل + راهنمای اعتبارسنجی واقعی؛ vCode 25؛ امضای سازگار با dev.1). گزارش: `HOLOO-PHASE15-RELEASE-fa.md`.
-> آخرین به‌روزرسانی: **Nov 19, 2026 (Task 73 — فاز ۱۵ / انتشار v1.9.16-dev.2)** · پایه: `develop` (bump `18dc7d8` + کامیت مستندات؛ تگ روی کامیت مستندات).
+> آخرین به‌روزرسانی: **Nov 21, 2026 (Task 74 / فاز ۱۵.۱ — ممیزی و اصلاح مستندات انتشار؛ SHA کامیت مستندات/تگ و راهنمای تست اصلاح شد؛ بدون تغییر کد عملیاتی)** · پایه: `develop` (bump `18dc7d8` + کامیت مستندات؛ تگ روی کامیت مستندات).
 
 ## ۱) وضعیت فعلی در یک نگاه
 
@@ -25,7 +25,7 @@
 
 | خروجی | نحوهٔ ساخت | چک‌ها |
 |---|---|---|
-| **APK** | `JAVA_HOME=<jdk21> ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon` (+ `-ProbolectricRepoUrl=<mirror>` روی شبکهٔ محدود) | ۲۰۴/۲۰۴ تست سبز · `aapt` نسخه‌ها (vCode 23) · `zipalign -c 4` · `apksigner verify` · SHA-256 |
+| **APK** | `JAVA_HOME=<jdk21> ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon` (+ `-ProbolectricRepoUrl=<mirror>` روی شبکهٔ محدود) | ۲۰۴/۲۰۴ تست سبز · `aapt` نسخه‌ها (vCode 25 / 1.9.16-dev.2) · `zipalign -c 4` · `apksigner verify` · SHA-256 |
 | **ZIP آفلاین پنل** | `git archive <tag>` با کنارگذاری `Android/`، `audit-tests/`، گزارش‌های فازی قدیمی و SUMهای کهنه | `unzip -t` · CRLF در install.bat (۱۹۲×CRLF/۰×LF-only) · بنر نسخه · **نبودن `holoo.key`** · SHA-256 |
 | **SHA256SUMS / SHA1SUMS** | `sha256sum` / `sha1sum` روی هر دو artifact | محتوا شامل نام دقیق فایل‌ها |
 
@@ -56,7 +56,7 @@
 5. بسته‌بندی پنل: باندل باید با زنجیرهٔ وصله‌های `scripts/build-panel.sh` (اکنون **۲۵ وصله**) بازتولید و هم‌ارزی‌اش اثبات شده باشد؛ ساخت ZIP با `git archive` از خود تگ (استثناهای مقرر: Android/، audit-tests/، ۷ گزارش قدیمی، SHA256SUMS کهنه).
 6. ساخت فایل‌های SUM (SHA-256 + SHA-1).
 7. تگ annotated روی کامیت مستندات + پوش تگ (تأیید ls-remote).
-8. ساخت **Pre-release** (هرگز نسخهٔ پایدار بدون تصمیم صریح مالک) + آپلود ۴ asset: APK · ZIP آفلاین · SHA1SUMS · SHA256SUMS.
+8. ساخت **Pre-release** (هرگز نسخهٔ پایدار بدون تصمیم صریح مالک) + آپلود ۵ asset: APK · ZIP آفلاین · SHA1SUMS · SHA256SUMS · راهنمای تست مالک (`HOLOO-PHASE15-LIVE-TEST-GUIDE-fa.md`).
 9. راستی‌آزمایی دانلود برگشتی + تطبیق هش + `unzip -t`.
 10. ثبت در `PROGRESS-MEDPAD.md` و `WORKLOG-MedPad.md` + گزارش نهایی.
 
